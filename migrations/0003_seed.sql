@@ -1,0 +1,478 @@
+-- ============================================================================
+-- MENU MASTER NG
+-- Seed 0002: units, categories, starter catalogue
+--
+-- STRICT RULE, ENFORCED THROUGHOUT THIS FILE:
+--   NO PRICES. Not one. Not as a default, not as an example, not as a
+--   comment that could be copied. Price is the user's data alone.
+--
+-- SECOND RULE:
+--   A Nigerian purchasing unit does NOT imply a universal weight.
+--   A paint of rice and a paint of beans are different masses. Local
+--   container units are seeded with factor_to_base = NULL, which forces
+--   the conversion to be captured per ingredient in
+--   ingredient_unit_conversions (ingredient + source unit + qty in base).
+--
+-- Run after 0001_init.sql.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 0. Container units
+-- The 'container' value is added in migration 0002, which MUST run as its own
+-- transaction. Postgres refuses to use a new enum value in the same
+-- transaction that added it, and the Supabase SQL editor wraps a script in
+-- one transaction. That is why it is a separate file.
+-- ----------------------------------------------------------------------------
+
+-- ----------------------------------------------------------------------------
+-- 1. GLOBAL UNITS
+-- account_id is NULL, meaning available to every account.
+-- factor_to_base is populated ONLY where the ratio is universal by
+-- definition. Everything else is NULL by design.
+-- ----------------------------------------------------------------------------
+
+insert into units (account_id, code, name, kind, is_base, factor_to_base) values
+
+-- Mass. Base unit: gram.
+  (null, 'g',      'Gram',        'mass',   true,  1),
+  (null, 'kg',     'Kilogram',    'mass',   false, 1000),
+  (null, 'mg',     'Milligram',   'mass',   false, 0.001),
+
+-- Volume. Base unit: millilitre.
+  (null, 'ml',     'Millilitre',  'volume', true,  1),
+  (null, 'l',      'Litre',       'volume', false, 1000),
+  (null, 'cl',     'Centilitre',  'volume', false, 10),
+
+-- Volume, universal by definition of the measure itself
+  (null, 'tsp',    'Teaspoon (measuring)',   'volume', false, 5),
+  (null, 'tbsp',   'Tablespoon (measuring)', 'volume', false, 15),
+  (null, 'cup_m',  'Cup (metric measuring)', 'volume', false, 250),
+
+-- Count. Base unit: one item.
+  (null, 'unit',   'Unit',        'count',  true,  1),
+  (null, 'dozen',  'Dozen',       'count',  false, 12),
+  (null, 'pair',   'Pair',        'count',  false, 2);
+
+-- ----------------------------------------------------------------------------
+-- 2. NIGERIAN AND LOCAL UNITS
+--
+-- Every one of these has factor_to_base = NULL. That is deliberate and it
+-- is the point. A paint of rice is not a paint of garri. A basket of
+-- tomatoes is not a basket of pepper. A tuber of yam varies by tuber.
+--
+-- The owner records the conversion once per ingredient, from her own
+-- measurement, and it becomes her data like everything else.
+-- ----------------------------------------------------------------------------
+
+insert into units (account_id, code, name, kind, is_base, factor_to_base) values
+
+-- Dry measure containers
+  (null, 'paint',    'Paint (rubber)',        'container', false, null),
+  (null, 'derica',   'Derica (milk cup)',     'container', false, null),
+  (null, 'congo',    'Congo',                 'container', false, null),
+  (null, 'mudu',     'Mudu',                  'container', false, null),
+  (null, 'kongo',    'Kongo',                 'container', false, null),
+  (null, 'tiya',     'Tiya',                  'container', false, null),
+  (null, 'cup_local','Cup (local tin)',       'container', false, null),
+  (null, 'rubber',   'Rubber',                'container', false, null),
+  (null, 'bowl',     'Bowl',                  'container', false, null),
+
+-- Wholesale and market packaging
+  (null, 'bag',      'Bag',                   'container', false, null),
+  (null, 'basket',   'Basket',                'container', false, null),
+  (null, 'crate',    'Crate',                 'container', false, null),
+  (null, 'carton',   'Carton',                'container', false, null),
+  (null, 'sack',     'Sack',                  'container', false, null),
+  (null, 'pack',     'Pack',                  'container', false, null),
+  (null, 'sachet',   'Sachet',                'container', false, null),
+  (null, 'roll',     'Roll',                  'container', false, null),
+  (null, 'tin',      'Tin',                   'container', false, null),
+  (null, 'bottle',   'Bottle',                'container', false, null),
+  (null, 'jerrican', 'Jerrican',              'container', false, null),
+  (null, 'keg',      'Keg',                   'container', false, null),
+  (null, 'gallon',   'Gallon',                'container', false, null),
+  (null, 'drum',     'Drum',                  'container', false, null),
+
+-- Natural items sold whole, weight varies per item
+  (null, 'tuber',    'Tuber',                 'container', false, null),
+  (null, 'bunch',    'Bunch',                 'container', false, null),
+  (null, 'head',     'Head',                  'container', false, null),
+  (null, 'bundle',   'Bundle',                'container', false, null),
+  (null, 'finger',   'Finger',                'container', false, null),
+  (null, 'cob',      'Cob',                   'container', false, null),
+  (null, 'wrap',     'Wrap',                  'container', false, null),
+  (null, 'piece',    'Piece',                 'container', false, null),
+  (null, 'portion',  'Portion',               'container', false, null),
+  (null, 'heap',     'Heap',                  'container', false, null);
+
+-- ----------------------------------------------------------------------------
+-- 3. STARTER CATALOGUE TABLES
+--
+-- Global templates. Cloned into an account at signup. These hold names,
+-- categories and base units only. There is no price column on either table
+-- and there must never be one: a schema that cannot store a seeded price
+-- cannot leak a seeded price.
+-- ----------------------------------------------------------------------------
+
+create table catalog_categories (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null unique,
+  sort_order    integer not null default 0
+);
+
+create table catalog_ingredients (
+  id            uuid primary key default gen_random_uuid(),
+  category_name text not null references catalog_categories(name),
+  kind          item_kind not null default 'ingredient',
+  name          text not null unique,
+  base_unit     text not null,        -- units.code of the base unit
+  -- Local units this item is commonly BOUGHT in. Used to prompt the owner
+  -- for her own conversion. It records that a question exists, never an answer.
+  common_units  text[] not null default '{}',
+  aliases       text[] not null default '{}',
+  applies_to    business_type[]       -- null means all business types
+);
+
+alter table catalog_categories enable row level security;
+alter table catalog_ingredients enable row level security;
+create policy p_catalog_categories on catalog_categories for select using (true);
+create policy p_catalog_ingredients on catalog_ingredients for select using (true);
+
+-- ----------------------------------------------------------------------------
+-- 4. CATEGORIES
+-- ----------------------------------------------------------------------------
+
+insert into catalog_categories (name, sort_order) values
+  ('Grains and Staples',      10),
+  ('Legumes and Nuts',        20),
+  ('Tubers and Plantain',     30),
+  ('Vegetables',              40),
+  ('Fruits',                  50),
+  ('Meat and Poultry',        60),
+  ('Fish and Seafood',        70),
+  ('Dairy and Eggs',          80),
+  ('Oils and Fats',           90),
+  ('Spices and Seasonings',  100),
+  ('Soup Thickeners and Leaves', 110),
+  ('Condiments and Sauces',  120),
+  ('Baking',                 130),
+  ('Drinks and Beverages',   140),
+  ('Packaging',              150),
+  ('Disposables and Service',160);
+
+-- ----------------------------------------------------------------------------
+-- 5. STARTER INGREDIENTS
+-- Names, categories, base units, and the local units each is commonly
+-- bought in so onboarding can ask the right conversion question.
+-- No prices. No assumed conversions. No assumed yields.
+-- ----------------------------------------------------------------------------
+
+insert into catalog_ingredients (category_name, name, base_unit, common_units, aliases) values
+
+-- Grains and Staples
+  ('Grains and Staples','Rice (local)','g','{bag,paint,congo,derica,mudu,kg}','{ofada,local rice}'),
+  ('Grains and Staples','Rice (imported)','g','{bag,paint,congo,derica,kg}','{}'),
+  ('Grains and Staples','Garri (white)','g','{bag,paint,congo,derica,mudu}','{}'),
+  ('Grains and Staples','Garri (yellow)','g','{bag,paint,congo,derica,mudu}','{}'),
+  ('Grains and Staples','Semovita','g','{bag,pack,kg}','{semolina}'),
+  ('Grains and Staples','Wheat flour','g','{bag,pack,kg}','{}'),
+  ('Grains and Staples','Plain flour','g','{bag,pack,kg}','{all purpose flour}'),
+  ('Grains and Staples','Poundo yam flour','g','{bag,pack,kg}','{}'),
+  ('Grains and Staples','Yam flour (elubo)','g','{paint,congo,pack,kg}','{amala}'),
+  ('Grains and Staples','Plantain flour','g','{pack,kg}','{elubo ogede}'),
+  ('Grains and Staples','Maize (corn)','g','{bag,paint,congo,cob}','{}'),
+  ('Grains and Staples','Pap (ogi)','g','{wrap,pack,kg}','{akamu}'),
+  ('Grains and Staples','Millet','g','{bag,paint,congo}','{}'),
+  ('Grains and Staples','Guinea corn','g','{bag,paint,congo}','{sorghum}'),
+  ('Grains and Staples','Acha','g','{pack,congo,kg}','{fonio}'),
+  ('Grains and Staples','Oats','g','{pack,carton,kg}','{}'),
+  ('Grains and Staples','Spaghetti','g','{carton,pack}','{}'),
+  ('Grains and Staples','Macaroni','g','{carton,pack}','{}'),
+  ('Grains and Staples','Noodles','g','{carton,pack}','{}'),
+  ('Grains and Staples','Couscous','g','{pack,kg}','{}'),
+
+-- Legumes and Nuts
+  ('Legumes and Nuts','Brown beans','g','{bag,paint,congo,derica,mudu}','{oloyin}'),
+  ('Legumes and Nuts','White beans','g','{bag,paint,congo,derica,mudu}','{}'),
+  ('Legumes and Nuts','Black eyed beans','g','{bag,paint,congo,derica}','{}'),
+  ('Legumes and Nuts','Soybeans','g','{bag,paint,congo}','{}'),
+  ('Legumes and Nuts','Bambara nut','g','{paint,congo,derica}','{okpa}'),
+  ('Legumes and Nuts','Groundnut (raw)','g','{bag,paint,congo,derica}','{peanut}'),
+  ('Legumes and Nuts','Cashew nut','g','{pack,kg}','{}'),
+  ('Legumes and Nuts','Tiger nut','g','{congo,derica,pack}','{ofio}'),
+  ('Legumes and Nuts','Lentils','g','{pack,kg}','{}'),
+
+-- Tubers and Plantain
+  ('Tubers and Plantain','Yam','g','{tuber,piece,heap}','{}'),
+  ('Tubers and Plantain','Water yam','g','{tuber,piece}','{}'),
+  ('Tubers and Plantain','Cocoyam','g','{piece,congo,basket}','{}'),
+  ('Tubers and Plantain','Cassava','g','{tuber,piece,bag}','{}'),
+  ('Tubers and Plantain','Sweet potato','g','{piece,basket,bag}','{}'),
+  ('Tubers and Plantain','Irish potato','g','{bag,basket,kg}','{}'),
+  ('Tubers and Plantain','Plantain (unripe)','g','{bunch,finger,piece}','{}'),
+  ('Tubers and Plantain','Plantain (ripe)','g','{bunch,finger,piece}','{}'),
+
+-- Vegetables
+  ('Vegetables','Tomato','g','{basket,paint,congo,piece,kg}','{}'),
+  ('Vegetables','Fresh pepper (rodo)','g','{basket,paint,congo,kg}','{atarodo,scotch bonnet}'),
+  ('Vegetables','Tatashe','g','{basket,paint,piece}','{red bell pepper}'),
+  ('Vegetables','Shombo','g','{basket,paint,congo}','{cayenne}'),
+  ('Vegetables','Dried pepper (ground)','g','{congo,derica,pack}','{}'),
+  ('Vegetables','Onion','g','{bag,basket,paint,piece,kg}','{}'),
+  ('Vegetables','Spring onion','g','{bunch,pack}','{}'),
+  ('Vegetables','Garlic','g','{head,pack,kg}','{}'),
+  ('Vegetables','Ginger','g','{piece,congo,kg}','{}'),
+  ('Vegetables','Ugu leaf','g','{bunch,bundle,paint}','{pumpkin leaf}'),
+  ('Vegetables','Waterleaf','g','{bunch,bundle,paint}','{}'),
+  ('Vegetables','Bitterleaf','g','{bunch,bundle,paint}','{onugbu}'),
+  ('Vegetables','Efo tete','g','{bunch,bundle}','{green amaranth}'),
+  ('Vegetables','Efo shoko','g','{bunch,bundle}','{}'),
+  ('Vegetables','Scent leaf','g','{bunch,wrap}','{efirin,nchanwu}'),
+  ('Vegetables','Okra','g','{basket,congo,paint,piece}','{}'),
+  ('Vegetables','Cabbage','g','{head,piece,bag}','{}'),
+  ('Vegetables','Carrot','g','{bag,basket,piece,kg}','{}'),
+  ('Vegetables','Green beans','g','{pack,kg,bunch}','{}'),
+  ('Vegetables','Green bell pepper','g','{piece,basket}','{}'),
+  ('Vegetables','Cucumber','g','{piece,bag,basket}','{}'),
+  ('Vegetables','Lettuce','g','{head,piece}','{}'),
+  ('Vegetables','Sweet corn','g','{tin,pack,cob}','{}'),
+
+-- Fruits
+  ('Fruits','Lemon','g','{piece,bag,basket}','{}'),
+  ('Fruits','Lime','g','{piece,bag,basket}','{}'),
+  ('Fruits','Orange','g','{piece,bag,basket}','{}'),
+  ('Fruits','Pineapple','g','{piece,basket}','{}'),
+  ('Fruits','Watermelon','g','{piece}','{}'),
+  ('Fruits','Banana','g','{bunch,finger,piece}','{}'),
+  ('Fruits','Coconut','g','{piece,bag}','{}'),
+  ('Fruits','Avocado','g','{piece,basket}','{}'),
+  ('Fruits','Date','g','{pack,kg}','{dabino}'),
+
+-- Meat and Poultry
+  ('Meat and Poultry','Beef','g','{kg,piece,portion}','{}'),
+  ('Meat and Poultry','Goat meat','g','{kg,piece,portion}','{}'),
+  ('Meat and Poultry','Cow skin (ponmo)','g','{kg,piece,portion}','{kanda}'),
+  ('Meat and Poultry','Shaki (tripe)','g','{kg,piece}','{}'),
+  ('Meat and Poultry','Cow leg','g','{kg,piece}','{bokoto}'),
+  ('Meat and Poultry','Liver','g','{kg,piece}','{}'),
+  ('Meat and Poultry','Assorted meat','g','{kg,piece,portion}','{orisirisi}'),
+  ('Meat and Poultry','Chicken (whole)','g','{piece,kg,carton}','{}'),
+  ('Meat and Poultry','Chicken laps','g','{kg,piece,carton}','{}'),
+  ('Meat and Poultry','Chicken breast','g','{kg,pack,carton}','{}'),
+  ('Meat and Poultry','Chicken wings','g','{kg,pack,carton}','{}'),
+  ('Meat and Poultry','Gizzard','g','{kg,pack}','{}'),
+  ('Meat and Poultry','Turkey','g','{kg,piece,carton}','{}'),
+  ('Meat and Poultry','Sausage','g','{pack,piece,carton}','{}'),
+
+-- Fish and Seafood
+  ('Fish and Seafood','Titus fish','g','{carton,kg,piece}','{mackerel}'),
+  ('Fish and Seafood','Croaker fish','g','{kg,piece,carton}','{}'),
+  ('Fish and Seafood','Catfish','g','{kg,piece}','{}'),
+  ('Fish and Seafood','Tilapia','g','{kg,piece}','{}'),
+  ('Fish and Seafood','Panla (hake)','g','{carton,kg,piece}','{}'),
+  ('Fish and Seafood','Stockfish','g','{kg,piece,bag}','{okporoko}'),
+  ('Fish and Seafood','Dried fish','g','{kg,piece,congo}','{}'),
+  ('Fish and Seafood','Crayfish (ground)','g','{congo,derica,paint,kg}','{}'),
+  ('Fish and Seafood','Prawns','g','{kg,pack}','{}'),
+  ('Fish and Seafood','Periwinkle','g','{congo,paint,kg}','{isam}'),
+  ('Fish and Seafood','Snail','g','{piece,kg,basket}','{}'),
+  ('Fish and Seafood','Sardine','g','{tin,carton}','{}'),
+
+-- Dairy and Eggs
+  ('Dairy and Eggs','Egg','unit','{crate,dozen,piece}','{}'),
+  ('Dairy and Eggs','Milk powder','g','{tin,sachet,pack,kg}','{}'),
+  ('Dairy and Eggs','Evaporated milk','ml','{tin,carton}','{}'),
+  ('Dairy and Eggs','Liquid milk','ml','{pack,carton,l}','{}'),
+  ('Dairy and Eggs','Yoghurt','ml','{bottle,pack,l}','{}'),
+  ('Dairy and Eggs','Butter','g','{pack,tin,kg}','{}'),
+  ('Dairy and Eggs','Margarine','g','{pack,tin,kg}','{}'),
+  ('Dairy and Eggs','Cheese','g','{piece,pack,kg}','{wara}'),
+
+-- Oils and Fats
+  ('Oils and Fats','Palm oil','ml','{keg,jerrican,gallon,bottle,l}','{}'),
+  ('Oils and Fats','Vegetable oil','ml','{keg,jerrican,gallon,bottle,l}','{}'),
+  ('Oils and Fats','Groundnut oil','ml','{keg,jerrican,bottle,l}','{}'),
+  ('Oils and Fats','Coconut oil','ml','{bottle,l}','{}'),
+  ('Oils and Fats','Olive oil','ml','{bottle,l}','{}'),
+  ('Oils and Fats','Shea butter','g','{pack,kg}','{ori}'),
+
+-- Spices and Seasonings
+  ('Spices and Seasonings','Salt','g','{bag,pack,kg}','{}'),
+  ('Spices and Seasonings','Seasoning cube','unit','{carton,pack,piece}','{}'),
+  ('Spices and Seasonings','Seasoning powder','g','{sachet,pack,tin}','{}'),
+  ('Spices and Seasonings','Curry powder','g','{sachet,pack,tin}','{}'),
+  ('Spices and Seasonings','Thyme','g','{sachet,pack,tin}','{}'),
+  ('Spices and Seasonings','Locust bean','g','{wrap,congo,pack}','{iru,dawadawa}'),
+  ('Spices and Seasonings','Ogiri','g','{wrap,pack}','{}'),
+  ('Spices and Seasonings','Black pepper','g','{pack,sachet,kg}','{}'),
+  ('Spices and Seasonings','White pepper','g','{pack,sachet}','{}'),
+  ('Spices and Seasonings','Cameroon pepper','g','{congo,pack,kg}','{}'),
+  ('Spices and Seasonings','Nutmeg','g','{piece,pack}','{}'),
+  ('Spices and Seasonings','Garlic powder','g','{pack,sachet}','{}'),
+  ('Spices and Seasonings','Ginger powder','g','{pack,sachet}','{}'),
+  ('Spices and Seasonings','Suya spice','g','{pack,congo,kg}','{yaji}'),
+  ('Spices and Seasonings','Uziza seed','g','{pack,congo}','{}'),
+  ('Spices and Seasonings','Ehu seed','g','{pack,piece}','{}'),
+  ('Spices and Seasonings','Uda','g','{pack,piece}','{}'),
+  ('Spices and Seasonings','Clove','g','{pack,sachet}','{}'),
+  ('Spices and Seasonings','Turmeric','g','{pack,sachet}','{}'),
+  ('Spices and Seasonings','Bay leaf','g','{pack,sachet}','{}'),
+  ('Spices and Seasonings','Vinegar','ml','{bottle,l}','{}'),
+
+-- Soup Thickeners and Leaves
+  ('Soup Thickeners and Leaves','Egusi (ground)','g','{paint,congo,derica,kg}','{melon}'),
+  ('Soup Thickeners and Leaves','Ogbono (ground)','g','{congo,derica,pack,kg}','{}'),
+  ('Soup Thickeners and Leaves','Achi','g','{congo,derica,pack}','{}'),
+  ('Soup Thickeners and Leaves','Ofor','g','{congo,derica,pack}','{}'),
+  ('Soup Thickeners and Leaves','Dried okra','g','{congo,pack}','{}'),
+  ('Soup Thickeners and Leaves','Ukazi leaf','g','{bunch,pack,congo}','{afang}'),
+  ('Soup Thickeners and Leaves','Oha leaf','g','{bunch,pack}','{}'),
+  ('Soup Thickeners and Leaves','Uziza leaf','g','{bunch,wrap}','{}'),
+
+-- Condiments and Sauces
+  ('Condiments and Sauces','Tomato paste','g','{tin,sachet,carton}','{}'),
+  ('Condiments and Sauces','Ketchup','ml','{bottle,carton}','{}'),
+  ('Condiments and Sauces','Mayonnaise','ml','{bottle,tin}','{}'),
+  ('Condiments and Sauces','Soy sauce','ml','{bottle}','{}'),
+  ('Condiments and Sauces','Honey','ml','{bottle,l}','{}'),
+  ('Condiments and Sauces','Groundnut paste','g','{tin,pack,congo}','{}'),
+
+-- Baking
+  ('Baking','Granulated sugar','g','{bag,pack,congo,kg}','{}'),
+  ('Baking','Icing sugar','g','{pack,kg}','{}'),
+  ('Baking','Baking powder','g','{tin,sachet,pack}','{}'),
+  ('Baking','Baking soda','g','{sachet,pack}','{}'),
+  ('Baking','Yeast','g','{sachet,pack}','{}'),
+  ('Baking','Vanilla flavour','ml','{bottle,sachet}','{}'),
+  ('Baking','Food colouring','ml','{bottle,sachet}','{}'),
+  ('Baking','Cocoa powder','g','{tin,pack,kg}','{}'),
+  ('Baking','Cake emulsifier','g','{tin,pack}','{}'),
+
+-- Drinks and Beverages
+  ('Drinks and Beverages','Bottled water','ml','{pack,carton,bottle}','{}'),
+  ('Drinks and Beverages','Zobo leaf','g','{congo,paint,pack}','{hibiscus}'),
+  ('Drinks and Beverages','Soft drink','ml','{crate,bottle,carton}','{}'),
+  ('Drinks and Beverages','Fruit juice','ml','{pack,carton,l}','{}');
+
+-- Packaging and disposables. Same table, kind = packaging.
+insert into catalog_ingredients (category_name, kind, name, base_unit, common_units, aliases) values
+  ('Packaging','packaging','Takeaway pack (small)','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Takeaway pack (medium)','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Takeaway pack (large)','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Foil tray','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Foil tray lid','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Plastic bowl (1 litre)','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Plastic bowl (2 litre)','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Plastic bowl (5 litre)','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Bottle (50cl)','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Cup with lid','unit','{pack,carton,piece}','{}'),
+  ('Packaging','packaging','Cling film','unit','{roll,carton}','{}'),
+  ('Packaging','packaging','Aluminium foil','unit','{roll,carton}','{}'),
+  ('Packaging','packaging','Nylon bag','unit','{pack,roll,carton}','{}'),
+  ('Packaging','packaging','Ziplock bag','unit','{pack,carton}','{}'),
+  ('Packaging','packaging','Carrier bag','unit','{pack,carton}','{}'),
+  ('Packaging','packaging','Paper bag','unit','{pack,carton}','{}'),
+  ('Packaging','packaging','Sticker label','unit','{roll,pack}','{}'),
+  ('Packaging','packaging','Cooler (insulated)','unit','{piece}','{}'),
+  ('Disposables and Service','packaging','Disposable plate','unit','{pack,carton}','{}'),
+  ('Disposables and Service','packaging','Cutlery set','unit','{pack,carton}','{}'),
+  ('Disposables and Service','packaging','Serviette','unit','{pack,carton}','{}'),
+  ('Disposables and Service','packaging','Chafing dish fuel','unit','{pack,carton,piece}','{}'),
+  ('Disposables and Service','packaging','Hand glove','unit','{pack,carton}','{}');
+
+-- ----------------------------------------------------------------------------
+-- 6. CLONE INTO AN ACCOUNT
+--
+-- Copies names, categories and base units. Copies nothing else, because
+-- there is nothing else to copy. The account's ingredient_prices table
+-- stays empty until the owner enters what she actually paid.
+--
+-- purchase_yield_pct is deliberately left at the schema default of 100.
+-- A seeded yield (chicken at 70 percent, for example) would be an assumed
+-- value silently entering a cost calculation, which is the same failure as
+-- a seeded price wearing a different hat. The owner sets her own yields.
+-- ----------------------------------------------------------------------------
+
+create or replace function fn_clone_starter_catalog(
+  p_account_id uuid,
+  p_type       business_type default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count integer;
+begin
+  -- Categories first
+  insert into ingredient_categories (account_id, name)
+  select p_account_id, c.name
+  from catalog_categories c
+  where not exists (
+    select 1 from ingredient_categories ic
+    where ic.account_id = p_account_id and ic.name = c.name
+  );
+
+  -- Then items, mapped to their category and base unit
+  insert into ingredients (account_id, kind, name, category_id, base_unit_id)
+  select
+    p_account_id,
+    ci.kind,
+    ci.name,
+    ic.id,
+    u.id
+  from catalog_ingredients ci
+  join ingredient_categories ic
+    on ic.account_id = p_account_id and ic.name = ci.category_name
+  join units u
+    on u.account_id is null and u.code = ci.base_unit
+  where (ci.applies_to is null or p_type is null or p_type = any(ci.applies_to))
+    and not exists (
+      select 1 from ingredients i
+      where i.account_id = p_account_id and lower(i.name) = lower(ci.name)
+    );
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 7. THE CONVERSION QUESTION QUEUE
+--
+-- For each ingredient, the local units it is commonly bought in that the
+-- owner has not yet given a conversion for. This drives the onboarding
+-- prompt: "How many kg is one paint of rice, in your experience?"
+--
+-- It asks the question. It never answers it.
+-- ----------------------------------------------------------------------------
+
+create view v_missing_unit_conversions with (security_invoker = on) as
+select
+  i.account_id,
+  i.id            as ingredient_id,
+  i.name          as ingredient_name,
+  u.id            as unit_id,
+  u.code          as unit_code,
+  u.name          as unit_name
+from ingredients i
+join catalog_ingredients ci on lower(ci.name) = lower(i.name)
+join units u on u.account_id is null
+            and u.code = any(ci.common_units)
+            and u.factor_to_base is null
+where i.deleted_at is null
+  and not exists (
+    select 1 from ingredient_unit_conversions c
+    where c.ingredient_id = i.id and c.unit_id = u.id
+  );
+
+-- ----------------------------------------------------------------------------
+-- 8. GUARD
+-- Run in CI. Must return zero rows.
+-- A container unit with a universal factor would mean someone assumed that
+-- a paint of rice and a paint of beans weigh the same.
+-- ----------------------------------------------------------------------------
+
+-- select code, name from units
+-- where kind = 'container' and factor_to_base is not null;
