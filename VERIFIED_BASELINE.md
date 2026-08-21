@@ -120,7 +120,7 @@ Suite 002 by phase: ATTACK A 4/4 · ATTACK B 2/2 · ATTACK C 4/4 · ATTACK D 8/8
 
 1. **The local test harness is reconstructed.** `tests/0000_local_supabase_shim.sql` is a rebuild. It is faithful to every requirement observable in the recovered suites, but if the original differed the results above could differ on the original harness. Moot against real Supabase, which supplies `auth` and the API roles itself.
 
-2. **The production Supabase boundary remains UNVERIFIED.** `docs/GATE1_REPORT.md` §7 records a residual risk: `authenticator` is granted `service_role`, so a raw SQL channel could `SET ROLE service_role`. The JWT-subject clause in `fn_is_service_context()` blocks the escalation, and test 003 proves it locally — but Supabase's **production** `authenticator` configuration and default privilege grants have never been tested. **Closing this requires a throwaway Supabase project. It has not been done.**
+2. **The production Supabase boundary was UNVERIFIED at this commit; it has since PASSED.** `docs/GATE1_REPORT.md` §7 records the residual risk: `authenticator` is granted `service_role`, so a raw SQL channel could `SET ROLE service_role`. The JWT-subject clause in `fn_is_service_context()` blocks the escalation, and test 003 proved it locally. On 2026-08-21 it was proven on real Supabase infrastructure as well — control PASS, 15/15 probes blocked, 0 inconclusive. See `docs/SUPABASE_BOUNDARY_RESULT.md`. The `service_role` path itself remains unverified by design.
 
 ---
 

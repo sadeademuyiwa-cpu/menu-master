@@ -1,0 +1,203 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+<title>Menu Master NG — Boundary Test v4</title>
+<style>
+ :root{--bg:#faf9f7;--fg:#1a1a18;--mut:#6b6a65;--line:#e2e0da;--pass:#1a7f37;--passbg:#eaf3de;--fail:#b42318;--failbg:#fde8e6;--gold:#b8860b}
+ *{box-sizing:border-box}
+ body{margin:0;padding:1.5rem 1rem;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+ .w{max-width:880px;margin:0 auto}
+ h1{font-size:1.35rem;margin:0 0 .2rem}.s{color:var(--mut);margin:0 0 1.2rem;font-size:.9rem}
+ fieldset{border:1px solid var(--line);border-radius:10px;padding:1rem 1.2rem;background:#fff;margin:0 0 1rem}
+ legend{font-weight:600;font-size:.88rem;padding:0 .4rem}
+ label{display:block;font-size:.76rem;color:var(--mut);margin:.6rem 0 .15rem;font-weight:600}
+ input{width:100%;padding:.5rem .6rem;border:1px solid var(--line);border-radius:7px;font:13px ui-monospace,Menlo,monospace}
+ button{margin-top:1rem;padding:.65rem 1.3rem;border:0;border-radius:8px;background:var(--gold);color:#fff;font-weight:600;cursor:pointer}
+ #log{background:#1a1a18;color:#d8d6d0;border-radius:8px;padding:.8rem 1rem;margin-top:1rem;font:12px ui-monospace,Menlo,monospace;white-space:pre-wrap;max-height:230px;overflow:auto}
+ table{width:100%;border-collapse:collapse;margin-top:1rem;background:#fff;font-size:.86rem}
+ th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+ th{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+ tr.pass{background:var(--passbg)}tr.fail{background:var(--failbg)}tr.unk{background:#faeeda}
+ .r{font-weight:700;white-space:nowrap}.p{color:var(--pass)}.f{color:var(--fail)}
+ .v{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;font-weight:600}
+ .ok{background:var(--passbg);color:var(--pass);border:1px solid var(--pass)}
+ .no{background:var(--failbg);color:var(--fail);border:1px solid var(--fail)}
+ .warn{background:#faeeda;color:#8a5a00;border:1px solid #8a5a00}
+ .det{font:11px ui-monospace,Menlo,monospace;color:var(--mut);word-break:break-all}
+</style></head><body><div class="w">
+<h1>Boundary Test <span style="color:#b8860b">v4</span></h1>
+<p class="s">No ids are typed by hand. The page signs in as each user and asks the database which rows are theirs, so a mistyped UUID can no longer masquerade as a security result.</p>
+
+<fieldset><legend>Your disposable project</legend>
+<label>Project URL</label>
+<input id="url" value="https://cpcsncdoimmcfwrigedo.supabase.co">
+<label>anon public key (Settings → API), starting eyJ…</label>
+<input id="key" placeholder="eyJhbGciOiJIUzI1NiIs...">
+<label>Password (all three users)</label><input id="pw" value="BoundaryTest2026!">
+<button id="go">Run boundary test</button>
+</fieldset>
+
+<div id="log"></div>
+<div id="out"></div>
+</div>
+<script>
+const $=i=>document.getElementById(i);
+const L=m=>{const l=$('log');l.textContent+=m+"\n";l.scrollTop=l.scrollHeight;};
+let URL_,KEY_;
+
+async function req(method,path,{jwt,body,noAuth}={}){
+  const ctl=new AbortController();
+  const timer=setTimeout(()=>ctl.abort(),15000);
+  const h={'apikey':KEY_};
+  if(body) h['Content-Type']='application/json';
+  if(jwt && !noAuth) h['Authorization']=`Bearer ${jwt}`;
+  try{
+    const r=await fetch(`${URL_}${path}`,{method,headers:h,body:body?JSON.stringify(body):undefined,signal:ctl.signal});
+    const t=await r.text();
+    return {ok:true,status:r.status,body:t};
+  }catch(e){
+    return {ok:false,status:0,body:'',err:(e.name==='AbortError'?'TIMEOUT after 15s':`${e.name}: ${e.message}`)};
+  }finally{ clearTimeout(timer); }
+}
+
+async function signIn(email,pw){
+  const r=await req('POST','/auth/v1/token?grant_type=password',{body:{email,password:pw},noAuth:true});
+  if(!r.ok){ L(`   x ${email} — ${r.err}`); return {jwt:null}; }
+  let j={}; try{ j=JSON.parse(r.body);}catch(_){}
+  if(j.access_token){ L(`   ok ${email}`); return {jwt:j.access_token}; }
+  L(`   x ${email} — HTTP ${r.status} ${r.body.slice(0,140)}`);
+  return {jwt:null};
+}
+
+function classify(r){
+  if(!r.ok) return {k:'inconclusive',why:r.err||'network failure'};
+  const b=(r.body||'').trim();
+  let j=null; try{ j=JSON.parse(b); }catch(_){}
+  const code=(j && !Array.isArray(j) && j.code) ? String(j.code) : '';
+  if(r.status===404||code==='PGRST202')
+    return {k:'inconclusive',why:`HTTP ${r.status} ${code} — function not found / schema cache stale`};
+  if(r.status===401) return {k:'inconclusive',why:'HTTP 401 — anon key wrong'};
+  if(r.status>=500)  return {k:'inconclusive',why:`HTTP ${r.status} server error`};
+  if(code==='42501'||r.status===403) return {k:'blocked',why:'42501 refused by our authorization'};
+  if(b===''||b==='[]'||b==='null')   return {k:'blocked',why:'empty result (RLS returned nothing)'};
+  if(r.status>=400)                  return {k:'blocked',why:`HTTP ${r.status} ${code}`};
+  return {k:'reached',why:`HTTP ${r.status} data returned`};
+}
+
+const rows=[];
+function rec(id,what,state,detail){rows.push({id,what,state,detail});}
+async function jget(path,jwt){
+  const r=await req('GET',path,{jwt});
+  if(!r.ok||r.status>=400) return {err:`HTTP ${r.status||'-'} ${(r.body||r.err||'').slice(0,80)}`};
+  try{ return {data:JSON.parse(r.body)}; }catch(e){ return {err:'unparseable: '+r.body.slice(0,80)}; }
+}
+
+async function run(){
+ try{
+  rows.length=0; $('out').innerHTML=''; $('log').textContent='';
+  URL_=$('url').value.trim().replace(/\/+$/,''); KEY_=$('key').value.trim();
+  const pw=$('pw').value;
+  $('go').disabled=true; $('go').textContent='Running…';
+  if(!/^https:\/\/.+\.supabase\.co$/.test(URL_)){ L('FATAL: not a project URL'); $('go').disabled=false;$('go').textContent='Run boundary test';return; }
+  if(!KEY_.startsWith('eyJ')){ L('FATAL: the anon key must start with eyJ'); $('go').disabled=false;$('go').textContent='Run boundary test';return; }
+
+  L('1. Signing in…');
+  const a=await signIn('ownera@boundary.test',pw);
+  const b=await signIn('ownerb@boundary.test',pw);
+  const c=await signIn('cashierb@boundary.test',pw);
+  if(!a.jwt||!b.jwt||!c.jwt){
+    $('out').innerHTML=`<div class="v no">Sign-in failed. A=${a.jwt?'ok':'FAILED'} B=${b.jwt?'ok':'FAILED'} cashier=${c.jwt?'ok':'FAILED'}</div>`;
+    $('go').disabled=false;$('go').textContent='Run boundary test';return;
+  }
+
+  L('2. Discovering the real fixture ids from the database…');
+  const pr = await jget('/rest/v1/ingredient_prices?select=ingredient_id,account_id&limit=1', a.jwt);
+  const ba = await jget('/rest/v1/businesses?select=id&limit=1', a.jwt);
+  const bb = await jget('/rest/v1/businesses?select=id&limit=1', b.jwt);
+  if(pr.err||ba.err||bb.err||!pr.data?.length||!ba.data?.length||!bb.data?.length){
+    L(`   could not resolve: prices=${pr.err||JSON.stringify(pr.data)} bizA=${ba.err||JSON.stringify(ba.data)} bizB=${bb.err||JSON.stringify(bb.data)}`);
+    $('out').innerHTML='<div class="v warn">INCONCLUSIVE — could not read the fixture ids as owner A. Send me the log.</div>';
+    $('go').disabled=false;$('go').textContent='Run boundary test again';return;
+  }
+  const ingA=pr.data[0].ingredient_id, acctA=pr.data[0].account_id;
+  const bizA=ba.data[0].id, bizB=bb.data[0].id;
+  L(`   ACCOUNT_A    = ${acctA}`);
+  L(`   BUSINESS_A   = ${bizA}`);
+  L(`   INGREDIENT_A = ${ingA}   (the ingredient that actually carries A's price)`);
+  L(`   BUSINESS_B   = ${bizB}`);
+  if(bizA===bizB){ L('   FATAL: A and B resolved to the same business.');
+    $('out').innerHTML='<div class="v no">A and B resolved to the same business — fixtures are wrong.</div>';
+    $('go').disabled=false;$('go').textContent='Run boundary test again';return; }
+
+  L('3. Control test — owner A reads her OWN cost, must be 15…');
+  const cr=await req('POST','/rest/v1/rpc/fn_ingredient_unit_cost',
+                     {jwt:a.jwt,body:{p_ingredient_id:ingA,p_business_id:bizA}});
+  const cc=classify(cr);
+  const val=parseFloat((cr.body||'').replace(/"/g,''));
+  const ctrlOK = cc.k==='reached' && Math.abs(val-15)<0.001;
+  L(`   HTTP ${cr.status||'-'}  body: ${(cr.body||cr.err||'(empty)').slice(0,120)}`);
+  L(`   control: ${ctrlOK?'PASS':'FAIL ('+cc.k+' — '+cc.why+')'}`);
+  rec('CTRL','Owner A reads her OWN cost (must be 15)',ctrlOK?'pass':'fail',
+      `HTTP ${cr.status||'-'} → ${(cr.body||cr.err||'').slice(0,110)}`);
+  if(!ctrlOK){ L(''); L('   Attacks NOT run: without a working control, "blocked" would prove nothing.');
+    render(); $('go').disabled=false;$('go').textContent='Run boundary test again';return; }
+
+  L('4. Running attacks…');
+  const A=[
+   ['A1','Owner B reads A\'s cost using A\'s ids',()=>req('POST','/rest/v1/rpc/fn_ingredient_unit_cost',{jwt:b.jwt,body:{p_ingredient_id:ingA,p_business_id:bizA}})],
+   ['A2','Owner B mixes A\'s ingredient with his own business',()=>req('POST','/rest/v1/rpc/fn_ingredient_unit_cost',{jwt:b.jwt,body:{p_ingredient_id:ingA,p_business_id:bizB}})],
+   ['A3','Owner B tries the usable-cost variant on A\'s data',()=>req('POST','/rest/v1/rpc/fn_ingredient_usable_unit_cost',{jwt:b.jwt,body:{p_ingredient_id:ingA,p_business_id:bizA}})],
+   ['A4','Owner B resolves A\'s private paint→kg conversion',()=>req('POST','/rest/v1/rpc/fn_resolve_qty_to_base',{jwt:b.jwt,body:{p_ingredient_id:ingA,p_qty:1,p_unit_id:'00000000-0000-0000-0000-000000000000'}})],
+   ['A5','Cashier B reads A\'s cost',()=>req('POST','/rest/v1/rpc/fn_ingredient_unit_cost',{jwt:c.jwt,body:{p_ingredient_id:ingA,p_business_id:bizA}})],
+   ['A6','Cashier B reads her OWN account\'s cost (role gate)',()=>req('POST','/rest/v1/rpc/fn_ingredient_unit_cost',{jwt:c.jwt,body:{p_ingredient_id:ingA,p_business_id:bizB}})],
+   ['X1','Owner B selects A\'s price rows directly',()=>req('GET',`/rest/v1/ingredient_prices?account_id=eq.${acctA}`,{jwt:b.jwt})],
+   ['X2','Owner B selects A\'s cost snapshots directly',()=>req('GET',`/rest/v1/cost_snapshots?account_id=eq.${acctA}`,{jwt:b.jwt})],
+   ['X3','Owner B selects A\'s unit conversions',()=>req('GET',`/rest/v1/ingredient_unit_conversions?account_id=eq.${acctA}`,{jwt:b.jwt})],
+   ['X9','Owner B lists A\'s ingredients',()=>req('GET',`/rest/v1/ingredients?account_id=eq.${acctA}`,{jwt:b.jwt})],
+   ['X12','Cashier B selects A\'s price rows',()=>req('GET',`/rest/v1/ingredient_prices?account_id=eq.${acctA}`,{jwt:c.jwt})],
+   ['X13','Signed-out visitor lists ingredients',()=>req('GET','/rest/v1/ingredients',{noAuth:true})],
+   ['X16','Owner B inserts a price row into A\'s account',()=>req('POST','/rest/v1/ingredient_prices',{jwt:b.jwt,body:{account_id:acctA,ingredient_id:ingA,amount:1,qty_base:1,effective_date:'2026-01-01'}})]
+  ];
+  for(const [id,what,fn] of A){
+    const res=await fn(); const k=classify(res);
+    rec(id,what,k.k==='reached'?'fail':(k.k==='blocked'?'pass':'inconclusive'),
+        `HTTP ${res.status||'-'} — ${k.why} → ${(res.body||res.err||'').slice(0,90)}`);
+    L(`   ${id.padEnd(4)} ${k.k.toUpperCase().padEnd(13)} HTTP ${String(res.status||'-').padEnd(4)} ${(res.body||res.err||'').slice(0,55)}`);
+  }
+  for(const [id,who,jwt] of [['X14','Owner B',b.jwt],['X15','Cashier B',c.jwt]]){
+    const res=await req('POST','/rest/v1/rpc/fn_is_service_context',{jwt,body:{}});
+    const k=classify(res); const claims=/true/i.test(res.body||'');
+    rec(id,`${who}'s session claims to be the billing system`,
+        k.k==='inconclusive'?'inconclusive':(claims?'fail':'pass'),
+        `HTTP ${res.status} → fn_is_service_context = ${(res.body||'').trim()||'(empty)'} — must be false`);
+    L(`   ${id.padEnd(4)} service_context=${(res.body||'').trim()||'(empty)'}  HTTP ${res.status}`);
+  }
+  render();
+ }catch(e){
+  L(`UNEXPECTED ERROR: ${e.name}: ${e.message}`);
+  $('out').innerHTML=`<div class="v no">The test crashed: ${e.name}: ${e.message}</div>`;
+ }finally{ $('go').disabled=false;$('go').textContent='Run boundary test again'; }
+}
+
+function render(){
+  const ctrl=rows.find(x=>x.id==='CTRL'), sec=rows.filter(x=>x.id!=='CTRL');
+  const leaks=sec.filter(x=>x.state==='fail').length;
+  const unk  =sec.filter(x=>x.state==='inconclusive').length;
+  const cls={pass:'pass',fail:'fail',inconclusive:'unk'};
+  const lbl={pass:'BLOCKED',fail:'LEAKED',inconclusive:'INCONCLUSIVE'};
+  let h='<table><tr><th>#</th><th>Attempt</th><th>Result</th></tr>';
+  for(const x of rows){
+    const t=x.id==='CTRL'?(x.state==='pass'?'PASS':'FAIL'):lbl[x.state];
+    h+=`<tr class="${cls[x.state]}"><td class="r">${x.id}</td><td>${x.what}<div class="det">${x.detail}</div></td><td class="r ${x.state==='pass'?'p':(x.state==='fail'?'f':'')}">${t}</td></tr>`;
+  }
+  h+='</table>';
+  if(!ctrl||ctrl.state!=='pass')
+    h+='<div class="v warn">INCONCLUSIVE — the control failed, so nothing below it proves anything.</div>';
+  else if(unk>0)
+    h+=`<div class="v warn">INCONCLUSIVE — ${unk} of ${sec.length} probes never reached the database.</div>`;
+  else if(leaks===0)
+    h+=`<div class="v ok">BOUNDARY HOLDS — control passed (A read her own 15), and ${sec.length}/${sec.length} attacks were refused by the database.</div>`;
+  else
+    h+=`<div class="v no">BOUNDARY BROKEN — ${leaks}/${sec.length} attacks succeeded. Gate 1 must not be called production-ready.</div>`;
+  $('out').innerHTML=h;
+}
+$('go').addEventListener('click',run);
+</script></body></html>

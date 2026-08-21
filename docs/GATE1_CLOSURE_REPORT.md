@@ -87,21 +87,23 @@ rows and are still refused the costing RPCs directly.
 
 ---
 
-## 5. GATE 1 IS NOT YET PRODUCTION-READY
+## 5. THE SUPABASE BOUNDARY BLOCKER IS CLOSED
 
-One blocker remains, and it is not code.
+`GATE1_REPORT.md` §7 recorded a residual risk: `authenticator` is granted
+`service_role`, and test 003 proved the JWT-subject clause blocks the escalation
+only against a local `authenticator` role *we created ourselves*.
 
-**The production Supabase boundary is still UNVERIFIED.** `GATE1_REPORT.md` §7
-records that `authenticator` is granted `service_role`. The JWT-subject clause
-blocks the escalation and test 003 proves it against a local `authenticator`
-role *we created* — which says nothing about the one Supabase actually ships.
+That is no longer an assumption. On 2026-08-21 the test was run against a
+disposable Supabase project with real GoTrue sign-ins, real JWTs, real PostgREST
+and Supabase's own roles and default privileges.
 
-`docs/SUPABASE_BOUNDARY_TEST.md`, `tests/006_supabase_boundary_fixtures.sql` and
-`scripts/supabase_boundary_test.sh` are prepared and **have not been run**. They
-require a brand-new disposable Supabase project containing no real data.
+**Control PASS (owner A read her own cost of 15), 15/15 probes blocked, 0
+inconclusive.** Full evidence, including the two harness defects found and fixed
+along the way, is in `docs/SUPABASE_BOUNDARY_RESULT.md`.
 
-**Until that test passes, this chain must not be called production-ready,**
-however green the local suites are.
+Three exclusions remain and are stated in that document §4. The most significant:
+**the `service_role` path is still unverified**, because testing it requires the
+`service_role` key, which was deliberately never requested or handled.
 
 ### Secondary residual: finalisation is opt-in
 
