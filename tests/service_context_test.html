@@ -1,0 +1,234 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+<title>Menu Master NG — Service Context Test</title>
+<style>
+ :root{--bg:#faf9f7;--fg:#1a1a18;--mut:#6b6a65;--line:#e2e0da;--pass:#1a7f37;--passbg:#eaf3de;--fail:#b42318;--failbg:#fde8e6;--gold:#b8860b}
+ *{box-sizing:border-box}
+ body{margin:0;padding:1.5rem 1rem;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+ .w{max-width:880px;margin:0 auto}
+ h1{font-size:1.35rem;margin:0 0 .2rem}.s{color:var(--mut);margin:0 0 1.2rem;font-size:.9rem}
+ fieldset{border:1px solid var(--line);border-radius:10px;padding:1rem 1.2rem;background:#fff;margin:0 0 1rem}
+ legend{font-weight:600;font-size:.88rem;padding:0 .4rem}
+ label{display:block;font-size:.76rem;color:var(--mut);margin:.6rem 0 .15rem;font-weight:600}
+ input{width:100%;padding:.5rem .6rem;border:1px solid var(--line);border-radius:7px;font:13px ui-monospace,Menlo,monospace}
+ button{margin-top:1rem;padding:.65rem 1.3rem;border:0;border-radius:8px;background:var(--gold);color:#fff;font-weight:600;cursor:pointer}
+ #log{background:#1a1a18;color:#d8d6d0;border-radius:8px;padding:.8rem 1rem;margin-top:1rem;font:12px ui-monospace,Menlo,monospace;white-space:pre-wrap;max-height:230px;overflow:auto}
+ table{width:100%;border-collapse:collapse;margin-top:1rem;background:#fff;font-size:.86rem}
+ th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+ th{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+ tr.pass{background:var(--passbg)}tr.fail{background:var(--failbg)}tr.unk{background:#faeeda}tr.unk{background:#faeeda}
+ .r{font-weight:700;white-space:nowrap}.p{color:var(--pass)}.f{color:var(--fail)}
+ .v{margin-top:1rem;padding:1rem 1.2rem;border-radius:10px;font-weight:600}
+ .ok{background:var(--passbg);color:var(--pass);border:1px solid var(--pass)}
+ .no{background:var(--failbg);color:var(--fail);border:1px solid var(--fail)}
+ .warn{background:#faeeda;color:#8a5a00;border:1px solid #8a5a00}
+ .det{font:11px ui-monospace,Menlo,monospace;color:var(--mut);word-break:break-all}
+</style></head><body><div class="w">
+<h1>Service Context Test <span style="color:#b8860b">S1–S13</span></h1>
+<p class="s"><b>Disposable project only.</b> Phase A needs the anon key alone. Phase B needs the service_role key — leave that box empty to run Phase A on its own. The key is never logged, never displayed, never sent anywhere except your own project, and is scrubbed from every line of output.</p>
+
+<fieldset><legend>Project</legend>
+<label>Project URL</label><input id="url" placeholder="https://xxxxxxxx.supabase.co">
+<label>anon public key (Settings → API), starting eyJ…</label>
+<input id="key" placeholder="eyJhbGciOiJIUzI1NiIs...">
+<label>Password (all three test users)</label><input id="pw" value="BoundaryTest2026!">
+<label style="color:#b42318">service_role key — PHASE B ONLY. Leave empty for Phase A.</label>
+<input id="svc" type="password" autocomplete="off" spellcheck="false" placeholder="(empty = Phase A only)">
+<button id="go">Run</button>
+</fieldset>
+
+<div id="log"></div>
+<div id="out"></div>
+</div>
+<script>
+const $=i=>document.getElementById(i);
+let URL_,KEY_,SVC_='';
+// Structural guarantee: nothing reaches the screen without passing through here.
+function scrub(s){
+  s=String(s==null?'':s);
+  if(SVC_ && SVC_.length>8) s=s.split(SVC_).join('«service key redacted»');
+  return s;
+}
+const L=m=>{const l=$('log');l.textContent+=scrub(m)+"\n";l.scrollTop=l.scrollHeight;};
+
+async function req(method,path,{jwt,apikey,body,noAuth}={}){
+  const ctl=new AbortController();
+  const timer=setTimeout(()=>ctl.abort(),15000);
+  const h={'apikey':apikey||KEY_};
+  if(body) h['Content-Type']='application/json';
+  if(jwt && !noAuth) h['Authorization']=`Bearer ${jwt}`;
+  try{
+    const r=await fetch(`${URL_}${path}`,{method,headers:h,body:body?JSON.stringify(body):undefined,signal:ctl.signal});
+    const t=await r.text();
+    return {ok:true,status:r.status,body:t};
+  }catch(e){
+    return {ok:false,status:0,body:'',err:(e.name==='AbortError'?'TIMEOUT after 15s':`${e.name}: ${e.message}`)};
+  }finally{ clearTimeout(timer); }
+}
+
+async function signIn(email,pw){
+  const r=await req('POST','/auth/v1/token?grant_type=password',{body:{email,password:pw},noAuth:true});
+  if(!r.ok){ L(`   x ${email} — ${r.err}`); return {jwt:null}; }
+  let j={}; try{ j=JSON.parse(r.body);}catch(_){}
+  if(j.access_token){ L(`   ok ${email}`); return {jwt:j.access_token}; }
+  L(`   x ${email} — HTTP ${r.status} ${r.body.slice(0,120)}`);
+  return {jwt:null};
+}
+
+function classify(r){
+  if(!r.ok) return {k:'inconclusive',why:r.err||'network failure'};
+  const b=(r.body||'').trim();
+  let j=null; try{ j=JSON.parse(b); }catch(_){}
+  const code=(j && !Array.isArray(j) && j.code) ? String(j.code) : '';
+  if(r.status===401) return {k:'inconclusive',why:'HTTP 401 — key wrong'};
+  if(r.status>=500)  return {k:'inconclusive',why:`HTTP ${r.status} server error`};
+  // 404/PGRST202 on a function the client is not granted IS the control working:
+  // the function is absent from that role's API surface. The CTRL probe proves
+  // RPC works in general, so this cannot mask a broken harness.
+  if(r.status===404||code==='PGRST202') return {k:'blocked',why:`HTTP 404 ${code} — not exposed to this role`};
+  if(code==='42501'||r.status===403)    return {k:'blocked',why:'42501 refused'};
+  if(b===''||b==='[]'||b==='null')      return {k:'blocked',why:`HTTP ${r.status} empty result`};
+  if(r.status>=400)                     return {k:'blocked',why:`HTTP ${r.status} ${code}`};
+  return {k:'reached',why:`HTTP ${r.status} data returned`};
+}
+
+const rows=[];
+function rec(id,what,state,detail){rows.push({id,what,state,detail:scrub(detail)});}
+async function probe(id,what,fn){
+  const r=await fn(); const k=classify(r);
+  rec(id,what,k.k==='reached'?'fail':(k.k==='blocked'?'pass':'inconclusive'),
+      `HTTP ${r.status||'-'} — ${k.why} → ${(r.body||r.err||'').slice(0,100)}`);
+  L(`   ${id.padEnd(4)} ${(k.k==='reached'?'LEAKED':k.k.toUpperCase()).padEnd(13)} HTTP ${String(r.status||'-').padEnd(4)} ${(r.body||r.err||'').slice(0,55)}`);
+  return r;
+}
+async function jget(path,jwt,apikey){
+  const r=await req('GET',path,{jwt,apikey});
+  if(!r.ok||r.status>=400) return {err:`HTTP ${r.status||'-'} ${(r.body||r.err||'').slice(0,80)}`};
+  try{ return {data:JSON.parse(r.body)}; }catch(e){ return {err:'unparseable'}; }
+}
+
+async function run(){
+ try{
+  rows.length=0; $('out').innerHTML=''; $('log').textContent='';
+  URL_=$('url').value.trim().replace(/\/+$/,''); KEY_=$('key').value.trim(); SVC_=$('svc').value.trim();
+  const pw=$('pw').value;
+  $('go').disabled=true; $('go').textContent='Running…';
+  if(!/^https:\/\/.+\.supabase\.co$/.test(URL_)){ L('FATAL: not a project URL'); return finish(); }
+  if(!KEY_.startsWith('eyJ')){ L('FATAL: the anon key must start with eyJ'); return finish(); }
+  if(SVC_ && SVC_===KEY_){ L('FATAL: the service key box contains the anon key. Clear it.'); return finish(); }
+  L(SVC_ ? 'Mode: PHASE A + PHASE B (service key supplied — it will not be printed)'
+         : 'Mode: PHASE A only (no service key supplied)');
+
+  L('1. Signing in…');
+  const a=await signIn('ownera@boundary.test',pw);
+  const b=await signIn('ownerb@boundary.test',pw);
+  const c=await signIn('cashierb@boundary.test',pw);
+  if(!a.jwt||!b.jwt||!c.jwt){ $('out').innerHTML=`<div class="v no">Sign-in failed. A=${a.jwt?'ok':'FAILED'} B=${b.jwt?'ok':'FAILED'} cashier=${c.jwt?'ok':'FAILED'}</div>`; return finish(); }
+
+  L('2. Discovering ids from the database…');
+  const pr=await jget('/rest/v1/ingredient_prices?select=ingredient_id,account_id&limit=1',a.jwt);
+  const ba=await jget('/rest/v1/businesses?select=id&limit=1',a.jwt);
+  const sb=await jget('/rest/v1/subscriptions?select=account_id,plan_id,status&limit=1',b.jwt);
+  if(pr.err||ba.err||sb.err||!pr.data?.length||!ba.data?.length||!sb.data?.length){
+    L(`   could not resolve: prices=${pr.err||''} bizA=${ba.err||''} subB=${sb.err||''}`);
+    $('out').innerHTML='<div class="v warn">INCONCLUSIVE — could not read fixture ids.</div>'; return finish(); }
+  const ingA=pr.data[0].ingredient_id, acctA=pr.data[0].account_id, bizA=ba.data[0].id;
+  const acctB=sb.data[0].account_id;
+  L(`   ACCOUNT_A = ${acctA}`);
+  L(`   ACCOUNT_B = ${acctB}   (subscription: ${sb.data[0].plan_id} / ${sb.data[0].status})`);
+
+  L('3. Control — owner A reads her own cost, must be 15…');
+  const cr=await req('POST','/rest/v1/rpc/fn_ingredient_unit_cost',{jwt:a.jwt,body:{p_ingredient_id:ingA,p_business_id:bizA}});
+  const ctrlOK=classify(cr).k==='reached' && Math.abs(parseFloat((cr.body||'').replace(/"/g,''))-15)<0.001;
+  L(`   HTTP ${cr.status} body: ${(cr.body||'').slice(0,60)} → control: ${ctrlOK?'PASS':'FAIL'}`);
+  rec('CTRL','Owner A reads her own cost (proves RPC reachability)',ctrlOK?'pass':'fail',`HTTP ${cr.status} → ${(cr.body||'').slice(0,60)}`);
+  if(!ctrlOK){ L('   Stopping: without a control, "blocked" proves nothing.'); render(); return finish(); }
+
+  L('4. PHASE A — clients must not reach the billing path…');
+  await probe('S1',"Owner B calls fn_set_subscription_plan on his own account",
+    ()=>req('POST','/rest/v1/rpc/fn_set_subscription_plan',{jwt:b.jwt,body:{p_account_id:acctB,p_plan_id:'trading',p_status:'active'}}));
+  await probe('S2',"Owner B PATCHes his subscription status to active",
+    ()=>req('PATCH',`/rest/v1/subscriptions?account_id=eq.${acctB}`,{jwt:b.jwt,body:{status:'active'}}));
+  await probe('S3',"Owner B DELETEs his subscription",
+    ()=>req('DELETE',`/rest/v1/subscriptions?account_id=eq.${acctB}`,{jwt:b.jwt}));
+  await probe('S4',"Owner B INSERTs a second subscription directly",
+    ()=>req('POST','/rest/v1/subscriptions',{jwt:b.jwt,body:{account_id:acctB,plan_id:'trial',status:'trialing'}}));
+  await probe('S5',"Owner B onboards a new account on a PAID plan (trigger test)",
+    ()=>req('POST','/rest/v1/rpc/fn_create_account_and_business',{jwt:b.jwt,body:{p_account_name:'S5 probe',p_business_name:'S5 probe',p_plan_id:'costing'}}));
+  await probe('S6',"Owner B upgrades himself to a paid plan without paying",
+    ()=>req('PATCH',`/rest/v1/subscriptions?account_id=eq.${acctB}`,{jwt:b.jwt,body:{plan_id:'trading'}}));
+  await probe('S7a',"Cashier B calls fn_set_subscription_plan",
+    ()=>req('POST','/rest/v1/rpc/fn_set_subscription_plan',{jwt:c.jwt,body:{p_account_id:acctB,p_plan_id:'trading'}}));
+  await probe('S7b',"Cashier B PATCHes the subscription",
+    ()=>req('PATCH',`/rest/v1/subscriptions?account_id=eq.${acctB}`,{jwt:c.jwt,body:{plan_id:'trading'}}));
+  for(const [id,who,jwt] of [['S8a','Owner A',a.jwt],['S8b','Owner B',b.jwt],['S8c','Cashier B',c.jwt]]){
+    const r=await req('POST','/rest/v1/rpc/fn_is_service_context',{jwt,body:{}});
+    const claims=/true/i.test(r.body||'');
+    rec(id,`${who}'s session claims service context`,claims?'fail':'pass',`HTTP ${r.status} → ${(r.body||'').trim()||'(empty)'} — must be false`);
+    L(`   ${id.padEnd(4)} service_context=${(r.body||'').trim()}  HTTP ${r.status}`);
+  }
+
+  if(!SVC_){ L(''); L('PHASE B skipped — no service key supplied.'); render(); return finish(); }
+
+  L('5. PHASE B — the service_role path…');
+  const S={apikey:SVC_,jwt:SVC_};
+  const r9=await req('POST','/rest/v1/rpc/fn_is_service_context',{...S,body:{}});
+  const isSvc=/true/i.test(r9.body||'');
+  rec('S9','service_role key alone → fn_is_service_context()',isSvc?'pass':'fail',`HTTP ${r9.status} → ${(r9.body||'').trim()} — must be true`);
+  L(`   S9   service_context=${(r9.body||'').trim()}  HTTP ${r9.status}  (must be true)`);
+
+  const r10=await req('POST','/rest/v1/rpc/fn_set_subscription_plan',{...S,body:{p_account_id:acctA,p_plan_id:'trading',p_status:'active',p_provider_ref:'PHASE-B-S10'}});
+  const v10=await jget(`/rest/v1/subscriptions?select=plan_id,status,provider_ref&account_id=eq.${acctA}`,SVC_,SVC_);
+  const row10=v10.data&&v10.data[0];
+  const ok10=r10.status<400 && row10 && row10.plan_id==='trading' && row10.status==='active';
+  rec('S10','service_role sets a plan — and the row actually changes',ok10?'pass':'fail',
+      `HTTP ${r10.status}; row now = ${JSON.stringify(row10||v10.err)}`);
+  L(`   S10  ${ok10?'PASS':'FAIL'}  row now = ${JSON.stringify(row10||v10.err)}`);
+
+  const r11=await req('POST','/rest/v1/rpc/fn_is_service_context',{apikey:SVC_,jwt:a.jwt,body:{}});
+  const mixed=/true/i.test(r11.body||'');
+  rec('S11','service_role apikey + end-user JWT → must be false',mixed?'fail':'pass',
+      `HTTP ${r11.status} → ${(r11.body||'').trim()} — must be false`);
+  L(`   S11  service_context=${(r11.body||'').trim()}  HTTP ${r11.status}  (must be false)`);
+
+  const r12=await req('POST','/rest/v1/rpc/fn_ingredient_unit_cost',{...S,body:{p_ingredient_id:ingA,p_business_id:bizA}});
+  rec('S12','service_role reads any account\'s cost (BY DESIGN — recorded, not scored)','info',
+      `HTTP ${r12.status} → ${(r12.body||'').slice(0,40)}`);
+  L(`   S12  by design: ${(r12.body||'').slice(0,30)}  HTTP ${r12.status}`);
+
+  const ghost='00000000-0000-0000-0000-0000000000ff';
+  const r13=await req('POST','/rest/v1/rpc/fn_set_subscription_plan',{...S,body:{p_account_id:ghost,p_plan_id:'trading',p_status:'active'}});
+  const v13=await jget(`/rest/v1/subscriptions?select=account_id&account_id=eq.${ghost}`,SVC_,SVC_);
+  const changed=(v13.data||[]).length;
+  const silentNoop = r13.status<400 && changed===0;
+  rec('S13','fn_set_subscription_plan on a NONEXISTENT account must not report success',
+      silentNoop?'fail':'pass',
+      `HTTP ${r13.status} → ${(r13.body||'').slice(0,80)}; rows actually affected = ${changed}`);
+  L(`   S13  ${silentNoop?'FAIL — reported success, changed 0 rows':'PASS'}  HTTP ${r13.status} rows=${changed}`);
+
+  render();
+ }catch(e){ L(`UNEXPECTED ERROR: ${e.name}: ${e.message}`);
+   $('out').innerHTML=`<div class="v no">Crashed: ${scrub(e.message)}</div>`; }
+ finally{ finish(); }
+}
+function finish(){ $('go').disabled=false; $('go').textContent='Run again'; }
+
+function render(){
+  const ctrl=rows.find(x=>x.id==='CTRL');
+  const scored=rows.filter(x=>x.id!=='CTRL'&&x.state!=='info');
+  const fails=scored.filter(x=>x.state==='fail');
+  const unk=scored.filter(x=>x.state==='inconclusive').length;
+  const cls={pass:'pass',fail:'fail',inconclusive:'unk',info:''};
+  let h='<table><tr><th>#</th><th>Test</th><th>Result</th></tr>';
+  for(const x of rows){
+    const t=x.state==='info'?'BY DESIGN':(x.state==='pass'?'PASS':(x.state==='fail'?'FAIL':'INCONCLUSIVE'));
+    h+=`<tr class="${cls[x.state]}"><td class="r">${x.id}</td><td>${x.what}<div class="det">${x.detail}</div></td><td class="r ${x.state==='pass'?'p':(x.state==='fail'?'f':'')}">${t}</td></tr>`;
+  }
+  h+='</table>';
+  if(!ctrl||ctrl.state!=='pass') h+='<div class="v warn">INCONCLUSIVE — control failed.</div>';
+  else if(unk>0) h+=`<div class="v warn">INCONCLUSIVE — ${unk} probe(s) never reached the database.</div>`;
+  else if(fails.length===0) h+=`<div class="v ok">ALL ${scored.length} SCORED TESTS PASS.</div>`;
+  else h+=`<div class="v no">${fails.length} FAILED: ${fails.map(f=>f.id).join(', ')}. Stop — report before changing anything.</div>`;
+  $('out').innerHTML=h;
+}
+$('go').addEventListener('click',run);
+</script></body></html>
