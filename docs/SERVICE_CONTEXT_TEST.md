@@ -86,12 +86,15 @@ reason.
 5. Create three users in Authentication → Users, all with the same password:
    `ownera@boundary.test`, `ownerb@boundary.test`, `cashierb@boundary.test`.
 6. Run `tests/006_supabase_boundary_fixtures.sql`.
-7. Run `tests/007_service_context.sql` — the pre-flight. Every `verdict` must
-   read `OK` except section 5, which records known-absent guards.
+7. Run `tests/007_service_context.sql` — the pre-flight. It emits ONE result
+   set of 14 rows, because the SQL Editor renders only the last one. Every
+   `verdict` must read `OK`. Sections 2, 3 and 6 report a row per expected
+   item whether or not it exists, so a missing fixture shows as `MISSING`
+   rather than as an absent row nobody notices.
 8. Open `tests/service_context_test.html` in a browser. Anon key only. Run.
    That is Phase A.
 9. Re-open it, add the `service_role` key, run again. That is Phase B.
-10. Re-run the `POST_B_subscriptions` block of `tests/007_service_context.sql`.
+10. Run `tests/008_post_phase_b.sql` to see what the key actually changed.
 11. Rotate the service_role key, then delete the project.
 
 ## 5. Result
