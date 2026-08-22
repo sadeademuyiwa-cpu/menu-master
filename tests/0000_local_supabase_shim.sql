@@ -72,6 +72,30 @@ $$;
 grant anon, authenticated, service_role to authenticator;
 
 -- ----------------------------------------------------------------------------
+-- 2b. Supabase's DEFAULT PRIVILEGES
+--
+-- Added after the service-context test found that every local result had been
+-- produced against a MORE locked-down database than production. Supabase runs
+-- the equivalent of these three statements, so every table, function and
+-- sequence a migration creates arrives with ALL granted to anon and
+-- authenticated -- and GRANTs are additive, so an explicit GRANT never removes
+-- them.
+--
+-- Without these lines the shim silently flatters us: anon appeared to hold
+-- nothing, when on Supabase it held DELETE, INSERT, REFERENCES, SELECT,
+-- TRIGGER, TRUNCATE, UPDATE on every tenant table. TRUNCATE is not gated by
+-- RLS, and `set role anon; truncate ingredient_prices cascade;` worked.
+--
+-- Migration 0018 revokes them. These lines exist so that the local suite is
+-- testing the same grant surface production has, and so that 0018 is exercised
+-- rather than assumed.
+-- ----------------------------------------------------------------------------
+
+alter default privileges in schema public grant all on tables    to anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+
+-- ----------------------------------------------------------------------------
 -- 3. The auth schema
 -- ----------------------------------------------------------------------------
 

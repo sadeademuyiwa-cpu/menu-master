@@ -1,0 +1,172 @@
+-- ============================================================================
+-- MENU MASTER NG
+-- 0018: grant surface hardening
+--
+-- 0011 stated privileges explicitly and said of the anon role: "gets nothing
+-- on tenant data. Not read, not write." That was true on the local test shim
+-- and FALSE on Supabase, because Supabase ships default privileges granting
+-- ALL on new public tables to anon, authenticated and service_role -- and
+-- GRANTs are additive. 0011 never revoked them.
+--
+-- Confirmed on a disposable Supabase project: every tenant table carried
+--   DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE
+-- for BOTH anon and authenticated.
+--
+-- What that actually cost us, tested rather than assumed:
+--
+--   SELECT/INSERT/UPDATE/DELETE  mitigated. RLS gates them; anon reads 0 rows.
+--   EXECUTE on functions         mitigated. In-function authorization refuses
+--                                anon. (Note: EXECUTE to PUBLIC on new
+--                                functions is core PostgreSQL behaviour, not a
+--                                Supabase quirk.)
+--   TRUNCATE                     NOT MITIGATED. RLS does not apply to TRUNCATE.
+--                                `set role anon; truncate ingredient_prices
+--                                cascade;` emptied the table.
+--   TRIGGER                      Not currently exploitable, but 0016 line 43
+--                                justifies pg_trigger_depth() by claiming
+--                                "CREATE TRIGGER requires table ownership".
+--                                That is WRONG: it requires the TRIGGER
+--                                privilege, which was granted. The attack
+--                                fails only because authenticated has no
+--                                CREATE on schema public and every
+--                                trigger-returning function has EXECUTE
+--                                revoked. This migration removes the
+--                                privilege so the conclusion no longer rests
+--                                on an incorrect premise.
+--
+-- Deliberately NOT changed: service_role keeps ALL. It is the trusted backend,
+-- it bypasses RLS by design, and the billing path depends on it.
+--
+-- ADDITIVE. Migrations 0001-0017 are not modified. Idempotent.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. TABLES: anon loses everything, then gets back only reference data
+-- ----------------------------------------------------------------------------
+
+-- ALL TABLES covers views and materialised views too.
+revoke all on all tables in schema public from anon;
+
+grant select on units, catalog_categories, catalog_ingredients, plans, plan_features
+  to anon;
+
+-- ----------------------------------------------------------------------------
+-- 2. TABLES: authenticated loses the three privileges RLS cannot gate
+--
+-- SELECT/INSERT/UPDATE/DELETE are left exactly as 0011, 0012 and 0015 set
+-- them: those are row-gated by policy, which is the design. TRUNCATE,
+-- TRIGGER and REFERENCES are not row-gated by anything.
+-- ----------------------------------------------------------------------------
+
+do $$
+declare t record;
+begin
+  for t in
+    select c.relname
+    from pg_class c
+    where c.relnamespace = 'public'::regnamespace
+      -- Views carry the same default grants as tables and must not be
+      -- skipped: an updatable view is a write path, and the self-check in
+      -- section 6 rightly refuses to pass while any object still holds these.
+      and c.relkind in ('r','p','v','m','f')
+  loop
+    execute format('revoke truncate, trigger, references on %I from authenticated', t.relname);
+  end loop;
+end
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 3. FUNCTIONS: anon and PUBLIC lose EXECUTE
+--
+-- authenticated's grants are left untouched -- 0011, 0012, 0014 and 0016
+-- state them deliberately and the suites depend on them. Only the implicit
+-- PUBLIC grant and anon are removed.
+-- ----------------------------------------------------------------------------
+
+do $$
+declare f record;
+begin
+  for f in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+  loop
+    execute format('revoke all on function %s from public, anon', f.sig);
+  end loop;
+end
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 4. SEQUENCES
+-- ----------------------------------------------------------------------------
+
+revoke all on all sequences in schema public from anon;
+
+do $$
+declare s text;
+begin
+  for s in select sequence_name from information_schema.sequences
+            where sequence_schema = 'public'
+  loop
+    execute format('grant usage, select on sequence %I to authenticated', s);
+  end loop;
+end
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 5. DEFAULT PRIVILEGES: stop the next table inheriting the same problem
+--
+-- Applies to objects created by the role running migrations. From here on a
+-- new table grants NOTHING to anon or authenticated until a migration says
+-- so explicitly -- which is what 0011 always claimed was happening.
+--
+-- This fails CLOSED: forget the grant and the feature visibly does not work,
+-- rather than silently arriving world-writable.
+-- ----------------------------------------------------------------------------
+
+alter default privileges in schema public
+  revoke all on tables from anon, authenticated;
+alter default privileges in schema public
+  revoke all on sequences from anon, authenticated;
+alter default privileges in schema public
+  revoke all on functions from anon, authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 6. SELF-CHECK
+--
+-- A migration whose whole purpose is removing privilege should verify it did.
+-- ----------------------------------------------------------------------------
+
+do $$
+declare
+  v_trunc  text;
+  v_anon   text;
+begin
+  select string_agg(distinct table_name, ', ')
+    into v_trunc
+    from information_schema.role_table_grants
+   where table_schema = 'public'
+     and grantee in ('anon','authenticated')
+     and privilege_type in ('TRUNCATE','TRIGGER','REFERENCES');
+
+  if v_trunc is not null then
+    raise exception
+      '0018 self-check FAILED: TRUNCATE/TRIGGER/REFERENCES still held on: %', v_trunc;
+  end if;
+
+  select string_agg(distinct table_name, ', ')
+    into v_anon
+    from information_schema.role_table_grants
+   where table_schema = 'public'
+     and grantee = 'anon'
+     and table_name not in ('units','catalog_categories','catalog_ingredients',
+                            'plans','plan_features');
+
+  if v_anon is not null then
+    raise exception
+      '0018 self-check FAILED: anon still holds privileges on tenant tables: %', v_anon;
+  end if;
+
+  raise notice '0018 self-check passed: anon holds reference-data SELECT only; no TRUNCATE/TRIGGER/REFERENCES for either client role.';
+end
+$$;
