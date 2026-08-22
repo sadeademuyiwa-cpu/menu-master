@@ -61,11 +61,12 @@ emit PART_4_engines_and_gate1.sql "Part 4 of 5: engines and Gate 1 hardening" \
   0012_gate1_authorization_hardening.sql
 
 emit PART_5_gate1_closure.sql "Part 5 of 5: Gate 1 closure" \
-  "Zero-value rejection, void-and-reissue, write-side role enforcement, role function permissions." \
+  "Zero-value rejection, void-and-reissue, write-side role enforcement, role function permissions, subscription state integrity." \
   0013_reject_zero_value_amounts.sql \
   0014_sales_void_and_reissue.sql \
   0015_write_side_role_enforcement.sql \
-  0016_role_function_permissions.sql
+  0016_role_function_permissions.sql \
+  0017_subscription_state_integrity.sql
 
 echo
 echo "Deployment chain rebuilt from migrations/."
