@@ -150,4 +150,17 @@ Confirmation that it worked: the disposable project's grant fingerprint
 
 ## 6a. Teardown
 
-`service_role` key rotated, then the project deleted. Recorded on completion.
+**Project deleted 2026-08-23.** The `service_role` key was NOT rotated first,
+deliberately: deletion is strictly stronger. Rotation invalidates a credential
+against a project that still exists and still holds data; deletion removes the
+Postgres instance, the API gateway, GoTrue and PostgREST together, leaving the
+key a signed token with nothing to authenticate against.
+
+Supabase has since migrated to JWT Signing Keys, where the legacy secret is
+changed by creating a standby key, rotating to it, and revoking the legacy
+secret. That path would also have worked. It was skipped because the project
+was destroyed minutes later.
+
+The key existed only in a browser page's memory (`type="password"`, scrubbed
+from all output, sent only as an HTTP header) and in the operator's clipboard.
+It was never committed, never logged, and never entered the conversation.
