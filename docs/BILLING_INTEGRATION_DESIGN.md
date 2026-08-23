@@ -1,6 +1,11 @@
 # Billing Integration — Design for Review
 
-**Status: DESIGN ONLY. No code written. Nothing deployed. Production untouched.**
+**Status: REVIEW-APPROVED DESIGN. No implementation. Nothing deployed.
+Production untouched.**
+
+Approved 2026-08-23. This document is the agreed design for **Gate 3 —
+Billing Integration**. Implementation has NOT begun and requires separate
+approval.
 
 Covers the Paystack webhook Edge Function and the `billing_events` audit table.
 Arises from S13: `0017` correctly refuses a subscription update for an account
@@ -387,13 +392,30 @@ Scenario 11 is the one that silently double-charges systems that get it wrong.
 
 ---
 
-## 12. Open questions for you
+## 12. Decisions — RESOLVED 2026-08-23
 
-1. **Record rejected signatures, or return 401 blind?** I recommend recording a
-   minimal row. It admits unauthenticated writes; the alternative is blindness.
-2. **200 or 422 on `failed_permanent`?** I recommend 200 plus our own alerting,
-   rather than depending on Paystack's dashboard.
-3. **What raises the alert?** A view nobody reads is not an alert. Email, Slack,
-   or a dashboard the team actually opens — this needs an owner, not just a table.
-4. **Sweeper: pg_cron or an external scheduler?** Nothing in Menu Master NG runs
-   on a timer today, so this is the first scheduled job in the system.
+All four open questions are settled. These are locked design decisions, not
+recommendations.
+
+| # | Question | **Decision** |
+|---|---|---|
+| 1 | Rejected signatures | **Minimal audit row only.** Timestamp, source IP, body length, body hash. The unverified payload is **never** persisted. |
+| 2 | `failed_permanent` response | **200 after durable recording.** Authenticated but permanently unprocessable events are recorded, marked `failed_permanent`, and acknowledged. |
+| 3 | Alerting | **Reconciliation must have an explicit owner and a real alert path.** A view alone is insufficient and does not satisfy this gate. |
+| 4 | Scheduler | **`pg_cron` preferred**, if it is supported cleanly on the project. Outbound notification via an Edge Function or equivalent where required. |
+
+Also locked, carried from section 7: **`data.authorization.authorization_code`
+must never be stored or logged.** It is a bearer credential capable of charging
+the customer again.
+
+### Consequences for the implementation gate
+
+Decision 3 converts an operational nicety into a **gate condition**.
+`v_billing_reconciliation` existing is not evidence of anything. Gate 3 cannot
+pass until a named owner and a working alert path exist and have been
+demonstrated firing on a `failed_permanent` row.
+
+Decision 4 introduces the **first scheduled job in Menu Master NG**. Nothing
+currently runs on a timer, so `pg_cron` availability must be confirmed on the
+target project before the sweeper is designed against it, and a fallback named
+if it is not cleanly supported.
