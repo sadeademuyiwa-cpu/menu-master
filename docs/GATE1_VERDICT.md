@@ -59,27 +59,51 @@ false premise. `0016` is not modified.
 
 Every one of these is outstanding. None is optional.
 
-## C1 — Production has never been audited *(blocking)*
+## C1 — Production audit *(CLOSED 2026-08-23)*
 
-All evidence comes from a **fresh, empty** project. Production has history no
-one has inspected. Required before any migration is proposed there:
+Executed read-only via `C1a_AUDIT_catalogue.sql`. 20 rows. Findings:
 
-- `tests/diagnostics/DIAGNOSE_grants.sql` — does the `TRUNCATE` exposure exist there?
-- `GRANT_FINGERPRINT.sql` — baseline before any change
-- dry-run of `0017`'s preflight — any status outside the four? any account with two subscriptions?
-- confirm whether the chain has ever been applied, and what connects to it
+| | Observed |
+|---|---|
+| All 11 migration markers | **ABSENT** — the chain has never been applied |
+| `anon` / `authenticated` grants | `NONE` — there are no tables to grant on |
+| Ungated privileges (TRUNCATE/TRIGGER/REFERENCES) | `0` |
+| Grant fingerprint | `n/a` |
+| **Default privileges for client roles** | **`f,r,S`** — Supabase's defaults ARE active |
+| Tables with RLS disabled | `none — all enabled` |
+| Lifetime writes | `0` |
+| Current sessions | `pgbouncer`, `supabase_admin`, `PostgREST 14.15` — Supabase's own infrastructure only; no application is connected |
 
-Read-only. No writes, no migrations.
+**Production is an empty Supabase project.** C1b was correctly not run: it
+counts rows in tables that do not exist.
 
-## C2 — `0017` and `0018` are not applied to production *(blocking)*
+The `f,r,S` row is the one that matters for sequencing. Supabase's default
+privileges are live, so every table created by `PART_1` will arrive with `ALL`
+granted to `anon` and `authenticated`. The exposure `0018` fixes will be
+*created by deployment* and removed at the end of `PART_5`.
 
-Both carry preflights that **refuse** rather than coerce. On a project with real
-data they may legitimately refuse, and that outcome needs a human decision, not
-a retry.
+## C2 — The chain is not deployed to production *(blocking, but now simple)*
 
-`0018` removes privileges. On an empty project that is safe. If anything is
-connecting to production, the blast radius must be understood first — C1
-answers this.
+C1 reframes this. It is not "apply `0017`/`0018` to a live database with
+history" — it is a **fresh deployment of the whole verified chain onto an empty
+project**, identical to the procedure rehearsed end-to-end on
+`mmng-service-context-test`.
+
+No preflight can refuse: there are no subscriptions to violate `0017`, and no
+grants for `0018` to remove that anything depends on. Nothing is connected, so
+there is no blast radius.
+
+**One sequencing note.** Between `PART_1` and `PART_5` the tables exist with
+Supabase's default `ALL` granted to `anon`. The practical exposure in that
+window is nil — PostgREST never emits `TRUNCATE`, and RLS (enabled by `0001`)
+gates every DML path it does expose; raw SQL needs database credentials that
+are not public. It is a defence-in-depth gap, not an exploitable hole, and it
+closes when `PART_5` runs.
+
+Mitigation is simply to **run all five parts in one sitting**. Revoking the
+default privileges before `PART_1` would close the window entirely, but that
+deviates from the sequence we verified, and trading verified-correct for
+marginally-tidier is a bad exchange.
 
 ## C3 — No billing path exists *(blocking before revenue, not before use)*
 
