@@ -5,6 +5,13 @@
 --
 -- Run ONLY AFTER PART 5. Every row must read PASS.
 --
+-- PRECONDITION: pg_cron must be installed (it is, on production -- the
+-- "pg_cron scheduler" backend was observed connected during P2). Item 12
+-- references cron.job by name, and a static reference to a missing relation
+-- fails at PARSE time, not run time. On a project WITHOUT pg_cron, delete the
+-- item 12 block before running. This is the same class of precondition that
+-- C2_CHECK_data.sql carries for catalog_* being created by 0003.
+--
 -- Three acceptance items CANNOT be proved from SQL and are marked
 -- OPERATOR CHECK. They are dashboard checks, listed in the runbook.
 -- ============================================================================
@@ -132,10 +139,17 @@ from (
     coalesce((select string_agg(id||'='||monthly_price, ', ') from plans where monthly_price <> 0), 'all zero'),
     not exists (select 1 from plans where monthly_price <> 0)
 
-  union all select 12, '12. no scheduled jobs (pg_cron not enabled)',
-    case when exists (select 1 from pg_extension where extname='pg_cron') then 'pg_cron INSTALLED'
-         else 'pg_cron not installed' end,
-    not exists (select 1 from pg_extension where extname='pg_cron')
+  -- CORRECTED 2026-08-24, approved. The original asserted that pg_cron was not
+  -- installed. That is not the requirement: the requirement is that no
+  -- scheduled job exists. Supabase enables pg_cron as a platform default --
+  -- confirmed running on production as the "pg_cron scheduler" backend -- so
+  -- the original check would have failed C2 for a reason unrelated to billing.
+  -- This passes when pg_cron is absent, and when it is present with nothing
+  -- scheduled; it fails the moment a job appears.
+  union all select 12, '12. no scheduled cron jobs',
+    case when to_regclass('cron.job') is null then 'cron.job absent (pg_cron not installed)'
+         else (select count(*)::text || ' job(s) scheduled' from cron.job) end,
+    to_regclass('cron.job') is null or not exists (select 1 from cron.job)
 
   union all select 13, '13. billing fn closed to clients',
     'authenticated='||has_function_privilege('authenticated',

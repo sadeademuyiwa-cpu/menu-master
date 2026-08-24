@@ -68,7 +68,7 @@ Verification scripts (all pure `SELECT`, single statement, no state change):
 
 - `deploy/runbook/C2_CHECK_structure.sql` — safe at **any** stage
 - `deploy/runbook/C2_CHECK_data.sql` — **only after PART 3** (`catalog_*` are created by `0003`, so it fails at parse time before then)
-- `deploy/runbook/C2_ACCEPTANCE.sql` — **only after PART 5**
+- `deploy/runbook/C2_ACCEPTANCE.sql` — **only after PART 5**, and requires `pg_cron` installed (it is on production; item 12 references `cron.job` by name)
 
 ---
 
@@ -207,11 +207,19 @@ Run `deploy/runbook/C2_ACCEPTANCE.sql`. 16 rows.
 | 9 | no `billing_events` table | `absent` · PASS |
 | 10 | no entitlement enforcement | `absent` · PASS |
 | 11 | plan prices all zero | `all zero` · PASS |
-| 12 | no scheduled jobs | `pg_cron not installed` · PASS |
+| 12 | no scheduled **cron jobs** | `0 job(s) scheduled` · PASS |
 | 13 | billing fn closed to clients | `authenticated=false anon=false` · PASS |
 | 14 | no billing Edge Function | **OPERATOR CHECK** — dashboard → Edge Functions list empty |
 | 15 | no Paystack secrets | **OPERATOR CHECK** — dashboard → Edge Functions → Secrets, no `PAYSTACK_*` |
 | 16 | no webhook endpoint | **OPERATOR CHECK** — Paystack dashboard, no webhook URL for this project |
+
+**Item 12 was corrected on 2026-08-24, with approval.** It originally asserted
+that `pg_cron` was not installed. That is not the requirement — the requirement
+is that no job is *scheduled*. Preflight P2 observed the `pg_cron scheduler`
+backend connected to production, so the original check would have failed C2
+over a Supabase platform default with nothing to do with billing. Verified
+three ways: passes with `pg_cron` absent-by-removal, passes with `cron.job`
+present and empty, fails with one job scheduled.
 
 **Items 14–16 print `OPERATOR CHECK`, never `PASS`.** A script must not report
 a pass for something it did not check; that is the defect that made an earlier
