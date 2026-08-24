@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p tests/supabase
 
-for f in tests/001_*.sql tests/002_*.sql tests/004_*.sql tests/005_*.sql; do
+for f in tests/001_*.sql tests/002_*.sql tests/004_*.sql tests/005_*.sql tests/010_*.sql; do
   base=$(basename "$f")
   out="tests/supabase/$base"
   {

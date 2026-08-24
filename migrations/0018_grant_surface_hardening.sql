@@ -194,3 +194,93 @@ begin
   raise notice '0018 self-check passed: anon holds reference-data SELECT only; no TRUNCATE/TRIGGER/REFERENCES for either client role.';
 end
 $$;
+
+-- ----------------------------------------------------------------------------
+-- 7. KEEP THE ANON REFERENCE READ ACTUALLY WORKING
+--
+-- Section 3 revokes EXECUTE on every fn_* from anon. Section 1 grants anon
+-- SELECT on five reference tables. Those two intents collide on `units`, and
+-- only on `units`, because both of its policies call fn_is_account_member:
+--
+--   p_units_read   FOR SELECT USING (account_id is null
+--                                    OR fn_is_account_member(account_id))
+--   p_units_write  FOR ALL    USING (account_id is not null
+--                                    AND fn_is_account_member(account_id))
+--
+-- A FOR ALL policy's USING clause is applied to SELECT as well, and PostgreSQL
+-- checks function EXECUTE when the expression runs -- it does not skip the
+-- check because an OR branch could have short-circuited. Without this section
+-- a plain `select from units` as anon is not a filtered result, it is:
+--
+--   ERROR: permission denied for function fn_is_account_member
+--
+-- and that happens even when every row has account_id IS NULL.
+--
+-- The fix scopes the two member-check policies to `authenticated`. A
+-- role-scoped policy is never applied to anon, so anon never evaluates the
+-- function. The invariant this migration exists to enforce -- anon executes
+-- no Menu Master fn_* -- is preserved exactly. Granting anon EXECUTE on
+-- fn_is_account_member would also work, and is deliberately NOT done.
+--
+-- catalog_categories, catalog_ingredients, plans and plan_features need no
+-- change: their policies are `using (true)` and call no function.
+-- ----------------------------------------------------------------------------
+
+do $$
+begin
+  if not exists (select 1 from pg_policies
+                  where schemaname = 'public' and tablename = 'units'
+                    and policyname in ('p_units_read','p_units_write')) then
+    raise exception '0018 section 7 preflight FAILED: expected p_units_read and '
+                    'p_units_write on units; found neither. The schema is not '
+                    'what this section was written against.';
+  end if;
+end
+$$;
+
+drop policy if exists p_units_read  on units;
+drop policy if exists p_units_write on units;
+
+-- Global reference units. Table-level GRANTs decide who reaches the table at
+-- all; section 1 gives anon SELECT and nothing else.
+create policy p_units_read_global on units
+  for select
+  using (account_id is null);
+
+-- A tenant's own custom units. Scoped to authenticated so the member check is
+-- never evaluated in an anon session.
+create policy p_units_read_own on units
+  for select to authenticated
+  using (account_id is not null and fn_is_account_member(account_id));
+
+create policy p_units_write on units
+  for all to authenticated
+  using      (account_id is not null and fn_is_account_member(account_id))
+  with check (account_id is not null and fn_is_account_member(account_id));
+
+do $$
+declare v_bad text;
+begin
+  -- Every table anon may SELECT must be free of fn_-calling policies that anon
+  -- would be forced to evaluate. Policies scoped to authenticated do not count.
+  select string_agg(distinct p.tablename || '.' || p.policyname, ', ')
+    into v_bad
+    from pg_policies p
+   where p.schemaname = 'public'
+     and p.tablename in (select table_name
+                           from information_schema.role_table_grants
+                          where table_schema = 'public'
+                            and grantee = 'anon'
+                            and privilege_type = 'SELECT')
+     and coalesce(p.qual,'') || coalesce(p.with_check,'') like '%fn\_%' escape '\'
+     and not ('authenticated' = any(p.roles));
+
+  if v_bad is not null then
+    raise exception '0018 section 7 self-check FAILED: anon may SELECT tables '
+                    'whose policies still call an fn_ it cannot execute: %', v_bad;
+  end if;
+
+  raise notice '0018 section 7 passed: the anon reference surface is readable '
+               'without EXECUTE on any Menu Master function.';
+end
+$$;
