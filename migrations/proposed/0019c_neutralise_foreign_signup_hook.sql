@@ -58,6 +58,29 @@ begin
                     'Nothing to neutralise -- do not run this migration.';
   end if;
 
+  -- 0. EXACT BASELINE FINGERPRINT.
+  --    The definition captured from production before this migration was
+  --    written is 285 bytes with md5 6eccc287be2c1bb645b28fbe8ccbe644. If the
+  --    function has changed by so much as one byte since that capture, this
+  --    migration is operating on something it was never reviewed against and
+  --    must refuse.
+  --
+  --    Note the body is stored with CRLF line endings inside the $function$
+  --    block -- 5 CR bytes, which is why it is 285 and not 280. The md5 is
+  --    computed inside the database, so it is unaffected by how any client
+  --    renders the text.
+  if md5(v_def) <> '6eccc287be2c1bb645b28fbe8ccbe644' then
+    raise exception '0019c preflight FAILED: handle_new_user fingerprint is %, '
+                    'expected 6eccc287be2c1bb645b28fbe8ccbe644. The function has '
+                    'changed since it was captured. STOP and re-capture before '
+                    'running this.', md5(v_def);
+  end if;
+
+  if octet_length(convert_to(v_def, 'UTF8')) <> 285 then
+    raise exception '0019c preflight FAILED: definition is % bytes, expected 285.',
+                    octet_length(convert_to(v_def, 'UTF8'));
+  end if;
+
   -- A. Refuse if a `vendors` relation now exists: the hook might be functional
   --    again, and neutralising a working hook would be a silent regression.
   if exists (select 1 from pg_class c
