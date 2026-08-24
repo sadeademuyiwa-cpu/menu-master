@@ -1,0 +1,20 @@
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'pg_catalog'
+AS $function$
+begin
+  -- Neutralised by 0019c. This hook was left behind by a previous application.
+  -- It wrote to a table that exists in no schema, so it raised 42P01 on every
+  -- signup and rolled the signup back.
+  --
+  -- The trigger belongs to auth.users, which this role does not own, so the
+  -- trigger itself cannot be dropped or disabled from here. Neutralising the
+  -- function it calls achieves the same outcome using only privileges we hold.
+  --
+  -- Menu Master does not use an auth.users trigger. Accounts and businesses are
+  -- created by fn_create_account_and_business, called by the client after
+  -- authentication succeeds. Nothing belongs in this function.
+  return new;
+end
+$function$
