@@ -1,6 +1,6 @@
 # C10 — Idempotent Onboarding: Design v2
 
-**Status:** design only. Nothing implemented. Every behaviour below was proven on
+**Status:** design APPROVED 2026-08-24; implementation NOT approved and not started. Every behaviour below was proven on
 a throwaway replica with a prototype that has since been destroyed — no
 prototype code exists in `migrations/`.
 
@@ -283,33 +283,60 @@ Parts 1–5 chain. The prototype existed only in that database and was destroyed
 
 ---
 
-## 10. Multi-business: `fn_create_business_in_account`
+## 10. Multi-business — APPROVED PRODUCT DECISION (2026-08-24)
 
-Still recommended, but for a different reason now that the flag is gone.
+**Decision: one account may own multiple businesses.** A legitimate second
+business is created **under the existing account** using a new idempotency key.
+No one-business-per-account restriction. `p_allow_additional` stays withdrawn.
 
-Today a second key produces a second **account**, which means a second
-**subscription** and a second **trial** (T4: `subs=2`). If the product intent is
-"one owner, one billing account, several businesses", that is wrong — but it is a
-*product* question, not an idempotency question, and it is why this RPC is
-separate from C10 rather than folded into it.
+### Approved idempotency contract
 
-```sql
-fn_create_business_in_account(
-  p_account_id uuid, p_business_name text,
-  p_business_type business_type, p_timezone text default 'Africa/Lagos')
-```
+| Input | Result |
+|---|---|
+| same user + same key + same payload | replay the original result |
+| same user + same key + different payload | explicit conflict / error |
+| same user + different key | legitimate **new business under the same account** |
+| concurrent same-key requests | exactly one successful provisioning result |
+| rolled-back attempt | key remains safely retryable |
+| idempotency keys | permanent |
 
-Requires `fn_has_account_role(p_account_id,'owner')`. Creates the business, its
-'Main' location, `business_settings` and 'Direct' channel. **No account, no
-membership beyond the existing one, no second subscription.** `businesses unique
-(account_id, slug)` already prevents a duplicate name within an account.
+### What this changes versus the prototype — important
 
-**Decision needed from you:** should a second key create a second *account*
-(current behaviour, second trial) or should additional businesses live under the
-first account? I recommend the latter, with C10 shipping first and this RPC
-following.
+The v1 prototype behaved differently on the third row, and that difference is now
+a required design change rather than an accepted behaviour:
 
----
+| | prototype (T4) | approved |
+|---|---|---|
+| second key, already-onboarded user | new **account** + new business + **second subscription** (`accounts=2 subs=2`) | new **business under the existing account**, **no second account, no second subscription** |
+
+So `fn_create_account_and_business` can no longer be the entry point for every
+call. The approved shape is:
+
+- **First onboarding** (user owns no account): create account, owner membership,
+  business, 'Main' location, business_settings, 'Direct' channel, starter
+  catalogue, trial subscription — as today.
+- **Subsequent call with a NEW key** (user already owns an account): create the
+  business, its 'Main' location, its business_settings and its 'Direct' channel
+  **inside the existing account**. No new account. No new membership row beyond
+  the existing owner membership. **No second subscription and no second trial.**
+- **Subsequent call with a USED key**: replay, or conflict if the payload differs.
+
+`onboarding_requests` already records `account_id` **and** `business_id` per key,
+so it expresses "this key produced this business within this account" without
+schema change. The starter catalogue is cloned per **account**, so a second
+business under the same account must **not** re-clone 180 ingredients — that
+would double the tenant's ingredient list. This is a specific implementation
+trap to test for (matrix #19).
+
+`businesses unique (account_id, slug)` already prevents two businesses with the
+same name inside one account, which gives a natural second line of defence.
+
+Whether this lands as branching inside `fn_create_account_and_business` or as the
+separate `fn_create_business_in_account(p_account_id, …)` RPC is an
+implementation choice to settle at implementation time. The separate RPC remains
+attractive because it keeps authorisation explicit
+(`fn_has_account_role(p_account_id,'owner')`) and keeps the first-onboarding path
+simple.
 
 ## 11. Migration and backward compatibility
 
@@ -353,6 +380,8 @@ following.
 | 16 | Test 010 re-run | 5/5 |
 | 17 | Full Part 5 gate after the signature check is updated | 26 PASS |
 | 18 | `fn_create_business_in_account` as owner / non-owner / duplicate name | Created / refused / refused |
+| 19 | Second business under an existing account | **`accounts` unchanged, `subscriptions` unchanged, ingredients NOT re-cloned** |
+| 20 | Second business, then count trials | Exactly one trial subscription for the account |
 
 Tests 3, 4, 5 and 9 are the ones that prove the design; the rest prove nothing
 else broke.
@@ -366,7 +395,10 @@ else broke.
 3. Confirm permanent key retention (§6).
 4. Confirm the client generates the key (§8) — only the client knows whether a
    submit is a retry or a new attempt.
-5. Decide the multi-business question in §10.
+5. ~~Decide the multi-business question in §10.~~ **Decided 2026-08-24: one
+   account, many businesses. Recorded in §10.**
 6. Confirm this lands before the first production user (§11.5).
 
-No code until you approve.
+**Status: design approved, implementation NOT approved.** Preserved for the next
+development stage. No code will be written until implementation is authorised
+separately.
