@@ -119,7 +119,12 @@ from the verified baseline and that must be explained before acceptance.
 2. **Precondition:** PART 2 GO.
 3. **Expected:** `Success. No rows returned`. 10–20 s.
 4. **Verify:** `C2_CHECK_structure.sql`, then `C2_CHECK_data.sql` (first time it is valid).
-5. **GO if:** markers 6/21 · tables 33 · views 6 · functions 41 · fingerprint `3a341e1096c9` · data shows `units 45 · catalog_categories 16 · catalog_ingredients 180 · plans 3 · plan_features 12` and **every tenant table 0** · `non-zero monthly_price` = `none — all zero`.
+5. **GO if:** markers 6/21 · tables 33 · views 6 · functions 41 · fingerprint `3a341e1096c9` · data shows `units 45 · catalog_categories 16 · catalog_ingredients 180` and **`plans 0 · plan_features 0`** and **every tenant table 0** · `non-zero monthly_price` = `none — all zero`.
+
+   **CORRECTED 2026-08-24.** This step originally required `plans 3 ·
+   plan_features 12`. That is wrong here: `0001` creates those tables but
+   `0010` seeds them, and `0010` is in PART 4. Following the original text
+   would have produced a STOP on a correct deployment.
 6. **STOP if:** any SQL error · any reference count differs · any tenant table non-zero · `C2_CHECK_data.sql` errors (it must be valid from here).
 7. **On STOP:** §6a.
 
@@ -131,7 +136,11 @@ from the verified baseline and that must be explained before acceptance.
 2. **Precondition:** PART 3 GO.
 3. **Expected:** `Success. No rows returned`. **30–60 s.** Do not click Run twice.
 4. **Verify:** `C2_CHECK_structure.sql` + `C2_CHECK_data.sql`
-5. **GO if:** markers 14/21 · tables 33 · views 9 · functions 69 · fingerprint `b814547ec55f` · reference counts unchanged · tenant tables still 0.
+5. **GO if:** markers 14/21 · tables 33 · views 9 · functions 69 · fingerprint `b814547ec55f` · `units 45 · catalog_categories 16 · catalog_ingredients 180` and **`plans 3 · plan_features 12`** (seeded here by `0010`) · tenant tables still 0 · `non-zero monthly_price` = `none — all zero`.
+
+   **CORRECTED 2026-08-24.** This step originally said "reference counts
+   unchanged". They do not stay unchanged: `plans` goes 0 → 3 and
+   `plan_features` 0 → 12, because `0010` seeds them. Measured, not assumed.
 6. **STOP if:** any SQL error · functions ≠ 69 · views ≠ 9 · markers ≠ 14 · any tenant table non-zero.
 7. **On STOP:** §6a. This is the largest part; a failure here is the most likely place to need diagnosis before retry.
 
@@ -254,6 +263,42 @@ green: it means the grant exposure `0018` exists to close is still open.
 
 On FAIL: stop, report, diagnose. Do not proceed to Gate 3, do not connect
 anything, do not begin Gate 2 against this project.
+
+## 8a. KNOWN DEFECT — the parts are not idempotent
+
+**Recorded 2026-08-24 from a live production stop. To be fixed later; the
+successfully deployed production state must NOT be changed to accommodate it.**
+
+During this deployment `PART_3` was submitted twice. The first application
+succeeded; the second failed with:
+
+```
+ERROR: 23505 duplicate key value violates unique constraint "units_coalesce_lower_idx"
+DETAIL: Key (COALESCE(account_id, '000...0'), lower(code)) = (000...0, g) already exists.
+```
+
+`0003` has no `ON CONFLICT` clause and `'g'` is the first value it inserts, so
+a second application fails on its very first row.
+
+**This is not unique to PART_3.** Reproduced: a second submission of `PART_4`
+fails with `function "fn_can_see_costs" already exists with same argument
+types`. Every part will fail on re-application, each with its own message.
+
+**What makes it survivable:** the editor runs a submission as one transaction,
+so the failing re-run rolls back completely and changes nothing. Verified after
+both reproductions — row counts, object counts and the grant fingerprint were
+all identical before and after the failed second run.
+
+**Operational rule until fixed:** if a part appears to hang, **do not click Run
+again**. A 96 KB submission takes 30–60 seconds. If you see a duplicate-key or
+already-exists error, treat it as a probable double submission: run the
+checkpoint scripts to establish the true state *before* doing anything, and do
+not delete or repair data.
+
+**Fix, deferred:** add `on conflict do nothing` to the seed inserts in `0003`
+and re-audit every `create`/`alter` in `0004`–`0018` for re-runnability. This
+must be a new migration or a regenerated deployment chain — **not** an edit to
+migrations already applied to production.
 
 ## 9. After C2 PASS
 
