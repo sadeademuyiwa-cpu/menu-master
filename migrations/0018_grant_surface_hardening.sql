@@ -83,16 +83,40 @@ $$;
 -- PUBLIC grant and anon are removed.
 -- ----------------------------------------------------------------------------
 
+--
+-- SCOPED 2026-08-24. This loop originally touched EVERY function in the
+-- public schema. Production carries public.handle_new_user -- a foreign
+-- SECURITY DEFINER function, owned by postgres, invoked by an active trigger
+-- on auth.users, and created by neither this chain nor an extension.
+-- Revoking its PUBLIC grant could have broken user signup silently.
+--
+-- Menu Master's functions are all named fn_*; verified 33 of 33 on a fully
+-- migrated database, with the only non-fn_ function in production being the
+-- foreign one. The loop is therefore restricted to fn_* and to functions not
+-- owned by an extension. Anything else in public is left byte-for-byte and
+-- privilege-for-privilege untouched, and is reported so it stays visible.
 do $$
-declare f record;
+declare f record; v_foreign text;
 begin
   for f in
     select p.oid::regprocedure as sig
     from pg_proc p
     where p.pronamespace = 'public'::regnamespace
+      and p.proname like 'fn\_%'
+      and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
   loop
     execute format('revoke all on function %s from public, anon', f.sig);
   end loop;
+
+  select string_agg(p.proname, ', ' order by p.proname) into v_foreign
+  from pg_proc p
+  where p.pronamespace = 'public'::regnamespace
+    and p.proname not like 'fn\_%'
+    and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e');
+
+  if v_foreign is not null then
+    raise notice '0018: LEFT UNTOUCHED (not Menu Master functions): %', v_foreign;
+  end if;
 end
 $$;
 
