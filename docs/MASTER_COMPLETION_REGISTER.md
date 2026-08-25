@@ -26,7 +26,7 @@ Source: `docs/GATE2_FINAL_DESIGN.md` §9.
 | ID | Item | Status | P | Depends | Effort | Test requirement | Blocking condition |
 |---|---|---|---|---|---|---|---|
 | A1 | G2 production preflight | **DONE** 25 Aug — 28 GO / 3 INFO / 0 STOP | P0 | — | — | — | — |
-| A2 | `0021` Phase 1 structural migration | **AUTHORED NOT DEPLOYED** — sha256 `48a4303…`, 30,800 B | P0 | A1 | done | `tests/011` 33/33 ✅ | operator must run it; I have no production access |
+| A2 | `0021` Phase 1 structural migration | **AUTHORED NOT DEPLOYED, GO ISSUED** — sha256 `b60d1d40…`, 30,982 B (the `48a4303…` build is superseded: it broke the costing engine) | P0 | A1 | done | `tests/011` 33/33 ✅ | operator must run it; I have no production access |
 | A3 | `0021` rollback | **AUTHORED NOT DEPLOYED** — sha256 `1cb6dfc…` | P0 | A2 | done | replica cycle ✅ | — |
 | A4 | `0022` Phase 2 backfill — Default format (capacity NULL), `portion_qty` → Basis B | **NOT STARTED** | P0 | A2 deployed | 4h | equality test: every backfilled variant reproduces `cost_per_portion` exactly | no-op in production (0 tenant rows) but required for correctness |
 | A5 | `0023` Phase 3 overhead basis (D1) | **NOT STARTED** | P0 | A2 deployed | 5h | `overhead_basis_incompatible` returned, never a silent conversion | — |
@@ -64,32 +64,32 @@ nothing has been fabricated to replace it.
 
 | ID | Item | Status | P | Depends | Effort | Test requirement | Blocking condition |
 |---|---|---|---|---|---|---|---|
-| C1 | Product blueprint | **DONE** this block | P0 | — | — | — | — |
-| C2 | Frontend blueprint | **DONE** this block | P0 | C1 | — | — | — |
-| C3 | Frontend stack decision | **DECISION** | P0 | — | — | — | see Decision 1 |
-| C4 | Application scaffold — repo, build, Supabase client, env handling | **NOT STARTED** | P0 | C3 | 4h | builds clean, no key in the bundle | **nothing exists: no `package.json`, no `src/`** |
-| C5 | Auth — signup, login, email confirmation, session | **NOT STARTED** | P0 | C4 | 6h | signup creates exactly one account | `0019c` neutralised the hook; onboarding is now an explicit RPC call |
-| C6 | Onboarding wizard → `fn_create_account_and_business` (9 args, idempotency key) | **NOT STARTED** | P0 | C5 | 6h | retry with the same key creates nothing new | key generated client-side, one per attempt |
+| C1 | Product blueprint | **DONE** | P0 | — | — | — | — |
+| C2 | Frontend blueprint | **DONE** | P0 | C1 | — | — | — |
+| C3 | Frontend stack decision | **DONE** — Next.js + Vercel approved | — | — | — | — | — |
+| C4 | Application scaffold | **DONE** — Next.js 15 / React 19 / Tailwind 4 / Supabase SSR, builds and typechecks clean, 11 routes | — | — | — | ✅ | — |
+| C5 | Auth — signup, login, email confirmation, session | **PARTIAL** — implemented, untested against a live project | P0 | C4 | 6h | signup creates exactly one account | `0019c` neutralised the hook; onboarding is now an explicit RPC call |
+| C6 | Onboarding wizard | **PARTIAL** — implemented with one key per attempt, untested live | P0 | C5 | 6h | retry with the same key creates nothing new | key generated client-side, one per attempt |
 | C7 | Business / location / member management | **NOT STARTED** | P0 | C6 | 8h | role matrix honoured in the UI | — |
-| C8 | Ingredients, categories, packaging items | **NOT STARTED** | P0 | C6 | 8h | `kind='packaging'` respected | — |
+| C8 | Ingredients, categories, packaging items | **PARTIAL** — list, create and the conversions to-do list built | P0 | C6 | 8h | `kind='packaging'` respected | — |
 | C9 | Prices + purchase posting | **NOT STARTED** | P0 | C8 | 8h | zero-amount refused (`0013`) | — |
 | C10 | Units + per-ingredient conversions | **NOT STARTED** | P0 | C8 | 6h | `v_missing_unit_conversions` drives the UI | **never offer a default conversion factor** |
 | C11 | Recipes, lines, sub-recipes, labour | **NOT STARTED** | P0 | C10 | 10h | cycle prevention surfaced | — |
 | C12 | Serving formats + variants (Gate 2 UI) | **NOT STARTED** | P0 | C11, A7 | 10h | capacity NULL renders as "not measured", never 0 | — |
 | C13 | Costing screens — `v_recipe_cost_current`, `v_costing_blockers` | **NOT STARTED** | P0 | C11 | 8h | **incomplete shows a named blocker, never ₦0** | governing rule |
 | C14 | Overhead configuration | **NOT STARTED** | P0 | A5 | 5h | pre-flight shows how many recipes go incomplete before enabling | design §11 point 2 |
-| C15 | Pricing and margins — `v_price_check` | **NOT STARTED** | P0 | C13 | 8h | no recommended price when incomplete | — |
+| C15 | Pricing and margins — `v_price_check` | **PARTIAL** — screen built, incomplete recipes correctly priceless | P0 | C13 | 8h | no recommended price when incomplete | — |
 | C16 | Trading — orders, order lines, finalisation, void/reissue, sales entries | **NOT STARTED** | P1 | C15 | 12h | finalised revenue immutable (`0014`) | — |
-| C17 | Dashboards and reporting — `v_dashboard_waterfall`, `v_profit_by_product`, `v_profit_by_period`, `v_sales_unified`, `v_voided_sales` | **NOT STARTED** | P1 | C16 | 10h | `cost_coverage_pct` always shown beside profit | the reporting surface **is** specified: these five views |
+| C17 | Dashboards and reporting **PARTIAL — by period, by product, voided sales built** — `v_dashboard_waterfall`, `v_profit_by_product`, `v_profit_by_period`, `v_sales_unified`, `v_voided_sales` | **NOT STARTED** | P1 | C16 | 10h | `cost_coverage_pct` always shown beside profit | the reporting surface **is** specified: these five views |
 | C18 | Subscription and account management screens | **NOT STARTED** | P0 | B8 | 6h | entitlement state visible and honest | — |
-| C19 | Mobile / responsive | **NOT STARTED** | P0 | C4 | 8h | every P0 workflow usable at 360 px | — |
+| C19 | Mobile / responsive | **PARTIAL** — built concurrently: bottom nav, card-collapse tables, 16px inputs | P0 | C4 | 8h | every P0 workflow usable at 360 px | — |
 | C20 | Onboarding progress — `v_onboarding_status` | **NOT STARTED** | P1 | C6 | 3h | — | — |
 
 ## D. TRACK D — QUALITY AND RELEASE
 
 | ID | Item | Status | P | Depends | Effort | Test requirement | Blocking condition |
 |---|---|---|---|---|---|---|---|
-| D1 | **Suites `001`/`002`/`004`/`005` broken on `0020`** — suite 001 dies at line 87, *"An idempotency key is required for onboarding"* | **PARTIAL/BROKEN** | **P0** | — | 6h | all four green again | measured 25 Aug: 001→1, 002→7, 004→20, 005→5 errors, **identical with and without `0021`** — this is `0020` damage, not Gate 2 |
+| D1 | Suites `001`/`002`/`004`/`005` repaired for the `0020` contract — **DONE**, 154/154 with `0021` applied. Original text: broken on `0020` — suite 001 dies at line 87, *"An idempotency key is required for onboarding"* | **DONE** | — | — | 6h | all four green again | measured 25 Aug: 001→1, 002→7, 004→20, 005→5 errors, **identical with and without `0021`** — this is `0020` damage, not Gate 2 |
 | D2 | `tests/010_anon_reference_read.sql` | **DONE** — 5 PASS | — | — | — | — | — |
 | D3 | `tests/011_gate2_phase1.sql` | **DONE** — 33 PASS / 0 FAIL on 17.6 | — | — | — | — | — |
 | D4 | `tests/003` real client role escalation | **DONE** — Gate 1 | — | — | — | — | — |
@@ -128,10 +128,15 @@ documentation are all complete.
 |---|---|---|---|
 | A — data platform | 11 | 3.0 | **27%** |
 | B — billing | 10 | 1.0 | **10%** |
-| C — product/frontend | 20 | 2.0 | **10%** |
-| D — quality/release | 12 | 4.0 | **33%** |
-| E — blueprint residue | 7 | 2.0 | **29%** |
-| **Overall** | **60** | **12.0** | **20%** |
+| C — product/frontend | 20 | 7.0 | **35%** |
+| D — quality/release | 12 | 5.0 | **42%** |
+| E — blueprint residue | 7 | 3.5 | **50%** |
+| **Overall** | **60** | **19.5** | **33%** |
+
+Movement this block: Track C +25 (scaffold, auth, onboarding, ingredients,
+pricing, reports, mobile), Track D +9 (154/154 restored), Track E +21 (tax,
+commission, period close and method audit all designed against approved
+rulings).
 
 The database layer beneath this (migrations `0001`–`0020`, Gate 1 at 154/154)
 is complete and deployed; it is not counted here because this register tracks
