@@ -1,103 +1,133 @@
 -- ============================================================================
--- MENU MASTER NG — C10 IDEMPOTENCY ACCEPTANCE TEST
+-- MENU MASTER NG — C10 IDEMPOTENCY ACCEPTANCE TEST  (dedicated test user)
+--
+-- ############################################################################
+-- ##  EDIT ONE LINE BEFORE RUNNING: put the temporary user's UUID below.    ##
+-- ############################################################################
 --
 -- RUN IT LIKE THIS, EXACTLY:
 --
 --     begin;
---         <this file>
+--         <this file, with the UUID filled in>
 --     rollback;          <-- NOT commit
 --
+-- THE FIVE EXISTING USERS ARE NOT INVOLVED
+--   This test acts on ONE dedicated throwaway user and nothing else. It
+--   refuses to run if the UUID given belongs to a user created before
+--   2026-08-15, which is every one of the five. It never reads them as
+--   subjects, never provisions for them, and never writes to auth.users at
+--   all -- no INSERT, no UPDATE, no DELETE, in this file or anywhere in C10.
+--
 -- WHY ROLLBACK
---   The test provisions real tenants to prove the behaviour, then discards
---   them. Everything is verified INSIDE the transaction, before the rollback,
---   so the rows genuinely existed when checked. Production keeps 0 accounts
---   and an empty ledger.
+--   The test provisions real rows to prove the behaviour, verifies them while
+--   they exist, then discards everything. Production keeps 0 accounts and an
+--   empty ledger. Only the Auth user survives, and it is removed afterwards
+--   through the Dashboard, never from SQL.
 --
--- *** READ THIS BEFORE RUNNING ***
---   No new auth user is created, per instruction. The test therefore uses TWO
---   OF THE FIVE EXISTING USERS as subjects. It only READS auth.users -- it
---   never inserts, updates or deletes a row there. What it creates are
---   accounts, businesses and ledger rows REFERENCING them, and every one of
---   those is discarded by the rollback.
---
---   Net effect on production after rollback: zero. The five users are not
---   modified in any way. But because this brushes against the standing
---   instruction not to touch them, run it only with that understood.
---
--- WHAT CANNOT BE TESTED HERE
---   Concurrency needs two simultaneous connections and cannot be exercised
---   from one SQL Editor tab. It was proven on a 17.6 replica both with the
---   advisory lock and with the lock stripped out -- one tenant, zero orphan
---   accounts, in both cases. Row 6 records that rather than pretending.
+-- WHAT IS NOT TESTED HERE, AND IS NOT CLAIMED
+--   * Concurrency needs two simultaneous connections; one SQL Editor tab
+--     cannot do it.
+--   * "Same key string, different user" needs a second subject, which would
+--     mean a second throwaway user.
+--   Both were proven on a 17.6 replica and are reported as REPLICA-PROVEN
+--   rather than dressed up as production results.
 -- ============================================================================
 
 do $acc$
 declare
-  v_u1 uuid; v_u2 uuid;
-  v_r  jsonb;
-  v_err text;
+  v_user    uuid;
+  v_created timestamptz;
+  v_r       jsonb;
 begin
-  if (select count(*) from auth.users) < 2 then
-    raise exception 'ACCEPTANCE ABORTED: need at least two users as subjects.';
+  -- ########################################################################
+  v_user := '00000000-0000-0000-0000-000000000000';   -- <<< PASTE UUID HERE
+  -- ########################################################################
+
+  if v_user = '00000000-0000-0000-0000-000000000000' then
+    raise exception 'ACCEPTANCE ABORTED: the test user UUID was not filled in. '
+                    'Edit the marked line before running.';
+  end if;
+
+  select u.created_at into v_created from auth.users u where u.id = v_user;
+
+  if v_created is null then
+    raise exception 'ACCEPTANCE ABORTED: no auth.users row with id %. Create the '
+                    'temporary user through the Dashboard first.', v_user;
+  end if;
+
+  -- The five pre-existing users are dated 2026-08-10..14. This makes it
+  -- impossible to select one of them, whatever UUID is pasted above.
+  if v_created < '2026-08-15'::timestamptz then
+    raise exception 'ACCEPTANCE ABORTED: user % was created at %, which places '
+                    'it among the five protected pre-existing users. They must '
+                    'not be used as test subjects.', v_user, v_created;
+  end if;
+
+  if exists (select 1 from memberships m where m.user_id = v_user) then
+    raise exception 'ACCEPTANCE ABORTED: that user already holds a membership. '
+                    'Do not run this twice against the same user.';
+  end if;
+
+  if (select count(*) from auth.users) <> 6 then
+    raise exception 'ACCEPTANCE ABORTED: auth.users holds % rows, expected 6 '
+                    '(five protected plus one temporary test user).',
+                    (select count(*) from auth.users);
   end if;
   if (select count(*) from accounts) <> 0 then
-    raise exception 'ACCEPTANCE ABORTED: accounts is not empty. Expected a '
-                    'clean baseline of 0.';
+    raise exception 'ACCEPTANCE ABORTED: accounts is not empty.';
   end if;
   if (select count(*) from onboarding_requests) <> 0 then
     raise exception 'ACCEPTANCE ABORTED: the ledger is not empty.';
   end if;
 
-  select id into v_u1 from auth.users order by created_at, id limit 1;
-  select id into v_u2 from auth.users order by created_at, id offset 1 limit 1;
-  perform set_config('mm.u1', v_u1::text, false);
-  perform set_config('mm.u2', v_u2::text, false);
+  perform set_config('mm.u', v_user::text, false);
 
   set local role authenticated;
+  perform set_config('request.jwt.claim.sub', v_user::text, true);
 
-  -- ---- T1: first call, key K1 -----------------------------------------
-  perform set_config('request.jwt.claim.sub', v_u1::text, true);
+  -- ---- T1: first call, key K1 -------------------------------------------
   v_r := fn_create_account_and_business(
-           'Acceptance Foods','Acceptance Kitchen','soup_seller',
-           null,'NGN','trial',14,'ACC-K1');
+           'C10 Test Foods','C10 Test Kitchen','soup_seller',
+           null,'NGN','trial',14,'C10-K1');
   perform set_config('mm.t1', v_r::text, false);
 
-  -- ---- T2: SAME key, SAME payload -> replay ----------------------------
+  -- ---- T2: SAME key, SAME payload -> replay ------------------------------
   v_r := fn_create_account_and_business(
-           'Acceptance Foods','Acceptance Kitchen','soup_seller',
-           null,'NGN','trial',14,'ACC-K1');
+           'C10 Test Foods','C10 Test Kitchen','soup_seller',
+           null,'NGN','trial',14,'C10-K1');
   perform set_config('mm.t2', v_r::text, false);
 
-  -- ---- T3: SAME key, DIFFERENT payload -> must refuse ------------------
+  -- ---- T3: SAME key, DIFFERENT payload -> refuse -------------------------
   begin
     v_r := fn_create_account_and_business(
-             'Acceptance Foods','A DIFFERENT KITCHEN','soup_seller',
-             null,'NGN','trial',14,'ACC-K1');
+             'C10 Test Foods','A DIFFERENT KITCHEN','soup_seller',
+             null,'NGN','trial',14,'C10-K1');
     perform set_config('mm.t3', 'NOT REFUSED -- returned a result', false);
   exception when others then
-    perform set_config('mm.t3', 'refused: ' || sqlstate || ' ' || left(sqlerrm, 60), false);
+    perform set_config('mm.t3', 'refused: ' || sqlstate || ' ' || left(sqlerrm, 55), false);
   end;
 
-  -- ---- T4: DIFFERENT key -> second business, SAME account --------------
+  -- ---- T4: DIFFERENT key -> second business, SAME account ----------------
   v_r := fn_create_account_and_business(
-           'Acceptance Foods','Second Kitchen','baker',
-           null,'NGN','trial',14,'ACC-K2');
+           'C10 Test Foods','C10 Second Kitchen','baker',
+           null,'NGN','trial',14,'C10-K2');
   perform set_config('mm.t4', v_r::text, false);
 
-  -- ---- T5: null key -> must refuse -------------------------------------
+  -- ---- T5: null key -> refuse --------------------------------------------
   begin
     v_r := fn_create_account_and_business('X','Y','caterer');
     perform set_config('mm.t5', 'NOT REFUSED', false);
   exception when others then
-    perform set_config('mm.t5', 'refused: ' || sqlstate || ' ' || left(sqlerrm, 50), false);
+    perform set_config('mm.t5', 'refused: ' || sqlstate || ' ' || left(sqlerrm, 45), false);
   end;
 
-  -- ---- T7: same key STRING, different user -> own tenant ---------------
-  perform set_config('request.jwt.claim.sub', v_u2::text, true);
-  v_r := fn_create_account_and_business(
-           'Second Owner Foods','Second Owner Kitchen','caterer',
-           null,'NGN','trial',14,'ACC-K1');
-  perform set_config('mm.t7', v_r::text, false);
+  -- ---- T6: blank key -> refuse -------------------------------------------
+  begin
+    v_r := fn_create_account_and_business('X','Y','caterer',null,'NGN','trial',14,'   ');
+    perform set_config('mm.t6', 'NOT REFUSED', false);
+  exception when others then
+    perform set_config('mm.t6', 'refused: ' || sqlstate, false);
+  end;
 
   reset role;
 end
@@ -105,8 +135,7 @@ $acc$;
 
 select * from (
 
-  select '1 first call' as section,
-         '>>> provisioned an account' as item,
+  select '1 first call' as section, '>>> provisioned exactly once' as item,
          'account_created=' || ((current_setting('mm.t1',true))::jsonb->>'account_created')
          || '  ingredients=' || ((current_setting('mm.t1',true))::jsonb->>'ingredients_added')
          || '  replay=' || ((current_setting('mm.t1',true))::jsonb->>'idempotent_replay') as observed,
@@ -117,7 +146,7 @@ select * from (
               then 'PASS' else 'STOP' end as "verdict >>>"
 
   union all
-  select '2 same key, same payload', '>>> REPLAYED, provisioned nothing',
+  select '2 same key same payload', '>>> REPLAYS THE EXACT TENANT',
          'replay=' || ((current_setting('mm.t2',true))::jsonb->>'idempotent_replay')
          || '  same account=' ||
          case when (current_setting('mm.t2',true))::jsonb->>'account_id'
@@ -126,101 +155,151 @@ select * from (
          || '  same business=' ||
          case when (current_setting('mm.t2',true))::jsonb->>'business_id'
                  = (current_setting('mm.t1',true))::jsonb->>'business_id'
+              then 'yes' else 'NO' end
+         || '  same location=' ||
+         case when (current_setting('mm.t2',true))::jsonb->>'location_id'
+                 = (current_setting('mm.t1',true))::jsonb->>'location_id'
               then 'yes' else 'NO' end,
-         'replay=true  same account=yes  same business=yes',
+         'replay=true  same account=yes  same business=yes  same location=yes',
          case when (current_setting('mm.t2',true))::jsonb->>'idempotent_replay' = 'true'
                and (current_setting('mm.t2',true))::jsonb->>'account_id'
                  = (current_setting('mm.t1',true))::jsonb->>'account_id'
                and (current_setting('mm.t2',true))::jsonb->>'business_id'
                  = (current_setting('mm.t1',true))::jsonb->>'business_id'
+               and (current_setting('mm.t2',true))::jsonb->>'location_id'
+                 = (current_setting('mm.t1',true))::jsonb->>'location_id'
               then 'PASS' else 'STOP' end
 
   union all
-  select '3 same key, diff payload', '>>> REFUSED',
+  select '3 same key diff payload', '>>> REFUSED',
          coalesce(current_setting('mm.t3',true), 'not collected'),
          'refused: 23505 ...',
          case when coalesce(current_setting('mm.t3',true),'') like 'refused: 23505%'
               then 'PASS' else 'STOP' end
 
   union all
-  select '4 different key', '>>> second business, SAME account, no new trial',
+  select '4 different key', '>>> second business in the SAME account',
          'account_created=' || ((current_setting('mm.t4',true))::jsonb->>'account_created')
          || '  ingredients=' || ((current_setting('mm.t4',true))::jsonb->>'ingredients_added')
-         || '  same account as T1=' ||
+         || '  same account=' ||
          case when (current_setting('mm.t4',true))::jsonb->>'account_id'
                  = (current_setting('mm.t1',true))::jsonb->>'account_id'
+              then 'yes' else 'NO' end
+         || '  new business=' ||
+         case when (current_setting('mm.t4',true))::jsonb->>'business_id'
+                <> (current_setting('mm.t1',true))::jsonb->>'business_id'
               then 'yes' else 'NO' end,
-         'account_created=false  ingredients=0  same account as T1=yes',
+         'account_created=false  ingredients=0  same account=yes  new business=yes',
          case when (current_setting('mm.t4',true))::jsonb->>'account_created' = 'false'
                and (current_setting('mm.t4',true))::jsonb->>'ingredients_added' = '0'
                and (current_setting('mm.t4',true))::jsonb->>'account_id'
                  = (current_setting('mm.t1',true))::jsonb->>'account_id'
+               and (current_setting('mm.t4',true))::jsonb->>'business_id'
+                <> (current_setting('mm.t1',true))::jsonb->>'business_id'
               then 'PASS' else 'STOP' end
 
   union all
   select '5 null key', '>>> REFUSED',
-         coalesce(current_setting('mm.t5',true), 'not collected'),
-         'refused: 22023 ...',
+         coalesce(current_setting('mm.t5',true), 'not collected'), 'refused: 22023 ...',
          case when coalesce(current_setting('mm.t5',true),'') like 'refused: 22023%'
+              then 'PASS' else 'STOP' end
+  union all
+  select '5 blank key', '>>> REFUSED',
+         coalesce(current_setting('mm.t6',true), 'not collected'), 'refused: 22023',
+         case when coalesce(current_setting('mm.t6',true),'') like 'refused: 22023%'
               then 'PASS' else 'STOP' end
 
   union all
-  select '6 concurrency', 'two simultaneous calls, same key',
-         'not runnable from one SQL Editor session',
-         'proven on a 17.6 replica: one tenant and zero orphan accounts BOTH '
-         'with the advisory lock and with it removed',
+  select '6 no duplicate tenant', '>>> accounts / businesses / memberships',
+         (select count(*) from accounts)::text || ' / ' ||
+         (select count(*) from businesses)::text || ' / ' ||
+         (select count(*) from memberships)::text,
+         '1 / 2 / 1 -- one account, two businesses, ONE owner membership',
+         case when (select count(*) from accounts) = 1
+               and (select count(*) from businesses) = 2
+               and (select count(*) from memberships) = 1
+              then 'PASS' else 'STOP' end
+  union all
+  select '6 no duplicate tenant', '>>> subscriptions: no second trial',
+         (select count(*)::text from subscriptions),
+         '1 -- two businesses, ONE trial',
+         case when (select count(*) from subscriptions) = 1
+              then 'PASS' else 'STOP' end
+  union all
+  select '6 no duplicate tenant', '>>> catalogue cloned once per ACCOUNT',
+         (select count(*)::text from ingredients),
+         '180 -- NOT 360; the second business must not re-clone',
+         case when (select count(*) from ingredients) = 180
+              then 'PASS' else 'STOP' end
+  union all
+  select '6 no duplicate tenant', '>>> locations / business_settings / channels',
+         (select count(*) from locations)::text || ' / ' ||
+         (select count(*) from business_settings)::text || ' / ' ||
+         (select count(*) from channels)::text,
+         '2 / 2 / 2 -- one set per business',
+         case when (select count(*) from locations) = 2
+               and (select count(*) from business_settings) = 2
+               and (select count(*) from channels) = 2
+              then 'PASS' else 'STOP' end
+  union all
+  select '6 no duplicate tenant', '>>> ledger rows',
+         (select count(*)::text from onboarding_requests),
+         '2 -- C10-K1 and C10-K2',
+         case when (select count(*) from onboarding_requests) = 2
+              then 'PASS' else 'STOP' end
+
+  union all
+  select '7 source of truth', '>>> no price, conversion or yield invented',
+         (select count(*) from ingredient_prices)::text || ' prices / ' ||
+         (select count(*) from ingredient_unit_conversions)::text || ' conversions',
+         '0 prices / 0 conversions',
+         case when (select count(*) from ingredient_prices) = 0
+               and (select count(*) from ingredient_unit_conversions) = 0
+              then 'PASS' else 'STOP' end
+
+  union all
+  select '8 protected users', '>>> auth.users total',
+         (select count(*)::text from auth.users),
+         '6 -- five protected plus one temporary test user',
+         case when (select count(*) from auth.users) = 6 then 'PASS' else 'STOP' end
+  union all
+  select '8 protected users', '>>> the five hold NOTHING',
+         (select count(*)::text from memberships m
+           join auth.users u on u.id = m.user_id
+          where u.created_at < '2026-08-15'::timestamptz) || ' memberships',
+         '0 -- none of the five was used as a subject',
+         case when not exists (select 1 from memberships m
+                                join auth.users u on u.id = m.user_id
+                               where u.created_at < '2026-08-15'::timestamptz)
+              then 'PASS' else 'STOP' end
+  union all
+  select '8 protected users', '>>> every provisioned row belongs to the test user',
+         case when exists (select 1 from memberships m
+                            where m.user_id::text <> current_setting('mm.u', true))
+              then 'A ROW BELONGS TO SOMEONE ELSE' else 'yes' end,
+         'yes',
+         case when not exists (select 1 from memberships m
+                                where m.user_id::text <> current_setting('mm.u', true))
+              then 'PASS' else 'STOP' end
+
+  union all
+  select '9 not tested here', 'concurrent same-key requests',
+         'needs two simultaneous connections',
+         'replica-proven on 17.6: one tenant and zero orphan accounts BOTH with '
+         'the advisory lock and with it removed',
+         'REPLICA-PROVEN'
+  union all
+  select '9 not tested here', 'same key string under a different user',
+         'would need a second throwaway user',
+         'replica-proven on 17.6: each user gets its own tenant; keys are '
+         'namespaced by user_id in the primary key',
          'REPLICA-PROVEN'
 
   union all
-  select '7 key is per-user', '>>> same key string, different user, own tenant',
-         'account_created=' || ((current_setting('mm.t7',true))::jsonb->>'account_created')
-         || '  different account=' ||
-         case when (current_setting('mm.t7',true))::jsonb->>'account_id'
-                <> (current_setting('mm.t1',true))::jsonb->>'account_id'
-              then 'yes' else 'NO -- KEYS ARE LEAKING ACROSS USERS' end,
-         'account_created=true  different account=yes',
-         case when (current_setting('mm.t7',true))::jsonb->>'account_created' = 'true'
-               and (current_setting('mm.t7',true))::jsonb->>'account_id'
-                <> (current_setting('mm.t1',true))::jsonb->>'account_id'
-              then 'PASS' else 'STOP' end
-
-  union all
-  select '8 totals', '>>> accounts / businesses / subscriptions',
-         (select count(*) from accounts)::text || ' / ' ||
-         (select count(*) from businesses)::text || ' / ' ||
-         (select count(*) from subscriptions)::text,
-         '2 / 3 / 2 -- two owners, three businesses, ONE trial each',
-         case when (select count(*) from accounts) = 2
-               and (select count(*) from businesses) = 3
-               and (select count(*) from subscriptions) = 2
-              then 'PASS' else 'STOP' end
-  union all
-  select '8 totals', '>>> starter catalogue cloned once per ACCOUNT',
-         (select count(*)::text from ingredients),
-         '360 -- 180 per account, NOT per business',
-         case when (select count(*) from ingredients) = 360
-              then 'PASS' else 'STOP' end
-  union all
-  select '8 totals', '>>> SOURCE OF TRUTH: no price invented',
-         (select count(*)::text from ingredient_prices), '0',
-         case when (select count(*) from ingredient_prices) = 0
-              then 'PASS' else 'STOP' end
-  union all
-  select '8 totals', '>>> ledger rows',
-         (select count(*)::text from onboarding_requests),
-         '3 -- K1 and K2 for user one, K1 for user two',
-         case when (select count(*) from onboarding_requests) = 3
-              then 'PASS' else 'STOP' end
-  union all
-  select '8 totals', '>>> auth.users untouched',
-         (select count(*)::text from auth.users), '5',
-         case when (select count(*) from auth.users) = 5 then 'PASS' else 'STOP' end
-
-  union all
-  select '9 cleanup', 'this transaction must be rolled back',
+  select '10 cleanup', 'this transaction must be rolled back',
          'accounts=' || (select count(*) from accounts)::text ||
          ' exist only inside this transaction',
-         'issue rollback; so production returns to 0 accounts and an empty ledger',
+         'issue rollback; then delete the temporary user via the Dashboard',
          'OPERATOR ACTION'
 
 ) as t order by 1, 2;
