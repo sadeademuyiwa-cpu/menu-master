@@ -65,3 +65,21 @@ It does not affect the PART_5 verdict and is recorded here so it is not lost.
 - **Five `auth.users` remain, untouched**, with no tenant. Treat as potentially
   real users; do not alter them.
 - Gate 1 remains CONDITIONAL PASS pending blocker C9 (signup).
+
+---
+
+## Superseded facts (added 2026-08-25)
+
+The "Still true after PART 5" list above was accurate on 2026-08-24 and is now
+partly overtaken. Corrections, in order:
+
+- **Signup is no longer broken.** `0019c_neutralise_foreign_signup_hook.sql`
+  replaced `handle_new_user` with a no-op. Blocker **C9 is closed**.
+- **Onboarding is now idempotent.** `0020_idempotent_onboarding.sql` added
+  `onboarding_requests` and the nine-argument
+  `fn_create_account_and_business`. **C10 is closed.**
+- **The tenant left behind by the C10 acceptance test has been removed** and the
+  two disposable auth users deleted through the Dashboard. See
+  `C5_CLOSURE_RECORD.md`. **C5 is closed.**
+- **The five `auth.users` remain untouched and still hold no tenant.** That part
+  of the list is unchanged and still binding.
