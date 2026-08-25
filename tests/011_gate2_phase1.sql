@@ -356,8 +356,20 @@ begin
     where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','f');
   select count(*) into v_pols from pg_policies where schemaname='public';
 
-  insert into t2_result values (31,'counts','fn_* = 47',
-    case when v_fns=47 then 'PASS' else 'FAIL' end, v_fns::text);
+  -- Assert the seven Phase 1 functions BY NAME rather than a global total.
+  -- Later phases legitimately add functions (0023 adds two), and a hardcoded
+  -- total would fail for the wrong reason -- it did, before this was fixed.
+  insert into t2_result values (31,'counts','all 7 Phase 1 functions present',
+    case when (select count(*) from pg_proc
+                where pronamespace='public'::regnamespace
+                  and proname in ('fn_assert_unit_visible_col',
+                                  'fn_assert_packaging_item_kind',
+                                  'fn_log_serving_format_change',
+                                  'fn_block_format_change_mutation',
+                                  'fn_reject_variant_on_inactive_format',
+                                  'fn_assert_sale_variant_valid',
+                                  'fn_assert_no_packaging_double_count')) = 7
+         then 'PASS' else 'FAIL' end, v_fns::text||' fn_* in total');
   insert into t2_result values (32,'counts','relations = 48',
     case when v_rels=48 then 'PASS' else 'FAIL' end, v_rels::text);
   insert into t2_result values (33,'counts','policies = 105',

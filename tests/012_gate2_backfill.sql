@@ -2,7 +2,10 @@
 -- MENU MASTER NG -- tests/012_gate2_backfill.sql
 --
 -- Acceptance test for 0022 (Gate 2, Phase 2 backfill).
--- Run from the repository root, on a database with 0021 applied.
+-- Run from the repository root, on a database with EXACTLY 0021 and 0022
+-- applied. This is a phase-scoped test: it re-runs the real 0022 file to prove
+-- idempotence, and 0022's own preflight refuses a database that has moved on to
+-- a later phase. Run it before 0023, not after.
 --
 -- Seeds deliberately awkward data, runs the real migration file via \i, then
 -- asserts. Everything rolls back; no rows are left behind.
