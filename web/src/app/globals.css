@@ -1,0 +1,31 @@
+@import 'tailwindcss';
+
+:root {
+  --mm-bg: #ffffff;
+  --mm-fg: #14110f;
+  --mm-muted: #6b625b;
+  --mm-line: #e6e0da;
+  --mm-accent: #1f6f4a;
+  --mm-warn: #8a5a00;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mm-bg: #14110f;
+    --mm-fg: #f5f1ec;
+    --mm-muted: #a79c93;
+    --mm-line: #2e2926;
+    --mm-accent: #4bbd85;
+    --mm-warn: #d9a441;
+  }
+}
+
+html, body { background: var(--mm-bg); color: var(--mm-fg); }
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Values the owner has not entered are never styled to look like data. */
+.mm-absent { color: var(--mm-muted); font-style: italic; }
