@@ -45,6 +45,29 @@ begin
              where u.created_at < '2026-08-15'::timestamptz) then
     raise exception 'CLEANUP ABORTED: a protected user holds a membership. STOP.';
   end if;
+  -- The trigger must be present, uniquely named and ENABLED before we touch
+  -- it. If it were already disabled, something else has interfered and the
+  -- re-enable at the end would silently "fix" a state we did not create.
+  if not exists (select 1 from pg_trigger t
+                   join pg_class c on c.oid = t.tgrelid
+                   join pg_namespace n on n.oid = c.relnamespace
+                  where n.nspname = 'public' and c.relname = 'memberships'
+                    and t.tgname = 'trg_memberships_last_owner'
+                    and not t.tgisinternal
+                    and t.tgenabled = 'O') then
+    raise exception 'CLEANUP ABORTED: trg_memberships_last_owner is not present '
+                    'and enabled on public.memberships. Do not proceed.';
+  end if;
+
+  if (select count(*) from pg_trigger
+       where not tgisinternal and tgname ilike '%last_owner%') <> 1 then
+    raise exception 'CLEANUP ABORTED: expected exactly one last-owner trigger, '
+                    'found %. A near-duplicate name would make the disable '
+                    'ambiguous.', (select count(*) from pg_trigger
+                                    where not tgisinternal
+                                      and tgname ilike '%last_owner%');
+  end if;
+
   if (select count(*) from units where account_id is null) <> 45 then
     raise exception 'CLEANUP ABORTED: expected 45 global units, found %.',
                     (select count(*) from units where account_id is null);
