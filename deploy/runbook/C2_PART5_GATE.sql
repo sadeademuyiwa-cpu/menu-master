@@ -28,9 +28,9 @@ select * from (
   union all
   select '1 structure', 'total public relations',
          (select count(*)::text from pg_class
-           where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','f')), '43',
+           where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','f')), '44',
          case when (select count(*) from pg_class
-                     where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','f'))=43
+                     where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','f'))=44
               then 'PASS' else 'STOP' end
 
   -- 2. RLS ------------------------------------------------------------------
@@ -45,8 +45,8 @@ select * from (
                                   and not relrowsecurity) then 'PASS' else 'STOP' end
   union all
   select '2 rls', 'policies on public tables',
-         (select count(*)::text from pg_policies where schemaname='public'), '92',
-         case when (select count(*) from pg_policies where schemaname='public')=92
+         (select count(*)::text from pg_policies where schemaname='public'), '93',
+         case when (select count(*) from pg_policies where schemaname='public')=93
               then 'PASS' else 'STOP' end
   union all
   select '2 rls', 'policies not named p_*',
@@ -196,11 +196,11 @@ select * from (
   union all
   select '5 grants', '>>> onboarding RPC executable by authenticated',
          case when has_function_privilege('authenticated',
-                     'fn_create_account_and_business(text,text,business_type,uuid,text,text,integer)',
+                     'fn_create_account_and_business(text,text,business_type,uuid,text,text,integer,text,uuid)',
                      'EXECUTE') then 'yes' else 'NO -- signup would be impossible' end,
          'yes',
          case when has_function_privilege('authenticated',
-                     'fn_create_account_and_business(text,text,business_type,uuid,text,text,integer)',
+                     'fn_create_account_and_business(text,text,business_type,uuid,text,text,integer,text,uuid)',
                      'EXECUTE') then 'PASS' else 'STOP' end
   union all
   select '5 grants', 'service_role table privileges present',

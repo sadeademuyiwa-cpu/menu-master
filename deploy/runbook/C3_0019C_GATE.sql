@@ -219,12 +219,12 @@ select * from (
          (select count(*)::text from pg_class
            where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','f'))||' / '||
          (select count(*)::text from pg_policies where schemaname='public'),
-         '40 / 43 / 92',
+         '40 / 44 / 93',
          case when (select count(*) from pg_proc
                      where pronamespace='public'::regnamespace and proname like 'fn\_%')=40
                and (select count(*) from pg_class
-                     where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','f'))=43
-               and (select count(*) from pg_policies where schemaname='public')=92
+                     where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','f'))=44
+               and (select count(*) from pg_policies where schemaname='public')=93
               then 'PASS' else 'STOP' end
   union all
   select '5 part5', '>>> no new non-fn_ function appeared',
@@ -283,11 +283,11 @@ select * from (
   union all
   select '6 grants', '>>> onboarding RPC executable by authenticated',
          case when has_function_privilege('authenticated',
-                'fn_create_account_and_business(text,text,business_type,uuid,text,text,integer)',
+                'fn_create_account_and_business(text,text,business_type,uuid,text,text,integer,text,uuid)',
                 'EXECUTE') then 'yes' else 'NO -- signup could not complete' end,
          'yes',
          case when has_function_privilege('authenticated',
-                'fn_create_account_and_business(text,text,business_type,uuid,text,text,integer)',
+                'fn_create_account_and_business(text,text,business_type,uuid,text,text,integer,text,uuid)',
                 'EXECUTE') then 'PASS' else 'STOP' end
   union all
   select '6 grants', '>>> service_role untouched',
