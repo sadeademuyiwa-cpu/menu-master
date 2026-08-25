@@ -47,7 +47,9 @@ drop trigger if exists trg_order_lines_variant_valid   on order_lines;
 drop trigger if exists trg_sales_entries_variant_valid on sales_entries;
 drop trigger if exists trg_recipe_lines_no_double_count on recipe_lines;
 
--- 2. the constraint added to a pre-existing table
+-- 2. chk_complete_requires_resolution was DEFERRED to 0025 and is not added
+--    by 0021. The guarded drop stays so this rollback is still correct if run
+--    against a database where an earlier draft of 0021 did add it.
 alter table cost_snapshots drop constraint if exists chk_complete_requires_resolution;
 
 -- 3. the columns added to pre-existing tables

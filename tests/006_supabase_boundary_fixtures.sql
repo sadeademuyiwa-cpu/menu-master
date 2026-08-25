@@ -41,8 +41,8 @@ begin
   end if;
 
   -- ---- two independent tenants --------------------------------------------
-  oa := fn_create_account_and_business('Boundary A','Kitchen A','soup_seller', ua);
-  ob := fn_create_account_and_business('Boundary B','Kitchen B','restaurant',  ub);
+  oa := fn_create_account_and_business('Boundary A','Kitchen A','soup_seller', ua, p_idempotency_key => gen_random_uuid()::text);
+  ob := fn_create_account_and_business('Boundary B','Kitchen B','restaurant',  ub, p_idempotency_key => gen_random_uuid()::text);
   acca := (oa->>'account_id')::uuid;  biza := (oa->>'business_id')::uuid;
   accb := (ob->>'account_id')::uuid;  bizb := (ob->>'business_id')::uuid;
 

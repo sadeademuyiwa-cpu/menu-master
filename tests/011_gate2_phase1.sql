@@ -268,15 +268,19 @@ begin
   end;
 
   -- ================================================= snapshot completeness
+  -- Phase 1 must NOT constrain completeness against resolved_qty: the 0012
+  -- engine writes complete snapshots without it, and only Phase 5 teaches it
+  -- to populate the column. This check asserts the ABSENCE of that constraint,
+  -- so that re-adding it early fails loudly here instead of in production.
   begin
     insert into cost_snapshots (account_id,business_id,recipe_id,costing_method,
                                 is_complete,required_inputs,priced_inputs)
       values (aA,bA,rA,'weighted_average',true,1,1);
-    insert into t2_result values (23,'design','a complete snapshot needs a resolved qty',
-      'FAIL','completeness was claimed with nothing behind it');
+    insert into t2_result values (23,'design','a complete snapshot still writes without resolved_qty',
+      'PASS','chk_complete_requires_resolution is correctly deferred to 0025');
   exception when others then
-    insert into t2_result values (23,'design','a complete snapshot needs a resolved qty',
-      'PASS', sqlerrm);
+    insert into t2_result values (23,'design','a complete snapshot still writes without resolved_qty',
+      'FAIL','PHASE 1 BROKE THE COSTING ENGINE: '||sqlerrm);
   end;
 
   insert into cost_snapshots (account_id,business_id,recipe_id,costing_method,

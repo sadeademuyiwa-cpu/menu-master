@@ -82,8 +82,8 @@ begin
   insert into auth.users(id,email) values (gen_random_uuid(),'cashierB@t') returning id into v_cashb;
   insert into auth.users(id,email) values (gen_random_uuid(),'kitchenA@t') returning id into v_kitcha;
 
-  oA := fn_create_account_and_business('Slim Olobe Group','Slim Olobe Kitchen','soup_seller',v_ua);
-  oB := fn_create_account_and_business('Abuja Foods','Abuja Kitchen','restaurant',v_ub);
+  oA := fn_create_account_and_business('Slim Olobe Group','Slim Olobe Kitchen','soup_seller',v_ua, p_idempotency_key => gen_random_uuid()::text);
+  oB := fn_create_account_and_business('Abuja Foods','Abuja Kitchen','restaurant',v_ub, p_idempotency_key => gen_random_uuid()::text);
   v_acca := (oA->>'account_id')::uuid; v_biza := (oA->>'business_id')::uuid;
   v_accb := (oB->>'account_id')::uuid; v_bizb := (oB->>'business_id')::uuid;
 
@@ -282,7 +282,7 @@ begin
 
   -- Escalation by onboarding: mint an owner membership for someone else
   r := attack(f.cashb, format(
-    'select fn_create_account_and_business(''X'',''Y'',''other'',%L)', f.ua));
+    'select fn_create_account_and_business(''X'',''Y'',''other'',%L, p_idempotency_key => gen_random_uuid()::text)', f.ua));
   perform g('ATTACK D','D6 cashier mints owner membership for another user',
     r like 'BLOCKED%', r);
 
@@ -350,7 +350,7 @@ begin
   -- The self-serve trial carve-out must not become a paid-plan hole
   declare newu2 uuid; acc2 uuid; begin
     insert into auth.users(id,email) values (gen_random_uuid(),'greedy@t') returning id into newu2;
-    r := attack_val(newu2, 'select (fn_create_account_and_business(''G'',''G Kitchen'',''other'',null,''NGN'',''trading''))->>''account_id''');
+    r := attack_val(newu2, 'select (fn_create_account_and_business(''G'',''G Kitchen'',''other'',null,''NGN'',''trading'', p_idempotency_key => gen_random_uuid()::text))->>''account_id''');
     perform g('ATTACK E','E7 self-signup cannot mint a PAID plan', r like 'BLOCKED%', r);
   end;
 
@@ -490,7 +490,7 @@ begin
   -- Onboarding still works for a brand new user
   declare newu uuid; begin
     insert into auth.users(id,email) values (gen_random_uuid(),'fresh@t') returning id into newu;
-    r := attack_val(newu, 'select (fn_create_account_and_business(''New Co'',''New Kitchen'',''baker''))->>''ingredients_added''');
+    r := attack_val(newu, 'select (fn_create_account_and_business(''New Co'',''New Kitchen'',''baker'', p_idempotency_key => gen_random_uuid()::text))->>''ingredients_added''');
     perform g('REGRESS','R8 new user can self-onboard', r like 'ALLOWED: 1%', r);
   end;
 end $$;

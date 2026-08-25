@@ -26,7 +26,7 @@ declare
   rice uuid; tom uuid; u_kg uuid; u_g uuid;
 begin
   insert into auth.users (id,email) values (gen_random_uuid(),'closure@test.local') returning id into u;
-  onboard := fn_create_account_and_business('Closure Group','Closure Kitchen','soup_seller', u);
+  onboard := fn_create_account_and_business('Closure Group','Closure Kitchen','soup_seller', u, p_idempotency_key => gen_random_uuid()::text);
   acc := (onboard->>'account_id')::uuid;  biz := (onboard->>'business_id')::uuid;
 
   select id into u_kg from units where account_id is null and code='kg';

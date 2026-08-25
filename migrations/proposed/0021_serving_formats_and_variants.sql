@@ -8,8 +8,8 @@
 --            baseline.
 --
 -- WHAT THIS MIGRATION DOES
---   Adds the four Gate 2 tables, one enum, ten nullable columns, two
---   constraints on existing tables, seven trigger functions and twelve
+--   Adds the four Gate 2 tables, one enum, ten nullable columns, one
+--   constraint on an existing table, seven trigger functions and twelve
 --   policies. That is all.
 --
 -- WHAT IT DELIBERATELY DOES NOT DO
@@ -72,13 +72,6 @@ begin
   if not exists (select 1 from pg_enum e join pg_type t on t.oid=e.enumtypid
                   where t.typname='unit_kind' and e.enumlabel='container') then
     raise exception '0021 preflight FAILED: unit_kind lacks container (0002 missing).';
-  end if;
-
-  if (select count(*) from cost_snapshots where is_complete) <> 0 then
-    raise exception '0021 preflight FAILED: % complete snapshot(s) exist. '
-                    'chk_complete_requires_resolution cannot be added VALID. '
-                    'Add it NOT VALID and backfill resolved_qty first.',
-                    (select count(*) from cost_snapshots where is_complete);
   end if;
 
   raise notice '0021 preflight OK on the 40/44/93 baseline.';
@@ -275,11 +268,20 @@ alter table order_lines
 alter table sales_entries
   add column variant_id uuid references recipe_variants(id) on delete set null;
 
--- A snapshot may not claim completeness without a resolved quantity behind it.
--- Preflight proved zero complete snapshots exist, so this is added VALID.
-alter table cost_snapshots
-  add constraint chk_complete_requires_resolution
-  check (not is_complete or resolved_qty is not null);
+-- DEFERRED TO PHASE 5 (0025): chk_complete_requires_resolution
+--
+--   Design section 3 places `is_complete implies resolved_qty is not null` on
+--   cost_snapshots. It CANNOT be added in Phase 1, and the replica proved why:
+--   fn_compute_recipe_cost_snapshot (0012) writes complete snapshots without
+--   resolved_qty, because resolved_qty is a Gate 2 column that only Phase 5
+--   teaches the engine to populate. Adding the constraint now makes every
+--   completely-costed recipe fail to snapshot -- suite 001 dies at line 173.
+--
+--   Preflight row 31 counted EXISTING complete snapshots (zero in production)
+--   and so did not catch this: the breakage is in FUTURE writes, not stored
+--   rows. Phase 1 must be zero behavioural change, and this constraint is not.
+--
+--   It belongs in 0025, added in the same migration that repoints the engine.
 
 -- NOTE ON chk_variant_matches_recipe
 --   Design section 3 asks for a constraint asserting that a sale's variant

@@ -44,8 +44,8 @@ begin
   insert into auth.users (id, email) values
     (gen_random_uuid(), 'manager@abuja.test') returning id into uM;
 
-  onboardA := fn_create_account_and_business('Slim Olobe Group','Slim Olobe Kitchen','soup_seller', uA);
-  onboardB := fn_create_account_and_business('Abuja Foods','Abuja Kitchen','restaurant', uB);
+  onboardA := fn_create_account_and_business('Slim Olobe Group','Slim Olobe Kitchen','soup_seller', uA, p_idempotency_key => gen_random_uuid()::text);
+  onboardB := fn_create_account_and_business('Abuja Foods','Abuja Kitchen','restaurant', uB, p_idempotency_key => gen_random_uuid()::text);
 
   accA := (onboardA->>'account_id')::uuid;  bizA := (onboardA->>'business_id')::uuid;
   accB := (onboardB->>'account_id')::uuid;  bizB := (onboardB->>'business_id')::uuid;

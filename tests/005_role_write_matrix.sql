@@ -61,7 +61,7 @@ begin
   insert into auth.users (id,email) values (gen_random_uuid(),'m_sales@t.local')      returning id into sal;
   insert into auth.users (id,email) values (gen_random_uuid(),'m_accountant@t.local') returning id into acc_u;
 
-  onboard := fn_create_account_and_business('Matrix Group','Matrix Kitchen','restaurant', own);
+  onboard := fn_create_account_and_business('Matrix Group','Matrix Kitchen','restaurant', own, p_idempotency_key => gen_random_uuid()::text);
   acc := (onboard->>'account_id')::uuid;  biz := (onboard->>'business_id')::uuid;
 
   insert into memberships (account_id,business_id,user_id,role) values
