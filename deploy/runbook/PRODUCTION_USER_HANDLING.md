@@ -37,3 +37,29 @@ stage of this project until the owner says otherwise in writing.
 - If they turn out to be real prospects, they signed up and got nothing. That
   is a customer-communication question for the owner, not a technical one, and
   it is recorded here so it is not forgotten.
+
+---
+
+## Addendum — acceptance-test user, 2026-08-24
+
+A sixth user was created through Supabase Auth to prove the post-0019c signup
+path. Its creation was itself the acceptance evidence: before 0019c the same
+action failed with 42P01.
+
+| | Value |
+|---|---|
+| UUID | `cd04bc73-d918-4ccb-849e-714e7472a047` |
+| Created | 2026-08-24 23:39:01 |
+| Memberships / profiles | 0 / 0 |
+| Referenced by any public table | no |
+
+Approved for deletion by the owner, via the Supabase Dashboard admin API
+rather than SQL: `auth.users` is owned by `supabase_auth_admin`, and eight
+auth-schema tables reference it — `identities`, `mfa_factors`,
+`oauth_authorizations`, `oauth_consents`, `one_time_tokens`, `sessions`,
+`webauthn_challenges`, `webauthn_credentials`. A raw DELETE would either be
+refused or strand rows GoTrue still believes exist.
+
+**The five originals — `2026-08-10` to `2026-08-14` — remain under the standing
+instruction above: not deleted, modified, merged, reset or altered.** They were
+verified untouched immediately before this deletion.
