@@ -11,6 +11,24 @@
 -- PASS only if every '>>>' row reads PASS.
 -- ============================================================================
 
+-- The ledger row count is read through dynamic SQL. A static reference to
+-- onboarding_requests would fail at PARSE time on a database where 0020 did
+-- not apply -- returning no rows at all instead of STOPping, which is exactly
+-- the situation where this gate is most needed as a diagnostic.
+do $gate$
+declare v_n text;
+begin
+  if exists (select 1 from pg_class c
+              where c.relnamespace = 'public'::regnamespace
+                and c.relname = 'onboarding_requests' and c.relkind = 'r') then
+    execute 'select count(*)::text from onboarding_requests' into v_n;
+  else
+    v_n := 'TABLE ABSENT';
+  end if;
+  perform set_config('mm.ledger_rows', v_n, false);
+end
+$gate$;
+
 select * from (
 
   -- 1. THE LEDGER ------------------------------------------------------------
@@ -70,8 +88,8 @@ select * from (
               then 'PASS' else 'STOP' end
   union all
   select '1 ledger', '>>> empty (0020 must not have provisioned anything)',
-         (select count(*)::text from onboarding_requests), '0',
-         case when (select count(*) from onboarding_requests) = 0
+         coalesce(current_setting('mm.ledger_rows', true), 'not collected'), '0',
+         case when coalesce(current_setting('mm.ledger_rows', true), '') = '0'
               then 'PASS' else 'STOP' end
 
   -- 2. LEDGER GRANTS ---------------------------------------------------------
