@@ -1,7 +1,7 @@
 # GATE 2 — SERVING FORMATS AND RECIPE VARIANTS
 
-**Status: migrations `0021`–`0025` COMPLETE and verified in production.
-One security fix, `0026`, is authored and awaiting execution.**
+**Status: GATE 2 CLOSED. Migrations `0021`–`0026` complete and verified in production.**
+
 
 ## 1. What was deployed
 
@@ -12,6 +12,7 @@ One security fix, `0026`, is authored and awaiting execution.**
 | `0023` | 3 — overhead basis (D1) | **49 / 48 / 105** |
 | `0024` | 4 — variant costing + cutover gate | **52 / 49 / 105** |
 | `0025` | 5 — repoint | **53 / 49 / 105 / 5 / 5 / 23 / t** |
+| `0026` | security fix | composite variant FKs: **4 / 0** |
 
 Final production state: **53 `fn_*` · 49 relations · 105 policies · anon on 5
 reference tables and 0 functions · 5 protected auth users · 0 tenant rows.**
@@ -59,7 +60,8 @@ authorization inherited.
 3. **A cross-tenant reference hole.** `0021` added `variant_id` to four tables
    as a plain single-column FK while 76 other references use the Gate 1
    composite pattern. Attack 8 proved account B could attach account A's
-   variant to its own price row. Closed by `0026`.
+   variant to its own price row. **Closed by `0026`, verified 4 / 0 in
+   production.**
 
 Nothing about the first two was found by reading the SQL. All three came from
 running it.
