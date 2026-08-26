@@ -11,7 +11,9 @@
 --   1. v_price_check        becomes variant-aware
 --   2. fn_freeze_sale_cost  freezes the VARIANT cost when a sale names one
 --   3. cost_snapshots       gains chk_complete_requires_resolution, scoped to
---                           variant-keyed rows (see the note in section 3)
+--                           variant-keyed rows -- and REPAIRS the unscoped
+--                           version if the superseded 0021 build left one
+--                           behind (see the note in section 3)
 --
 -- THE COMPATIBILITY PROPERTY, enforced by the self-check below
 --   A recipe with NO variants produces exactly the v_price_check row it
@@ -203,9 +205,48 @@ $$;
 --    Scoped to variant-keyed rows the rule is exactly what the design means: a
 --    VARIANT claiming completeness must have resolved the quantity it sells.
 -- ----------------------------------------------------------------------------
-alter table cost_snapshots
-  add constraint chk_complete_requires_resolution
-  check (variant_id is null or not is_complete or resolved_qty is not null);
+--    THE SUPERSEDED 0021 BUILD may have left the UNSCOPED constraint behind.
+--    That build (sha256 48a43032...) differed from the corrected one in exactly
+--    one statement: this constraint, added without the variant_id scope. The
+--    0021 verification query could not tell the two builds apart, because a
+--    CHECK constraint changes none of the counts it reported.
+--
+--    Where it is present unscoped it is a LIVE LATENT DEFECT: the first recipe
+--    that costs completely fails to snapshot. This migration repairs it.
+do $$
+declare v_def text; v_blocked int;
+begin
+  select pg_get_constraintdef(c.oid) into v_def
+    from pg_constraint c
+   where c.conname = 'chk_complete_requires_resolution'
+     and c.conrelid = 'public.cost_snapshots'::regclass;
+
+  if v_def is null then
+    execute 'alter table cost_snapshots
+               add constraint chk_complete_requires_resolution
+               check (variant_id is null or not is_complete
+                      or resolved_qty is not null)';
+    raise notice '0025: completeness constraint added, scoped to variant rows.';
+
+  elsif v_def like '%variant_id%' then
+    raise notice '0025: completeness constraint already scoped correctly; left as is.';
+
+  else
+    -- refuse to widen silently if real rows depend on the stricter form
+    select count(*) into v_blocked from cost_snapshots
+     where is_complete and resolved_qty is null and variant_id is null;
+    raise notice '0025: found the UNSCOPED constraint left by the superseded '
+                 '0021 build. Replacing it with the scoped form. % recipe-level '
+                 'snapshot(s) were being blocked by it.', v_blocked;
+    execute 'alter table cost_snapshots
+               drop constraint chk_complete_requires_resolution';
+    execute 'alter table cost_snapshots
+               add constraint chk_complete_requires_resolution
+               check (variant_id is null or not is_complete
+                      or resolved_qty is not null)';
+  end if;
+end
+$$;
 
 -- ----------------------------------------------------------------------------
 -- 4. v_price_check, repointed
@@ -329,8 +370,15 @@ begin
     raise exception '0025 self-check FAILED: the sale freeze was not repointed.';
   end if;
 
-  if not exists (select 1 from pg_constraint where conname='chk_complete_requires_resolution') then
-    raise exception '0025 self-check FAILED: chk_complete_requires_resolution missing.';
+  -- the constraint must end up SCOPED, whichever state we started from
+  if not exists (
+        select 1 from pg_constraint c
+         where c.conname='chk_complete_requires_resolution'
+           and c.conrelid='public.cost_snapshots'::regclass
+           and pg_get_constraintdef(c.oid) like '%variant_id%') then
+    raise exception '0025 self-check FAILED: chk_complete_requires_resolution is '
+                    'missing or still unscoped. An unscoped constraint breaks the '
+                    'recipe engine on the first complete costing.';
   end if;
 
   -- the deprecated legacy columns must still be there
