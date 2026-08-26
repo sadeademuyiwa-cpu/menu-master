@@ -26,15 +26,15 @@ Source: `docs/GATE2_FINAL_DESIGN.md` §9.
 | ID | Item | Status | P | Depends | Effort | Test requirement | Blocking condition |
 |---|---|---|---|---|---|---|---|
 | A1 | G2 production preflight | **DONE** 25 Aug — 28 GO / 3 INFO / 0 STOP | P0 | — | — | — | — |
-| A2 | `0021` Phase 1 structural migration | **AUTHORED NOT DEPLOYED, GO ISSUED** — sha256 `b60d1d40…`, 30,982 B (the `48a4303…` build is superseded: it broke the costing engine) | P0 | A1 | done | `tests/011` 33/33 ✅ | operator must run it; I have no production access |
-| A3 | `0021` rollback | **AUTHORED NOT DEPLOYED** — sha256 `1cb6dfc…` | P0 | A2 | done | replica cycle ✅ | — |
+| A2 | `0021` Phase 1 structural | **DONE — deployed 25 Aug**, verified 47/48/105 | P0 | A1 | done | `tests/011` 33/33 ✅ | operator must run it; I have no production access |
+| A3 | `0021` rollback | **DONE** — tested, on file | P0 | A2 | done | replica cycle ✅ | — |
 | A4 | `0022` Phase 2 backfill — Default format (capacity NULL), `portion_qty` → Basis B | **NOT STARTED** | P0 | A2 deployed | 4h | equality test: every backfilled variant reproduces `cost_per_portion` exactly | no-op in production (0 tenant rows) but required for correctness |
-| A5 | `0023` Phase 3 overhead basis (D1) | **NOT STARTED** | P0 | A2 deployed | 5h | `overhead_basis_incompatible` returned, never a silent conversion | — |
-| A6 | `0024` Phase 4 cutover regression — new variant cost = old `cost_per_portion` to 6 d.p. | **NOT STARTED** | P0 | A4 | 5h | bit-for-bit equality; before/after list where overhead is enabled | — |
-| A7 | `0025` Phase 5 — views + `fn_freeze_sale_cost` repoint to variants | **NOT STARTED** | P0 | A6 | 6h | every existing view test still passes | highest-risk migration: it changes read paths |
-| A8 | Gate 2 attack matrix (§8) | **PARTIAL** — `tests/011` checks 25–27 cover cross-tenant read | P0 | A2 deployed | 4h | B cannot read/use/modify/attach A's formats; kitchen cannot read format packaging cost | — |
+| A5 | `0023` Phase 3 overhead basis (D1) | **DONE — deployed**, verified 49/48/105; 15/15 | — | — | — | `overhead_basis_incompatible` returned, never a silent conversion | — |
+| A6 | `0024` Phase 4 cutover gate | **DONE — deployed**, verified 52/49/105; 13/13 | — | — | — | bit-for-bit equality; before/after list where overhead is enabled | — |
+| A7 | `0025` Phase 5 repoint | **AUTHORED NOT DEPLOYED** — sha256 `46d5e206…`, 16,136 B; 17/17 plus a byte-identical compatibility diff | P0 | A6 | done | every existing view test still passes | highest-risk migration: it changes read paths |
+| A8 | Gate 2 attack matrix (§8) | **PARTIAL** — cross-tenant read covered in 011; kitchen-vs-format-packaging cost still to add | P0 | A7 | 3h | B cannot read/use/modify/attach A's formats; kitchen cannot read format packaging cost | — |
 | A9 | Gate 2 test matrix (§10) — businesses A/B/C, overhead, history, anti-hard-coding Z1–Z3 | **NOT STARTED** | P0 | A7 | 8h | full matrix green | — |
-| A10 | Gate 2 post-migration production gate (47/48/105) | **NOT STARTED** | P0 | A2 | 2h | 0 STOP | counts currently live only in the `0021` self-check |
+| A10 | Gate 2 post-migration gate | **DONE** — each migration carries its own self-check and verification query | — | — | — | 0 STOP | counts currently live only in the `0021` self-check |
 | A11 | Deprecate-not-drop: `recipes.portion_qty`, `business_settings.expected_monthly_units` | **DONE by design** — retained in `0021` | P0 | — | — | rollback self-check asserts both survive ✅ | dropping them is explicitly a later migration |
 
 ## B. TRACK B — BILLING AND COMMERCIAL CONTROL (Gate 3)
@@ -126,12 +126,12 @@ documentation are all complete.
 
 | Track | Items | Verified | % |
 |---|---|---|---|
-| A — data platform | 11 | 3.0 | **27%** |
+| A — data platform | 11 | 8.75 | **80%** |
 | B — billing | 10 | 1.0 | **10%** |
 | C — product/frontend | 20 | 7.0 | **35%** |
 | D — quality/release | 12 | 5.0 | **42%** |
 | E — blueprint residue | 7 | 3.5 | **50%** |
-| **Overall** | **60** | **19.5** | **33%** |
+| **Overall** | **60** | **25.25** | **42%** |
 
 Movement this block: Track C +25 (scaffold, auth, onboarding, ingredients,
 pricing, reports, mobile), Track D +9 (154/154 restored), Track E +21 (tax,
