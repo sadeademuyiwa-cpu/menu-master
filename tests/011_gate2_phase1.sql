@@ -370,10 +370,21 @@ begin
                                   'fn_assert_sale_variant_valid',
                                   'fn_assert_no_packaging_double_count')) = 7
          then 'PASS' else 'FAIL' end, v_fns::text||' fn_* in total');
-  insert into t2_result values (32,'counts','relations = 48',
-    case when v_rels=48 then 'PASS' else 'FAIL' end, v_rels::text);
-  insert into t2_result values (33,'counts','policies = 105',
-    case when v_pols=105 then 'PASS' else 'FAIL' end, v_pols::text);
+  -- Same lesson as check 31: assert the Phase 1 OBJECTS, not a global total
+  -- that later phases legitimately move. 0024 adds a view, taking relations to
+  -- 49; that is not a Phase 1 regression.
+  insert into t2_result values (32,'counts','all 4 Phase 1 tables present',
+    case when (select count(*) from pg_class
+                where relnamespace='public'::regnamespace and relkind='r'
+                  and relname in ('serving_formats','recipe_variants',
+                                  'serving_format_packaging','serving_format_changes')) = 4
+         then 'PASS' else 'FAIL' end, v_rels::text||' relations in total');
+  insert into t2_result values (33,'counts','the 12 Phase 1 policies present',
+    case when (select count(*) from pg_policies
+                where schemaname='public'
+                  and tablename in ('serving_formats','recipe_variants',
+                                    'serving_format_packaging','serving_format_changes')) = 12
+         then 'PASS' else 'FAIL' end, v_pols::text||' policies in total');
 end
 $$;
 
