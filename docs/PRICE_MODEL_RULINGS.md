@@ -680,7 +680,7 @@ column split was for.
 | `current_period_end` is NULL | `unknown_period_end` — see D-3; never assumed |
 | `total_days <= 0` | `degenerate_period` |
 | Subscription is `past_due` | `upgrade_while_past_due` — money is already owed (D-16) |
-| Computed charge below the minimum | see D-14 |
+| Computed charge below the provider minimum | **not a refusal** — waive, grant the upgrade, record the calculated amount and the waiver reason (D-14) |
 
 Every one of these refuses rather than substituting a default. A prorated charge
 computed from a guessed period end would be a fabricated invoice.
@@ -735,13 +735,14 @@ difference, so nobody games the boundary. The second is what D-14 is about.
 
 | | Decision | What it blocks | Why it cannot be defaulted |
 |---|---|---|---|
-| **1** | **D-13 — Paystack mechanics and interval tokens.** Does Paystack support monthly, quarterly and annual recurring plans directly, and what are its exact interval tokens? | **`0031`** | This is structural, not cosmetic. If a cycle is not natively supported, §7 changes shape before anything is built. Tokens must be read from Paystack's documentation, never guessed. |
+| **1** | **D-13 — researched 27 Aug 2026, still OPEN.** The structural question **cleared**: monthly, quarterly and annual are all native Paystack intervals, so §7 stands. What remains is (a) primary-source verification — every Paystack host is blocked by this environment's egress proxy, so nothing is verbatim-confirmed — and (b) two unknowns that would change design: whether Paystack retries a failed subscription charge (**sources conflict**), and whether a subscription can be created from a stored authorisation with no customer action. Full findings: **`docs/D13_PAYSTACK_RESEARCH.md`**. | **seeding** `0031`, no longer its shape | Twelve plan codes must not be created from second-hand tokens. Note `annual` → Paystack's **`annually`**: the `provider_interval` column is not optional. |
 | **2** | **D-1 — how time-triggered work runs.** `pg_cron`, a scheduled Edge Function, or external. | **`0033`** and every deadline: lapse, revocation, scheduled downgrade, boundary plan switch, pre-charge notification | There is no scheduler at all today. A revocation must be *stamped once* and a notification *sent*; neither is a query result. |
 | **3** | **D-4 — approve R5, and set the reversal window.** | **`0032`** — it decides `founding_members`' columns | The table cannot be built twice. A ₦90,000 annual first payment sharpens it. |
 | **4** | **D-3 — grace when `current_period_end` is NULL.** Proposed: stay entitled, raise a reconciliation item. | the `fn_account_is_entitled` change, and §10.4's `unknown_period_end` guard | It decides whether a real person loses access over missing data. |
-| **5** | **D-14 — minimum prorated charge.** Below what figure is an upgrade charge waived rather than billed? Proposed: waive below ₦100 or the provider minimum, whichever is higher; grant the upgrade; record the waiver. | the upgrade path in `0033` | ₦131.50 and ₦4.50 are both arithmetically correct and commercially different. Paystack also has its own minimum. |
+| **5** | **D-14 — RULED. Waive below the provider's minimum.** Where a prorated upgrade charge falls below the payment provider's permitted minimum transaction amount, **waive the charge, grant the upgrade, and write an auditable record** carrying the calculated amount and the reason for the waiver. **₦100 is not hard-coded** — the threshold reads the provider's documented minimum, and becomes a fixed figure only if Paystack's documentation establishes one or a later commercial rule sets one. Open only on the *value*: D-13 research found **no documented hard minimum**, only a ₦50 *recommendation* for a first recurring charge (U-3). | the upgrade path in `0033` | The rule is settled; the number is not. Storing it as configuration rather than a literal is what keeps it correct when the provider changes it. |
 | **6** | **D-5 and D-6 — the Level 2 boundary, and whether 1/1/3 businesses, 2/3/10 users, 20/∞/∞ recipes is the packaging you intend to sell.** | the R7 enforcement migration | Nothing in the repository defines what `level = 2` unlocks. It is the difference between the two paid products. |
-| **7** | **D-9 — email provider and the R8 notification set.** | the R8 notification migration | No transactional email exists beyond Supabase Auth's own. |
+| **7** | **D-17 — NEW, raised by the D-13 research.** §10's prorated charge needs `charge_authorization`, which needs `authorization_code` — the credential `BILLING_INTEGRATION_DESIGN.md` §7 calls *"the single most important line in this document"* and `lib.ts` strips before storage. Options: **(a)** prorated upgrades go through a fresh checkout with the customer present, credential never stored; **(b)** store it in a separate service-role-only table; **(c)** keep redaction absolute and abandon server-initiated proration. | the upgrade path in `0033` | Both current positions are correct and they cannot both stand. (a) also composes with the standing rule against changing a billing amount without authorisation. |
+| **8** | **D-9 — email provider and the R8 notification set.** | the R8 notification migration | No transactional email exists beyond Supabase Auth's own. `invoice.create` arrives **3 days before** each payment, which supplies the pre-charge trigger R8 needs without a scheduler. |
 
 ### Blocks launch, not the migrations
 
@@ -761,6 +762,7 @@ difference, so nobody games the boundary. The second is what D-14 is about.
 | — | What happens at trial recipe 21 | Product copy, not schema. `limit_value = 20` is already stored. |
 | — | The `monthly_equivalent` reporting view | Reporting convenience; no other component depends on it. |
 
-**The critical path is D-13 → D-1.** D-13 can change the shape of `0031`, and D-1
-gates everything with a deadline attached. The rest can be settled while those two
-are being answered.
+**The critical path is now D-1.** D-13's structural risk cleared — all three
+cycles are native — so `0031`'s shape is safe; what D-13 still gates is *seeding*
+it with twelve plan codes, which cannot happen on second-hand tokens. D-1 gates
+everything with a deadline attached and nothing about it has moved.
