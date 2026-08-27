@@ -237,10 +237,13 @@ evidence. Proposed:
 | **T−3 days** | trial ending — what happens next, and the price |
 | **T+0**, only if unconverted | trial ended — data stays readable, here is how to subscribe |
 
-T−3 mirrors Paystack's own `invoice.create` lead time, so a customer sees the
-same warning interval whether the money is about to move or the trial is about to
-close. Both are queued by J5, both use due-or-overdue predicates, and neither
-depends on a webhook. **Awaiting approval before the enumeration freezes.**
+**RULED — approved in principle.** Timing is owned entirely by Menu Master NG:
+`trial_ends_at` is ours, set by `0020` at signup, and **no Paystack evidence is
+assumed or required** for it. T−3 matching Paystack's `invoice.create` lead time
+is a deliberate *consistency of customer experience* — the same warning interval
+whether money is about to move or a trial is about to close — not a dependency.
+Both notices are queued by J5 on due-or-overdue predicates and neither waits on a
+webhook.
 
 ---
 

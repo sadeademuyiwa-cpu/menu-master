@@ -398,7 +398,9 @@ do. `pg_net` 0.20.4 is also available and is deliberately **not** adopted.
 
 ### BLOCKER — implementation cannot start
 
-**V-1 is closed** (§9) and no longer appears here.
+**All prior blockers are now ruled.** What remains is owner-run verification
+(D-3's query), external verification (D-7, U-3/U-4/U-5, V-3/V-4/V-5), commercial
+values (D-2, D-8), and the newly-raised D-20.
 
 | | Item |
 |---|---|
