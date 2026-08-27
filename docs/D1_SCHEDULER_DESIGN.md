@@ -412,6 +412,8 @@ values (D-2, D-8), and the newly-raised D-20.
 
 | | Item |
 |---|---|
+| **D-20** | **RULED — server-owned quote, hosted Paystack checkout.** `docs/D20_CHECKOUT.md`. Adds `checkout_quotes`, whose amount is a foreign key to an immutable `plan_prices` row rather than a copied figure. Raises **D-21**, **D-22**, **V-6**. |
+| **V-7** | **`recipe_prices` entitlement gating — verification item, not an asserted defect.** If read-only inspection confirms it sits outside the entitlement write policies, its Level 1 write protection folds into `0034`. Not to be changed on inference. |
 | **D-7** | VAT treatment, confirmed by a Nigerian tax adviser. Schema is NULL-safe; no charge may be taken until it is answered. |
 | **D-2** | Six standard prices. A standard row is an INSERT — no migration changes. Blocks customer 101 and every lapsed founder's renewal. |
 | **D-8** | Twelve Paystack plan codes, created and paired. |
