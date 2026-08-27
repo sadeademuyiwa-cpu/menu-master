@@ -26,6 +26,13 @@ trial duration changes explicitly — grace is not a disguise for it.
 
 ## 2. The single reconciled definition
 
+**Revised 27 Aug 2026 after the owner declined blanket Case 11.** The earlier
+draft carried `current_period_end is null` as a **standalone first disjunct** —
+which is precisely the blanket rule that was rejected: it granted write access to
+*any* status with a missing boundary. It has been dissolved into the per-status
+branches, so the predicate is now a **whitelist of four named states** and
+nothing else can match.
+
 ```sql
 create or replace function fn_account_is_entitled(p_account_id uuid)
 returns boolean
@@ -35,30 +42,34 @@ as $$
     select 1 from subscriptions s
      where s.account_id = p_account_id
        and (
-         -- (1) ANOMALY TOLERANCE (D-3). NOT a valid state.
-         --     Missing data never withdraws entitlement from someone who may
-         --     legitimately have paid. Every match carries an open
-         --     null_period_end reconciliation item. Once the NOT NULL
-         --     constraint lands (§4) no new row can reach this branch.
-         s.current_period_end is null
+         -- TRIALING. Exactly the advertised days, no grace (D-26).
+         -- A NULL boundary FAILS CLOSED: nothing was ever paid, so there is no
+         -- evidence of entitlement to protect, and failing open would recreate
+         -- the unlimited trial D-26 exists to abolish.
+            (s.status = 'trialing' and s.current_period_end > now())
 
-         -- (2) TRIAL (D-26). Exactly the advertised days. No grace.
-         or (s.status = 'trialing' and s.current_period_end > now())
+         -- ACTIVE. Status-only, deliberately: a stale row is OUR gap, and
+         -- withdrawing here would cut off every customer whose renewal webhook
+         -- runs late. A NULL boundary is therefore tolerated as a consequence,
+         -- not as a special case. J6 reconciles.
+         or  s.status = 'active'
 
-         -- (3) PAID AND EXPECTED TO RENEW. Deliberately status-only.
-         --     A stale row is OUR gap, not the customer's. Withdrawing here
-         --     would cut off every customer whose renewal webhook is minutes
-         --     late. J6 reconciles; see §3 case 2.
-         or s.status = 'active'
-
-         -- (4) DUNNING GRACE (R4/D-11). current_period_end is NOT advanced on
-         --     a failed renewal, so this is 7 days past the last paid-through
-         --     date. Interval read from configuration -- see §5.
+         -- PAST_DUE. Paid previously, renewal failed. Grace is 7 days past the
+         -- last paid-through date (R4/D-11, read from configuration -- §5).
+         -- NULL fails OPEN: they have paid, so the missing boundary is the
+         -- anomaly, not the absence of entitlement.
          or (s.status = 'past_due'
-             and s.current_period_end + <grace_interval> > now())
+             and (s.current_period_end is null
+                  or s.current_period_end + <grace_interval> > now()))
 
-         -- (5) CANCELLED BUT PAID THROUGH.
-         or (s.status = 'cancelled' and s.current_period_end > now())
+         -- CANCELLED. Paid through, or -- where the boundary is missing --
+         -- only where provider_ref shows the account ever converted.
+         -- A cancelled row with no provider_ref is an unconverted trial:
+         -- nothing was ever paid, so nothing is protected.
+         or (s.status = 'cancelled'
+             and (s.current_period_end > now()
+                  or (s.current_period_end is null
+                      and s.provider_ref is not null)))
        )
   );
 $$;
@@ -71,11 +82,22 @@ Signature unchanged, so **none of the 60 write policies is touched**. Replaced
 
 Every comparison is **strict `>`**. At exactly `current_period_end` the account is
 **not** entitled: access ends *at* the boundary, not after it. Equality never
-remains entitled, for trials, for cancellations, and for the end of grace.
+remains entitled — for trials, cancellations, or the end of grace.
 
 (In practice `now()` carries microsecond resolution, so exact equality is
 effectively unreachable — but the semantics are defined rather than left to
 chance.)
+
+### 2.2 Unknown statuses cannot manufacture entitlement
+
+`0017` installs `ck_subscriptions_status check (status in ('trialing','active',
+'past_due','cancelled'))`, so a fifth value **cannot exist** in the table.
+
+But the predicate no longer relies on that. Because it is a whitelist of four
+named branches, **an unrecognised status matches nothing and fails closed by
+construction** — not by a rule someone must remember to add. A future migration
+that widened the CHECK without touching this function would grant the new status
+no entitlement at all, which is the safe direction and the correct default.
 
 ---
 
@@ -89,30 +111,57 @@ Expiry never deletes, hides or destroys anything.
 |---|---|:---:|:---:|:---:|
 | 1 | `active`, inside period | **✓** | ✓ | — |
 | 2 | `active`, period expired | **✓** | ✓ | **✓** J6: renewal evidence missing |
-| 3 | `past_due`, inside 7-day grace | **✓** | ✓ | — *(dunning notices, not an anomaly)* |
+| 3 | `past_due`, inside grace | **✓** | ✓ | — *(dunning notices, not an anomaly)* |
 | 4 | `past_due`, beyond grace | ✗ | ✓ | — *(J3 lapses it; expected)* |
 | 5 | `trialing`, before boundary | **✓** | ✓ | — |
 | 6 | `trialing`, **exactly at** boundary | ✗ | ✓ | — |
 | 7 | `trialing`, after boundary | ✗ | ✓ | — |
-| 8 | `trialing`, boundary **NULL** | **✓** | ✓ | **✓** `null_period_end` |
+| 8 | **`trialing`, boundary NULL** | **✗** | ✓ | **✓** `null_period_end` |
 | 9 | `cancelled`, inside paid period | **✓** | ✓ | — |
 | 10 | `cancelled`, outside period | ✗ | ✓ | — |
-| 11 | `active` / `past_due` / `cancelled`, boundary **NULL** | **✓** | ✓ | **✓** `null_period_end` |
-| 12 | **no subscription row at all** | ✗ | ✓ | **✓** — onboarding always creates one, so absence is a real signal, not an unknown (`0028`) |
+| 11a | **`active`, boundary NULL** | **✓** | ✓ | **✓** `null_period_end` |
+| 11b | **`past_due`, boundary NULL** | **✓** | ✓ | **✓** `null_period_end` |
+| 11c | **`cancelled`, boundary NULL, `provider_ref` present** | **✓** | ✓ | **✓** `null_period_end` |
+| 11d | **`cancelled`, boundary NULL, `provider_ref` absent** | **✗** | ✓ | **✓** `null_period_end` |
+| 11e | **unrecognised status** *(unreachable — `ck_subscriptions_status`)* | **✗** | ✓ | **✓** if ever observed |
+| 12 | no subscription row at all | ✗ | ✓ | **✓** — onboarding always creates one, so absence is a real signal, not an unknown (`0028`) |
 
-Case 2 is the one worth defending explicitly. `active` with a passed boundary
-means we have heard neither a success nor a failure — a gap in *our* record.
-Withdrawing entitlement there would cut off a paying customer at every renewal
-where the webhook is delayed by so much as a minute. The exposure is bounded by
-J6's daily sweep, not by the predicate, and that is the approved asymmetry:
-**evidence may extend entitlement automatically; it may never withdraw it.**
+### 3.1 The principle that decides every NULL row
 
-Case 11 applies the D-3 fail-open branch **uniformly across all statuses**,
-including `cancelled`. That is the reading flagged as **D-3 §2.1** and it is
-still awaiting your explicit confirmation — it changes today's behaviour for
-`cancelled` + NULL, which currently fails closed. It is written this way here
-because the alternative is one rule for three statuses and a different one for
-the fourth, which is how the inconsistency arose in the first place.
+The governing rule protects *"a customer who **may legitimately have paid**"*.
+That phrase is the whole test, and applying it literally splits the NULL cases
+rather than blanketing them:
+
+| Status | Ever paid? | NULL boundary |
+|---|---|---|
+| `trialing` | **no** — by definition | **fail closed** (8) |
+| `active` | **yes** — status means a charge succeeded | fail open (11a) |
+| `past_due` | **yes** — *"paid previously; a renewal charge has failed"* | fail open (11b) |
+| `cancelled` | **it depends** — reachable from `active` (paid) **and** from `trialing` (never paid) | fail open **only** with `provider_ref` (11c/11d) |
+
+Case 8 is the correction the owner's challenge produced. A trialing account has
+paid nothing, so failing open protects no purchase — it manufactures a free
+unlimited trial, exactly what D-26 abolishes. **Fail-open is grounded in payment,
+not in sympathy.**
+
+Case 11c/11d needed the evidence test because `cancelled` is the one status
+reachable from both a paid and an unpaid history. `provider_ref` is set to the
+Paystack subscription code on conversion (state machine §3.1) and is the durable
+marker that money once moved. Without it, a cancelled row with no boundary is an
+unconverted trial, and granting it write access would hand indefinite free use to
+every trial that quietly ended.
+
+*(A simpler alternative — fail closed for all `cancelled` + NULL — would match
+today's behaviour but could strip a genuine former payer whose boundary was lost.
+The `provider_ref` test costs one conjunct and keeps the governing principle
+intact. Recommended, but it is a one-line choice if you prefer the simpler form.)*
+
+Case 2 remains as defended: `active` past its boundary means we have heard
+neither success nor failure — a gap in *our* record. Withdrawing there would cut
+off a paying customer at every renewal where the webhook is delayed by so much as
+a minute. Exposure is bounded by J6's daily sweep, not by the predicate, and that
+is the approved asymmetry: **evidence may extend entitlement automatically; it
+may never withdraw it.**
 
 ---
 
@@ -157,6 +206,36 @@ constraint loses access the moment the constraint is added.
 
 D-11 ruled 7 days uniform, as a design assumption. **Recommendation: hold it in
 configuration rather than inline in the function.**
+
+### 5.1 The smallest mechanism that is still auditable
+
+**Not** a settings subsystem. One append-only, effective-dated table — the same
+discipline `plan_prices` already uses, so history is inherent and no separate
+audit table is needed:
+
+```
+billing_config
+  effective_from            timestamptz not null
+  payment_failure_grace     interval    not null
+  authorised_by             text        not null
+  reason                    text        not null
+  primary key (effective_from)
+```
+
+Reading the current row is `order by effective_from desc limit 1` where
+`effective_from <= now()`. Changing the grace is an **INSERT**, never an UPDATE,
+so the previous value, who changed it, when and why are all preserved by
+construction. One authoritative value at any instant; the whole history visible.
+
+Other already-ruled constants can join the same row as they are needed — D-4's
+reversal window, D-14's provider minimum, D-22's quote TTL — without a new table
+each time and without becoming a generic key/value store where a typo makes a
+silent NULL.
+
+The function stays `stable`, so a one-row read is cached within a statement.
+
+**Trial expiry takes no value from this table.** It has no grace, by ruling, and
+there must be no configurable knob that could quietly give it one.
 
 The reason is directly relevant to your instruction not to replace this function
 repeatedly: with a literal, changing 7 → 10 means **replacing
