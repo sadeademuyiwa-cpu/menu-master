@@ -188,37 +188,23 @@ Nothing is deleted at any point.
 
 ---
 
-## 5. Commercial inputs still outstanding before `0031`-`0033`
+## 5. Commercial inputs — superseded
 
-Settled by the owner, 27 Aug 2026:
+The owner ruled on VAT, proration, downgrades, dunning, reversals, plan records,
+feature enforcement, notifications and the subscription unit on 27 Aug 2026.
+Those rulings, the contradictions they expose in the existing schema and state
+machine, the intended feature entitlements, and the minimum decisions still
+required now live in **`docs/PRICE_MODEL_RULINGS.md`**, which is authoritative on
+all commercial questions.
 
-- Founding Costing **₦3,500/month**; Founding Costing + Sales **₦7,500/month**;
-  Free Trial **₦0**, 14 days.
-- Slots permanent, capped at exactly 100, never reused.
-- Status and price entitlement remain structurally separate.
+Two of those rulings touch this document directly:
 
-Still required, and each one blocks part of the price model:
+- **R4 (7-day grace)** supplies the number the lapse rule was missing. Recovery
+  at any point up to `current_period_end + 7 days` stamps nothing. Past it, the
+  entitlement is revoked exactly once and the founding **status** is untouched.
+- **R5 (reversal exception)** proposes a narrow exception to permanence for a
+  *first* payment reversed before the grant should stand. It is designed in
+  `PRICE_MODEL_RULINGS.md` §5 and **not approved yet**. Until it is, the nine
+  behaviours above stand exactly as written.
 
-| # | Open input | Blocks |
-|---|---|---|
-| 1 | **Standard post-Founding-100 price**, per plan | `plan_prices` standard rows; customer 101; anomaly condition 6 |
-| 2 | **VAT treatment of the subscription itself** — is ₦3,500 inclusive or exclusive of 7.5% VAT? D5 ruled on *menu item* tax, not on our own invoice | what `plan_prices.monthly_price` means, and the Paystack plan amount |
-| 3 | **Mid-period plan change money handling** — charge the difference now, or apply the new amount at next renewal; and does a downgrade drop features immediately or at period end | `subscription_changes.amount_applied` semantics in `0033` |
-| 4 | **Dunning outer bound** — days in `past_due` before `cancelled`. `SUBSCRIPTION_STATE_MACHINE.md` §1 already flags this as a commercial decision left open | `fn_revoke_lapsed_founding_prices()` — it is the exact moment entitlement lapses |
-| 5 | **Refund / chargeback against a permanent slot** — a first payment that succeeds and is later reversed currently mints an irreversible founding slot | whether permanence carries a single named exception |
-| 6 | **Paystack plan codes**, per plan per tier (4 codes: costing/trading × founding/standard) | `plan_prices.provider_plan_code`; `0031` cannot be seeded without them |
-
-Not blocking these three migrations, but unresolved and due before 1 September:
-
-- **`plan_features` limits are enforced nowhere.** `costing` = 1 business /
-  3 users, `trading` = 3 businesses / 10 users, `trial` = 1 / 2 / 20 recipes are
-  stored, readable, and read by no code path — the same defect class as C4.
-  Needs both a commercial confirmation of the packaging and an enforcement
-  migration.
-- **No transactional email exists.** Anomaly condition 7, renewal receipts,
-  dunning notices and trial-ending warnings all need one.
-- **How the renewal amount actually changes at Paystack** — plan codes encode the
-  amount, so moving a customer from founding to standard is a cancel-and-
-  re-authorise, not an amount edit.
-- **Commission on gross vs net** — `PRICING_ECONOMICS_DESIGN.md` assumes gross
-  (Option A) and the alternative was never ruled on. Costing engine, not billing.
+`0031`-`0033` remain held.
