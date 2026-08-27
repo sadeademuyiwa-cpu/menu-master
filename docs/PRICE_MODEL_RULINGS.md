@@ -234,85 +234,129 @@ No change to the nine approved behaviours. R4 supplies the missing number:
 
 ---
 
-## 5. R5 — proposed reversal exception, FOR APPROVAL, NOT IMPLEMENTED
+## 5. R5 / D-4 — reversal exception — **APPROVED 27 Aug 2026**
 
-The problem R5 names: a first payment succeeds, the grant is minted, and the
-payment is then reversed. Under permanence that burns a founding number on money
-that never stayed.
+Ruled: a founding slot may return to available capacity when the qualifying first
+payment is refunded, reversed or otherwise invalidated **within the configured
+reversal window**. Initial window **7 days**, stored as **configuration, not a
+literal**, so it can change before launch without touching the schema.
 
-### Proposed state boundary
+**The ruling's central constraint: capacity is reclaimable, identity is not.**
+If #47 is allocated and later voided, the original allocation survives as an
+immutable record marked voided. It is never deleted, and history is never
+rewritten so that a later customer appears to have always been #47.
 
-The grant has two states, and the slot number is issued at the first:
+### 5.1 Why this needs an allocation ledger, not a membership table
+
+The earlier sketch had one row per account with `slot_number` set to NULL on
+void. That **cannot** satisfy the ruling: nulling the number erases the fact that
+this account once held #47, and it leaves nowhere to record that #47 has been
+held twice by two different accounts at two different times.
+
+The model therefore becomes **append-only allocations**, with current membership
+derived from them:
 
 ```
-founding_members
-  ...
-  granted_payment_reference   text not null   -- the exact payment that bought it
-  grant_state                 text not null   -- 'provisional' | 'confirmed' | 'void'
-  confirms_at                 timestamptz not null  -- granted_at + reversal window
+founding_slot_allocations
+  id                          uuid primary key
+  allocation_seq              bigint generated always as identity  -- total order, never reused
+  slot_number                 int  not null check (between 1 and 100)
+  account_id                  uuid not null
+  allocated_at                timestamptz not null
+
+  granted_plan_id, granted_interval, granted_price, currency
+  granting_payment_reference  text not null      -- the exact payment that bought it
+
+  state                       text not null      -- 'provisional' | 'confirmed' | 'void'
+  confirms_at                 timestamptz not null   -- allocated_at + configured window
   confirmed_at                timestamptz
+
   voided_at                   timestamptz
   void_reason                 text
-  slot_number                 int unique      -- set NULL on void; NULL is not unique-constrained
+  voiding_payment_reference   text
+  voided_by                   text               -- 'system' | an operator, for manual voids
+
+  price_entitlement_revoked_at timestamptz
+  revoke_reason               text
+  lapsed_at                   timestamptz
 ```
 
-| State | Meaning |
+Two partial unique indexes carry the whole rule:
+
+```
+unique (slot_number) where state <> 'void'     -- capacity: one live holder per number
+unique (account_id)  where state <> 'void'     -- one live membership per account
+```
+
+### 5.2 The four things the ruling asked to be distinguishable
+
+| | Answered by |
 |---|---|
-| `provisional` | `granted_at` ≤ now < `confirms_at`. The member has their number and their price. |
-| `confirmed` | now ≥ `confirms_at`, or a confirming sweep ran. **Irreversible.** |
-| `void` | the granting payment was reversed while provisional. |
+| **Allocation / sequence history** | the whole table, ordered by `allocation_seq`. Every allocation ever made, void ones included. "Who has ever held #47" is a query. |
+| **Current valid founding membership** | `where state <> 'void'`. "Who holds #47 now" is a different query, and both have answers. |
+| **Founding-capacity consumption** | `count(*) where state <> 'void'`, which the indexes hold at ≤ 100. Allocation takes the **lowest unused number in 1..100 among non-void rows**. |
+| **Reversal / void reason and timestamp** | `voided_at`, `void_reason`, `voiding_payment_reference`, `voided_by`. |
 
-### The exact rule
+`allocation_seq` is never reused even when `slot_number` is. So the sequence of
+events is total and immutable, while the *number* is a reclaimable label. That
+separation is what lets both statements be true at once: #47 was held by A and
+voided, and #47 is now held by B.
 
-A reversal voids the grant **only** when all four hold:
+### 5.3 Automatic void — all four conditions, unchanged
 
-1. the event is a refund or chargeback of `granted_payment_reference` — the
-   **granting** payment, not any later one;
-2. `grant_state = 'provisional'`;
-3. the reversal is for the **full** amount granted;
-4. it is the account's **first and only** successful qualifying payment — if any
-   later payment succeeded, the membership stood on its own and is confirmed.
+A reversal voids automatically **only** when every one holds:
 
-Any reversal failing any one of these leaves founding history **completely
-untouched** and is handled as an ordinary refund. That is R5's "ordinary later
-refunds" case, and it is the default.
+1. it reverses `granting_payment_reference` — the granting payment, not a later one;
+2. `state = 'provisional'`, i.e. **now < `confirms_at`**;
+3. it is for the **full** granted amount;
+4. no other successful qualifying payment exists on the account.
 
-### Audit behaviour
+Any reversal failing any one of these is an **ordinary refund** and leaves
+founding history completely untouched.
 
-- The row is **never deleted**. `grant_state = 'void'`, `voided_at`,
-  `void_reason`, and the reversal's provider reference are stamped.
-- `slot_number` is set NULL and the **number returns to the pool**. The row keeps
-  a permanent `voided_slot_number` copy, so "who briefly held #47" stays
-  answerable.
-- Allocation changes from `max(slot_number) + 1` to **lowest unused number in
-  1..100 among non-void rows**. Under the advisory lock this stays race-free, and
-  the `unique` + `check (between 1 and 100)` backstops still hold.
-- Every void is an open item in `v_billing_reconciliation` until a human closes
-  it.
+### 5.4 Reversal outside the window — flagged, never automatic
 
-### Why this cannot be abused
+Per the ruling: a reversal arriving after `confirms_at`, or against a `confirmed`
+row, **does not reclaim the slot**. It raises a `reconciliation_item` of kind
+`founding_reversal_outside_window` and changes nothing.
 
-- The window is bounded by `confirms_at`, which is set **at grant time** and never
-  extended. It cannot be reopened.
-- Voiding requires a genuine provider reversal event — not an application call.
-- A reversal one second after `confirms_at` does nothing.
-- The cap is arithmetic: at most 100 non-void rows can exist, because allocation
-  refuses when no number in 1..100 is free.
-- A voided grant is not a released seat for the same account to re-take at the
-  founding price: re-subscribing takes the ordinary path, and if a number is free
-  they claim it as a **new** grant, recorded as such.
+A manual void remains possible but is an **explicit, attributed operator action**
+— `void_reason` and `voided_by` recorded — never a silent adjustment to the
+first-100 population. The system will not change that population on its own
+outside the window, and the audit trail names whoever did.
 
-### The one number this needs
+### 5.5 Founding status cannot be recreated by accident
 
-`confirms_at = granted_at + <reversal window>`. **I have not chosen it and will
-not guess it** — it depends on Paystack's and the card schemes' chargeback
-windows, which must be confirmed from Paystack's own documentation and terms
-rather than from memory. Note the trade-off plainly: a long window (matching a
-real chargeback window) means a founding member's status is provisional for
-months; a short window (say 7 days) is honest to the customer but leaves a genuine
-late chargeback holding a slot. **Neither is obviously right — see D-4.**
+Preserved exactly, and the capacity release does not open a hole:
 
----
+| Event | Effect on founding status |
+|---|---|
+| Ordinary cancellation | none — status permanent, price kept to the paid-through date |
+| Failed renewal / lapse | entitlement revoked **once**; `state` stays `confirmed`, so `unique (account_id) where state <> 'void'` **blocks any second allocation forever** |
+| Plan switch, interval switch | none — no code path touches allocations |
+| Resubscription after lapse | standard price; the revoked allocation still occupies the account's live slot, so no new one can be minted |
+
+The one account that *can* receive a new allocation is one whose only allocation
+was **voided** — because a voided allocation means the payment never stuck, so
+there is no founding history to recreate. That is deliberate, and it is not
+exploitable: a customer who pays, is voided, and pays again ends up holding
+**one** slot, never two.
+
+The distinction that makes this safe is the one the ruling drew: **voided** means
+the payment failed to stand; **revoked** means a real payment lapsed later. Only
+the first releases capacity.
+
+### 5.6 The window is configuration
+
+7 days initially. Held in configuration so it can move before launch without a
+schema change — the same treatment D-14's provider minimum and D-2's standard
+prices already get.
+
+Stated plainly, because it is the trade-off the number encodes: **7 days covers
+refunds and rapid reversals, not true card chargebacks**, which typically arrive
+months later. A genuine late chargeback therefore keeps its slot and lands in
+§5.4's manual queue. That was the accepted trade: a bounded, rare loss of
+capacity, against telling all 100 members their number is provisional for months.
 
 ## 6. Minimum decisions still required before `0031`–`0033`
 
@@ -321,7 +365,7 @@ late chargeback holding a slot. **Neither is obviously right — see D-4.**
 | **D-1** | **How time-triggered work runs.** `pg_cron` in Postgres, a Supabase scheduled Edge Function, or an external scheduler. | R2, R3, R4, R5, R8 — everything with a deadline | There is no scheduler at all today (C-1). Revocation and notification are actions, not query results. |
 | **D-2** | **Standard price for each paid plan.** Two numbers. | `plan_prices`; customer 101; the anomaly's next renewal | Guessing a price is out of bounds, and customer 101 is blocked until it exists. |
 | **D-3** | **Grace when `current_period_end` is NULL** on a `past_due` row. Proposed: remain entitled and raise a reconciliation item — never cut off a paying customer over missing data. | `fn_account_is_entitled` | It decides whether a real person loses access; the state machine's §3.5 precedent is to fail safe and loudly, not to guess. |
-| **D-4** | **The reversal window in §5**, and whether R5's exception is approved at all. | `0032` | Requires a fact about Paystack/card-scheme chargeback windows plus a commercial judgement. |
+| **D-4** | **RULED 27 Aug 2026 — approved**, 7-day window held as configuration, capacity reclaimable but identity immutable. §5. | — | Closed. |
 | **D-5** | **Level 2 boundary** — approve or amend the table split in §3.1. | R7 enforcement | Nothing in the repository defines it; it is the difference between the two paid products. |
 | **D-6** | **Are the four seeded limits the packaging you intend to sell?** businesses 1/1/3, users 2/3/10, recipes 20/∞/∞. | R7 enforcement | They were seeded in `0010` as scaffolding and have never been commercially confirmed. |
 | **D-7** | **VAT treatment**, confirmed by a Nigerian tax adviser — is a SaaS subscription standard-rated, and what invoice/tax records must be retained? | R1, `plan_prices`, the invoice record (C-5) | **I cannot certify tax compliance and will not guess it.** See the note below. |

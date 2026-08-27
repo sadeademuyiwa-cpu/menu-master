@@ -402,10 +402,9 @@ do. `pg_net` 0.20.4 is also available and is deliberately **not** adopted.
 
 | | Item |
 |---|---|
-| **D-4** | Approve R5 and set the reversal window. Decides `founding_members`' columns, and that table cannot be built twice. |
 | **D-3** | Grace when `current_period_end` is NULL. Proposed: stay entitled, raise an item. Decides the entitlement predicate and J3's guard. |
 | **D-5 / D-6** | The Level 2 boundary, and whether 1/1/3 businesses, 2/3/10 users, 20/∞/∞ recipes is the packaging you intend to sell. Nothing in the repository defines what `level = 2` unlocks. |
-| **D-9** | Email provider. **Promoted to blocker by P-3**: with no provider retry and no email, a failed card lapses an account in total silence. The notification *is* the dunning system. |
+| **D-9** | **Channel and provider for billing communication.** Promoted to blocker by P-3: with no provider retry, the notification *is* the dunning system. Longest lead time on the list — sender domain verification is DNS work with a warm-up period — so it should run **in parallel**, not in sequence. |
 
 ### BEFORE LAUNCH — build can start, launch cannot happen
 
@@ -434,7 +433,7 @@ Each row names what gates it. Nothing in `0001`–`0030` is modified.
 | | Migration | Contents | Gated by |
 |---|---|---|---|
 | **0031** | Pricing foundation — `billing_intervals` (with `months`, `provider_interval`), `plan_prices` on the triple, drop `plans.provider_plan_code` + its index (verified NULL at migration time), retire `plans.monthly_price` from read paths, repoint the ingest resolution from a plan id to the triple | D-13 ✓ · seed needs D-8 |
-| **0032** | `founding_members`, `fn_claim_founding_slot` with the advisory lock, allocation, and R5's grant states if approved | **D-4** |
+| **0032** | `founding_slot_allocations` (append-only ledger), the two partial unique indexes, `fn_claim_founding_slot` under the advisory lock with lowest-unused allocation, and D-4's provisional/confirmed/void states | D-4 ✓ |
 | **0033** | Subscription state — `billing_interval`, `price_tier`, `billing_plan_price_id`, `scheduled_*`, `finalised_at`; `fn_effective_plan`; `subscription_changes` | 0031, 0032 |
 | **0034** | Entitlement and grace — replace `fn_account_is_entitled` with the 7-day bound; NULL-period-end handling; update `tests/018` check 3 and `tests/019` check 10 for the changed rule, and add grace-expiry checks | **D-3** |
 | **0035** | Money record — `subscription_charges` with gross/rate/VAT/net, period and provider reference (closes C-5) | D-7 for values, not for shape |

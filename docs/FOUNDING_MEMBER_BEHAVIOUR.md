@@ -202,9 +202,17 @@ Two of those rulings touch this document directly:
 - **R4 (7-day grace)** supplies the number the lapse rule was missing. Recovery
   at any point up to `current_period_end + 7 days` stamps nothing. Past it, the
   entitlement is revoked exactly once and the founding **status** is untouched.
-- **R5 (reversal exception)** proposes a narrow exception to permanence for a
-  *first* payment reversed before the grant should stand. It is designed in
-  `PRICE_MODEL_RULINGS.md` §5 and **not approved yet**. Until it is, the nine
-  behaviours above stand exactly as written.
+- **R5 / D-4 (reversal exception)** is **APPROVED**, 7-day window held as
+  configuration. It changes the storage model in §1 of this document: one row per
+  account cannot record that #47 was held twice, so `founding_members` becomes an
+  **append-only allocation ledger** with current membership derived from it.
+  **Capacity is reclaimable; identity is not.** See `PRICE_MODEL_RULINGS.md` §5
+  for the model, the four automatic-void conditions, and the manual path for a
+  reversal arriving outside the window.
+
+  The nine behaviours above are otherwise unchanged. A **voided** allocation
+  (the payment never stood) releases capacity; a **revoked** entitlement (a real
+  payment that later lapsed) never does, and permanently blocks a second
+  allocation for that account.
 
 `0031`-`0033` remain held.
