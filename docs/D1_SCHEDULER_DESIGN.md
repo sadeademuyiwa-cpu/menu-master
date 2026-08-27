@@ -334,34 +334,43 @@ place that distinction is enforced.
 
 ---
 
-## 9. V-1 — pg_cron, still unverified
+## 9. V-1 — VERIFIED, 27 Aug 2026
 
-Supabase's documentation is blocked by this environment's egress proxy and the
-Supabase MCP tooling is not connected in this session, so **I have not verified
-availability and will not assert it.** One read-only query settles it:
+Owner-run read-only query against the production project
+(`select name, default_version, installed_version from pg_available_extensions
+where name in ('pg_cron','pg_net')`):
 
-```sql
-select name, default_version, installed_version
-  from pg_available_extensions
- where name in ('pg_cron','pg_net')
- order by name;
-```
+| name | default_version | installed_version |
+|---|---|---|
+| `pg_cron` | **1.6.4** | **NULL** |
+| `pg_net` | **0.20.4** | **NULL** |
 
-**Minimum viable fallback if `pg_cron` is unavailable** — and the reason every
-unit of work in §3 is a SQL function rather than inline SQL:
+**Both available. Neither installed.** This is the preferred outcome: `pg_cron`
+can be adopted, and nothing has been enabled behind our backs.
 
-> A single scheduled Edge Function, hourly, whose entire body is
-> `select fn_billing_tick();` — one entrypoint calling J1-J7 in order — plus the
-> drainer it already runs. Nothing in §§3-6 changes: same jobs, same predicates,
-> same idempotency, same failure behaviour. What is lost is transactional
-> co-location (the tick becomes a network call), and what is gained is nothing.
-> It is a strictly worse trigger for an unchanged design.
+Three consequences for `0036`:
 
-`pg_net` is **not** required by this design and should not be enabled for it. The
-database makes no outbound calls; that is the Edge Function's job, and keeping it
-that way is what keeps provider credentials out of Postgres.
+1. **`create extension pg_cron` is a real production change** and needs its own
+   explicit authorisation when the time comes. It is not covered by approving
+   this design.
+2. **`pg_net` stays off, deliberately.** It is available, and availability is not
+   a reason. Enabling it would let Postgres make outbound calls, which is exactly
+   the boundary that keeps provider credentials out of the database. The Edge
+   Function is the only thing that talks to Paystack. If a future migration ever
+   proposes `pg_net`, that is a security decision, not a convenience.
+3. **Two Supabase-specific details must be confirmed at migration time rather
+   than assumed**: which schema `pg_cron` installs into, and which database its
+   jobs execute against. Both are checkable in the same transaction that creates
+   the extension, and `0036`'s preflight should refuse rather than guess.
 
----
+### The fallback, now unused but retained
+
+Had `pg_cron` been unavailable: one scheduled Edge Function, hourly, whose entire
+body is `select fn_billing_tick();` calling J1-J7 in order, plus the drainer.
+Same jobs, same predicates, same idempotency, same failure behaviour — a strictly
+worse trigger for an unchanged design. Retained because it is also the **disaster
+fallback** if `pg_cron` ever has to be dropped, and because it is the reason
+every unit of work in §3 is a SQL function rather than inline SQL.
 
 ## A. Final recommendation
 
@@ -380,16 +389,19 @@ Adopt `pg_cron` → transactional SQL jobs → durable outbox → Edge Function,
 - **customer-present checkout** for both prorated upgrades and failed-payment
   recovery — one flow, two uses, no stored credential.
 
-Subject to **V-1**. If `pg_cron` is unavailable, §9's fallback carries the same
-design at a worse trigger, and nothing else moves.
+**V-1 is verified and clears** (§9): `pg_cron` 1.6.4 available, not installed.
+The recommendation therefore stands **unchanged** — verification confirmed the
+trigger and changed nothing about the design, which is what it was supposed to
+do. `pg_net` 0.20.4 is also available and is deliberately **not** adopted.
 
 ## B. Remaining decisions, ranked
 
 ### BLOCKER — implementation cannot start
 
+**V-1 is closed** (§9) and no longer appears here.
+
 | | Item |
 |---|---|
-| **V-1** | `pg_cron` availability. One read-only query (§9). Decides the trigger, not the design. |
 | **D-4** | Approve R5 and set the reversal window. Decides `founding_members`' columns, and that table cannot be built twice. |
 | **D-3** | Grace when `current_period_end` is NULL. Proposed: stay entitled, raise an item. Decides the entitlement predicate and J3's guard. |
 | **D-5 / D-6** | The Level 2 boundary, and whether 1/1/3 businesses, 2/3/10 users, 20/∞/∞ recipes is the packaging you intend to sell. Nothing in the repository defines what `level = 2` unlocks. |
@@ -426,7 +438,7 @@ Each row names what gates it. Nothing in `0001`–`0030` is modified.
 | **0033** | Subscription state — `billing_interval`, `price_tier`, `billing_plan_price_id`, `scheduled_*`, `finalised_at`; `fn_effective_plan`; `subscription_changes` | 0031, 0032 |
 | **0034** | Entitlement and grace — replace `fn_account_is_entitled` with the 7-day bound; NULL-period-end handling; update `tests/018` check 3 and `tests/019` check 10 for the changed rule, and add grace-expiry checks | **D-3** |
 | **0035** | Money record — `subscription_charges` with gross/rate/VAT/net, period and provider reference (closes C-5) | D-7 for values, not for shape |
-| **0036** | Scheduler core — `scheduled_job_runs`, both outboxes, `provider_operation_attempts`, `reconciliation_items`, J1–J7, `v_billing_job_health`, and the pg_cron schedules | **V-1** |
+| **0036** | Scheduler core — `scheduled_job_runs`, both outboxes, `provider_operation_attempts`, `reconciliation_items`, J1–J7, `v_billing_job_health`, and the pg_cron schedules | V-1 ✓ · needs separate authorisation for `create extension pg_cron` |
 | **0037** | Plan-limit enforcement (R7) — businesses, users, recipes, and the `level` boundary actually enforced server-side | **D-5 / D-6** |
 | **0038** | Upgrade proration — `upgrade_quotes`, quote/verify/apply, and D-14's waiver record | D-17 ✓ |
 
