@@ -1,232 +1,439 @@
-# D-1 — TIME-TRIGGERED SUBSCRIPTION WORK
+# D-1 — TIME-TRIGGERED SUBSCRIPTION WORK — IMPLEMENTATION-READY DESIGN
 
 **DESIGN ONLY. No migrations, no production code, no Paystack plans, no
-production changes.** Recommendation for approval.
+production changes.** Supersedes the D-1 outline of 27 Aug 2026.
 
-Depends on the verified provider facts in `docs/D13_PAYSTACK_RESEARCH.md` §7 —
-in particular **P-3, Paystack does not retry failed subscription charges**, which
-changes what a scheduler is *for*.
+Approved direction:
+`Postgres/Supabase state → pg_cron → transactional SQL jobs → durable outbox →
+Edge Function for provider operations`.
 
----
-
-## 1. The governing principle
-
-> **Lateness must never grant entitlement, and never remove it.**
-
-Menu Master NG already has one instance of this idea and it has paid for itself
-twice: `fn_account_is_entitled` derives entitlement from **status and date
-together**, so a subscription can sit at `active` with a period end in the past
-and the answer is still right. `SUBSCRIPTION_STATE_MACHINE.md` §1 chose that
-precisely because nothing ran on a timer. R10 then added three billing intervals
-and that rule needed **no change at all**.
-
-The scheduler should not undo that. So every state that *can* be derived from
-stored dates stays derived, and the scheduler's job is narrowed to the three
-things that genuinely cannot be:
-
-| | Category | Examples | If the scheduler is down for a day |
-|---|---|---|---|
-| **Derived** | entitlement; effective feature plan; founding-price eligibility | `fn_account_is_entitled`, `fn_effective_plan` | **Nothing is wrong.** Nobody gains what they did not pay for; nobody loses what they did. |
-| **Stamped** | `price_entitlement_revoked_at`, `lapsed_at`, materialising `plan_id` after a boundary change, the `cancelled` transition | audit facts that must exist once, with a time | Audit is **late**, not wrong — and catch-up is automatic, because the jobs key on the effect, not on the run. |
-| **Sent / executed** | notifications; provider commands (disable + create-at-boundary) | outbox | **Genuinely late.** This is the only category where a stopped scheduler has customer-visible consequences. |
-
-Two derivations carry the weight and both are worth stating explicitly:
-
-- **`fn_effective_plan(account_id)`** returns `scheduled_plan_id` once
-  `scheduled_effective_at <= now()`, otherwise `plan_id`. A downgrade that the
-  job has not yet materialised is *already* in force for feature purposes, so a
-  late job cannot leave Costing + Sales switched on for a customer who dropped to
-  Costing. The stored column catches up; the answer was never wrong.
-- **Founding-price eligibility** is resolved at price-resolution time from the
-  revocation stamp **and** the dates, not from the stamp alone. A late revocation
-  therefore cannot cause someone to be quoted the founding price after lapsing.
-
-This is what makes the choice of scheduler a **replaceable implementation
-detail** rather than a load-bearing dependency — which is exactly what you want
-for the one component the system has never had.
+Rulings folded in: **D-17** customer-present checkout for prorated upgrades ·
+**D-18** unattended changes allowed downward, never upward · **D-19** hourly, and
+catch-up safe · **V-2** our own idempotency regardless of provider support.
 
 ---
 
-## 2. What P-3 changes
+## 1. Governing principle, and the two rules that implement it
 
-Paystack does not retry a failed subscription charge. The consequences are larger
-than a footnote:
+> **Lateness must never grant entitlement, and must never remove legitimate
+> entitlement.**
 
-1. **The 7-day grace is a working window, not a waiting one.** Nothing recovers
-   on its own. At day 7 the customer lapses in silence unless something acted.
-2. **R8's notification stops being a courtesy and becomes the recovery
-   mechanism.** "Your payment failed, here is how to fix it" *is* the dunning
-   system. There is no other one.
-3. **Recovery must be customer-present**, unless D-17 is opened up — a
-   server-initiated retry needs `authorization_code`. A fresh checkout needs
-   nothing stored, and per the owner's ruling the security boundary is not moved
-   for convenience.
+Two concrete rules carry it, and everything below obeys them:
 
-So the scheduler's most commercially important job is not state transitions. It
-is **making sure a human is told, in time, while the account can still be
-saved.**
+**Rule 1 — due-or-overdue, never equals-now (D-19).** Every selection predicate
+is `<= now()`. No job asks "what falls in this hour"; every job asks "what is due
+or overdue and not yet done". A missed run is therefore recovered by the next run
+with no catch-up mode, no backfill flag and no operator action.
 
----
+**Rule 2 — the scheduler stamps and sends; it never decides entitlement.**
+Entitlement, effective plan and founding-price eligibility are **derived** from
+stored dates. The jobs materialise those derivations into columns for audit and
+reporting, and they emit the side effects. If every job stopped forever, no
+customer would gain access they had not paid for and none would lose access they
+had.
 
-## 3. Options
+### 1.1 A consequence that changed the design
 
-| | **A. `pg_cron`** | **B. Scheduled Edge Function** | **C. External (Vercel Cron / GH Actions)** |
-|---|---|---|---|
-| Runs where | inside Postgres | Supabase Deno runtime | third-party, over the public internet |
-| Outbound HTTP | **no** (would need `pg_net`) | **yes**, native | **yes**, native |
-| Transactional with our data | **yes** — the job *is* a transaction | no; a network hop away | no |
-| New credential at rest | **none** | `service_role` key in function env | key in a third-party vendor **and** a public authenticated endpoint |
-| New attack surface | none | reuses the boundary `paystack-webhook` already established | **a new internet-reachable trigger endpoint** |
-| RLS posture | runs as `postgres` → `fn_is_service_context()` is **true**, same as a migration | service role | service role |
-| Cold start / time limits | none | yes, both | yes |
-| Failure visibility | needs our own audit table | needs our own audit table | best of the three out of the box |
+Provider commands for a boundary change are dispatched **when the change is
+requested, not when the boundary arrives.**
 
-**C is rejected on security grounds**, and that is not a close call: it requires
-an authenticated public endpoint whose only purpose is to let an outside party
-start privileged billing work, plus a credential in a fourth vendor. We have
-spent this whole gate keeping the billing boundary narrow.
-
-**B alone is rejected on correctness grounds**: the state work is transactional
-database work sitting behind constraints, RLS and audit triggers, and putting a
-network hop and a cold start in the middle of it buys nothing.
+The earlier draft enqueued them at the boundary. That is wrong under Rule 1:
+Paystack charges on `next_payment_date`, so a scheduler outage across the
+boundary would let the **old** subscription renew at the **old** price — lateness
+producing a wrong charge. Dispatching on request makes the commercial outcome
+independent of any job running on time. The scheduler's role at the boundary
+becomes: materialise our own state, notify, and **verify the provider did what we
+asked**.
 
 ---
 
-## 4. Recommendation — A as the engine, B as the only outbound arm, an outbox between
+## 2. Objects this design assumes (not yet created)
 
-```
-   pg_cron  --calls-->  SQL job functions  --write-->  outbox tables
-                              |                              |
-                    all state work, transactional            |
-                    no network, no credentials               |
-                                                             v
-                                              scheduled Edge Function
-                                              drains outbox -> email / Paystack
-                                              records outcome back
-```
-
-Three properties this buys:
-
-1. **The database never holds a provider credential and never makes a network
-   call.** Everything that talks to Paystack stays in the same isolated Deno
-   function that already handles the webhook.
-2. **The network side is retryable and auditable**, because it reads a *durable
-   queue* rather than reacting to an ephemeral trigger. A failed send is a row
-   that is still there next time — the same discipline `billing_events` already
-   applies inbound.
-3. **The scheduler is swappable.** Every unit of work is a SQL function
-   (`fn_billing_*`). If `pg_cron` turns out to be unavailable (**V-1**), the same
-   functions are driven by a scheduled Edge Function calling one entrypoint, and
-   nothing else in the design changes.
-
-### 4.1 The jobs
-
-| Job | Cadence | Does |
-|---|---|---|
-| `fn_billing_apply_boundaries()` | hourly | Applies scheduled plan/interval changes whose time has passed: materialises `plan_id` / `billing_interval`, clears `scheduled_*`, writes `subscription_changes`, enqueues the provider command. |
-| `fn_billing_expire_grace()` | hourly | Subscriptions past `current_period_end + grace` with no successful renewal → transition to `cancelled`, revoke the founding price **once**, enqueue the founding-price-loss notice. |
-| `fn_billing_scan_renewals()` | daily | Renewals due within the notice window that have **no** queued pre-renewal notification → enqueue one. Independent of any webhook (§4.3). |
-| `fn_billing_reconcile()` | daily | Compares our period state against provider evidence; raises items, never overwrites (§4.4). |
-| `fn_billing_retry_events()` | 15 min | Drains `billing_events` where `status = 'failed_transient'` and `next_retry_at <= now()`. **This closes the "no sweeper" gap already recorded against `0027`** — those columns exist today and nothing reads them. |
-| outbox drainer | 5-15 min | Edge Function: sends notifications, executes provider commands, records the outcome. |
-
-Cron is UTC; the business timezone is Africa/Lagos. Daily jobs at **00:15 UTC**
-(01:15 Lagos) — after midnight locally, before the working day.
-
-### 4.2 The eight required behaviours
-
-| Requirement | How |
+| Object | Purpose |
 |---|---|
-| **Scheduled downgrade at period end** | Derived immediately by `fn_effective_plan`; materialised by `fn_billing_apply_boundaries`; executed at the provider by disable + create-with-`start_date` (P-6), which needs no re-authorisation and no stored credential. |
-| **Cancellation / non-renewal** | Already correct with no scheduler: `cancelled AND current_period_end > now()` retains entitlement to the paid-through date. The job only stamps and notifies. |
-| **Failed-payment grace expiry** | `fn_billing_expire_grace`, hourly. Because of P-3 the *notifications* during grace are the substantive part — the expiry job is the last resort, not the mechanism. |
-| **Entitlement revocation** | One-way and effect-keyed: `where price_entitlement_revoked_at is null`. Re-running stamps nothing. Eligibility is derived independently, so a late stamp is never a pricing error. |
-| **Pre-renewal notifications** | `fn_billing_scan_renewals` plus the `invoice.create` fast path (§4.3). |
-| **Founding-price lapse** | Same transaction as grace expiry, so the lapse and its revocation cannot diverge. Founding **status** and `slot_number` are untouched — permanent. |
-| **Delayed or missing webhook** | `fn_billing_reconcile` (§4.4). |
-| **Idempotency** | Four layers (§5). |
+| `scheduled_job_runs` | one row per logical run. `unique (job_name, run_key)`. Audit + L3 idempotency. |
+| `notification_outbox` | customer-facing messages. `unique (dedupe_key)`. Freely retryable. |
+| `provider_operations` | operations with a **provider-side or financial effect**. `unique (operation_key)`. Never freely retried — see §5. |
+| `provider_operation_attempts` | one row per attempt: number, timestamps, outcome, provider reference, HTTP status, error code. **Never request/response bodies** — they carry credentials. |
+| `reconciliation_items` | anything a human must resolve. Open/closed, with evidence. |
+| `subscription_charges` | what a customer was actually charged: gross, VAT rate, VAT, net, period, provider reference (C-5). |
+| `upgrade_quotes` | D-17's prorated quote: amount, price ids, period, expiry, state. |
 
-### 4.3 `invoice.create` — a fast path, never a dependency
+The two outboxes are **deliberately separate**. A duplicated email is
+embarrassing; a duplicated `create subscription` is two live subscriptions and
+two charges. Mixing them into one table invites one retry policy for both.
 
-P-4 gives us a provider event 3 days before each payment. Per your instruction the
-state machine must not depend on receiving it, so **both paths run**:
+---
 
-- `invoice.create` arrives → enqueue the pre-renewal notice.
-- `fn_billing_scan_renewals` independently finds renewals inside the notice
-  window with nothing queued → enqueue.
+## 3. The jobs
 
-Whichever gets there first wins; the other is a no-op, because the outbox's
-natural dedup key (§5, L4) makes the second insert a conflict rather than a
-duplicate. Losing every `invoice.create` Paystack sends would delay a notice by
-at most one daily cycle. Receiving them all changes nothing about correctness.
+All cadences are pg_cron, UTC. Daily jobs at 00:15 UTC (01:15 Africa/Lagos).
+Every job opens with `pg_try_advisory_xact_lock(<stable key>)` — the **try**
+form, so a slow run never accumulates waiting copies — and processes each row in
+its **own subtransaction**, so one poisoned row cannot block every other
+customer.
 
-### 4.4 Reconciliation — provider state is evidence, not authority
-
-For each subscription whose `current_period_end` has passed while its status has
-not moved, the drainer fetches the provider's view and compares it with ours.
-Three outcomes, and only three:
+### J1 · `fn_billing_apply_boundaries` — scheduled downgrade / interval change
 
 | | |
 |---|---|
-| **Agree** | advance our period, recording `next_payment_date` as the evidence it came from |
-| **Disagree** | write a reconciliation item. **Do not write.** A human resolves it. |
-| **Unreachable** | retry later. Never assume, in either direction. |
+| **Cadence** | hourly |
+| **Selects** | `subscriptions where scheduled_plan_price_id is not null and scheduled_effective_at <= now()` |
+| **Writes** | `subscriptions`: materialise `plan_id`, `billing_interval`, `price_tier`, `billing_plan_price_id`; clear `scheduled_*`. `subscription_changes`: one append-only row. |
+| **Idempotency key** | L2 does the work — clearing `scheduled_*` in the same transaction means a second run selects nothing. L3 run key `('apply_boundaries', date_trunc('hour', now()))`. `subscription_changes` carries `unique (subscription_id, effective_at, change_kind)`. |
+| **Retry** | none needed — next hourly run re-selects anything left. |
+| **On failure** | per-row subtransaction rolls back that row only; error into `scheduled_job_runs.error` and a `reconciliation_item`; batch continues. |
+| **Outbox** | `notification_outbox`: *plan change now in effect*. |
+| **Edge Function** | **none at this point.** The provider command was dispatched at request time (§1.1). |
+| **Reconciliation** | asserts the provider subscription matches the new plan; mismatch raises an item, never a write. |
 
-This is the costing engine's rule applied to billing: where the data does not
-support a conclusion, produce **no** conclusion rather than a plausible one.
-Overwriting our period with theirs on a mismatch would be the billing equivalent
-of substituting an industry-average price.
+**Nothing here is load-bearing for entitlement.** `fn_effective_plan()` already
+returns the scheduled plan once its time has passed, so a J1 outage cannot leave
+Costing + Sales switched on for someone who dropped to Costing.
 
-The sweep also surfaces two existing blind spots: `rejected` events, which today
-hold only a body hash and sit outside the reconciliation queue, and events whose
-signature verified but whose body would not parse.
+### J2 · `fn_billing_finalise_nonrenewal` — cancellation at boundary
+
+| | |
+|---|---|
+| **Cadence** | hourly |
+| **Selects** | `status = 'cancelled' and current_period_end <= now() and finalised_at is null` |
+| **Writes** | `subscriptions.finalised_at`. **Status is already `cancelled`** — set the moment the customer cancelled, per the state machine. Nothing about access changes here. |
+| **Idempotency key** | `finalised_at is null` (L2); L3 hourly run key. |
+| **Retry / failure** | as J1. |
+| **Outbox** | *your access has ended*, plus the export-your-data reminder — reads are never gated, so this is factual, not a threat. |
+| **Edge Function** | none. Paystack emits `subscription.disable` at the same boundary on its own. |
+| **Reconciliation** | if Paystack still shows the subscription active past the boundary, raise — **do not** cancel it silently. |
+
+### J3 · `fn_billing_expire_grace` — failed-payment grace expiry
+
+| | |
+|---|---|
+| **Cadence** | hourly |
+| **Selects** | `status = 'past_due' and current_period_end + interval '7 days' <= now()` and no successful charge covering the period |
+| **Writes** | `subscriptions.status → 'cancelled'`, `lapsed_at`. |
+| **Idempotency key** | the predicate stops matching once status moves (L2); L3 hourly. |
+| **Retry / failure** | as J1. |
+| **Outbox** | *subscription lapsed*, with re-subscribe path. |
+| **Edge Function** | none. |
+| **Reconciliation** | before lapsing, the most recent provider evidence must not show a successful payment. If it does, **do not lapse** — raise. Removing entitlement on stale data is the exact failure Rule 2 forbids. |
+
+**With P-3 in force this job is the last resort, not the mechanism.** Paystack
+does not retry, so the substantive work is J5's dunning notices during the seven
+days. If those do not go out, this job simply lapses people in silence.
+
+### J4 · `fn_billing_revoke_lapsed_founding_prices` — founding-price lapse
+
+| | |
+|---|---|
+| **Cadence** | hourly, immediately after J3 |
+| **Selects** | `founding_members f join subscriptions s using (account_id) where f.price_entitlement_revoked_at is null and not <entitlement continuity holds>` |
+| **Writes** | `price_entitlement_revoked_at`, `revoke_reason`, `lapsed_at`. **Never** `slot_number`, `granted_at` or the row itself. |
+| **Idempotency key** | `price_entitlement_revoked_at is null` — the stamp is **one-way** by construction, so a second run and a second lapse both change nothing. |
+| **Retry / failure** | as J1. |
+| **Outbox** | *founding price ended*, naming the standard price that now applies. |
+| **Edge Function** | none. |
+| **Reconciliation** | eligibility is **also** derived at price-resolution time from the dates, so a late stamp can never cause a founding quote after a lapse. |
+
+**"Entitlement revocation" is not a job.** Entitlement is derived; there is
+nothing to revoke. What is scheduled is the *stamping of the audit fact* and the
+*notification*. That distinction is the whole of Rule 2.
+
+### J5 · `fn_billing_scan_notices` — pre-renewal and dunning notices
+
+| | |
+|---|---|
+| **Cadence** | daily 00:15 UTC (dunning reminders re-evaluated each run) |
+| **Selects** | (a) renewals due within the notice window with nothing queued; (b) `past_due` accounts at day 0 / 3 / 6 of grace with that day's notice not queued; (c) any subscription whose next amount **differs** from the last charged amount |
+| **Writes** | nothing in `subscriptions`. Notices only. |
+| **Idempotency key** | `notification_outbox.dedupe_key = (account_id, kind, subject_key)` where `subject_key` is the period end and, for dunning, the day index. |
+| **Retry / failure** | as J1; the notice is re-queued next run if the insert never landed. |
+| **Outbox** | pre-renewal notice; dunning notices; **renewal-amount-changed notice** — the one the founding-race anomaly and every lapsed founder require. |
+| **Edge Function** | drainer sends. |
+| **Reconciliation** | `invoice.create` is a **fast path only** (§4.3 of the prior draft, retained): whichever path queues first wins, the other conflicts on the dedupe key. Losing every `invoice.create` delays a notice by at most one daily cycle. |
+
+### J6 · `fn_billing_reconcile` — provider reconciliation
+
+| | |
+|---|---|
+| **Cadence** | daily |
+| **Selects** | subscriptions whose `current_period_end` has passed while status has not moved; `provider_operations` in `unknown` or long `in_flight`; `billing_events` in `rejected` |
+| **Writes** | **enqueues probes only.** The job itself writes no subscription state. |
+| **Idempotency key** | one open probe per subject: `unique (kind, subject_key) where status = 'open'`. |
+| **Retry** | probes follow §5's backoff. |
+| **On failure** | provider unreachable → leave open, retry. **Never** assume, in either direction. |
+| **Outbox** | `provider_operations` of kind `probe_subscription`. |
+| **Edge Function** | fetches the subscription and returns `status` + `next_payment_date` as evidence. |
+| **Reconciliation** | the asymmetry in §4. |
+
+### J7 · `fn_billing_retry_events` — inbound webhook recovery
+
+| | |
+|---|---|
+| **Cadence** | 15 minutes |
+| **Selects** | `billing_events where status = 'failed_transient' and next_retry_at <= now()` |
+| **Writes** | re-invokes apply; updates `status`, `attempts`, `next_retry_at`. |
+| **Idempotency key** | apply is already effect-keyed; `body_sha256` and `provider_event_id` remain the redelivery keys. |
+| **Retry** | §5 backoff; terminal at `failed_permanent` + reconciliation item. |
+| **Outbox** | none. |
+| **Edge Function** | none — this is pure database work. |
+
+**This closes a gap already on the record**: `0027` created `attempts` and
+`next_retry_at` in production and nothing has ever read them.
+
+### J8 · outbox drainer — Edge Function
+
+| | |
+|---|---|
+| **Cadence** | 15 minutes (pg_cron may also trigger it; it is safe to run concurrently with itself only under §5's claim) |
+| **Selects** | `notification_outbox` and `provider_operations` where `status in ('pending','failed_transient') and next_attempt_at <= now()`, claimed with `for update skip locked` |
+| **Writes** | attempt rows; terminal status; `provider_reference` on success. |
+| **Idempotency** | §5, all five mechanisms. |
+| **Failure after the database commits** | see §6, scenario 2 — this is the case the whole design is shaped around. |
 
 ---
 
-## 5. Idempotency — four layers
+## 4. Reconciliation — the asymmetry that implements Rule 2
 
-| | Layer | Guarantees |
+Provider state is **evidence, not authority**. But "never write on a mismatch"
+is too blunt, and it fails the second half of the governing principle. The rule
+is asymmetric, deliberately:
+
+| Evidence says | Action |
+|---|---|
+| Provider is **ahead** in a way consistent with a renewal we missed — active, `next_payment_date` beyond our `current_period_end` | **Accept it.** Advance our period, record the evidence and the provider reference, and log a `reconciliation_item` marked auto-resolved so it stays visible. |
+| Provider **contradicts** us in a way that would **remove** entitlement — shows cancelled/attention while we show active, or a period end earlier than ours | **Never write.** Raise for a human. |
+| Provider **unreachable** | retry. Assume nothing. |
+
+The asymmetry is the point: **evidence may extend entitlement automatically; it
+may never withdraw it automatically.** A missed webhook then costs a customer
+nothing, and a misread or stale provider response can never cut off someone who
+has paid. This is the same instinct as the costing engine's refusal to invent a
+price — except that here, refusing to act has a direction, and the safe direction
+is toward the customer.
+
+---
+
+## 5. Idempotency — five mechanisms, ours not the provider's (V-2)
+
+Paystack's idempotency support is **not verified** — its documentation is
+unreachable from this environment — and per your ruling it is treated as an
+*additional* protection if present, never as our only one.
+
+| | Mechanism | Applies to |
 |---|---|---|
-| **L1** | `pg_try_advisory_xact_lock(<job key>)` at the top of each job | Two overlapping runs cannot both proceed. **`try`, not the blocking form** — a slow run must not accumulate a queue of waiting copies behind it. |
-| **L2** | **Effect-keyed predicates**, never run-keyed. `where price_entitlement_revoked_at is null`; `where scheduled_effective_at <= now() and scheduled_plan_id is not null` | A second run finds nothing to do. This is the layer that actually makes double-application impossible; the others are containment. |
-| **L3** | `scheduled_job_runs (job_name, run_key)` **unique**, `run_key = date_trunc(<cadence>, now())` | A duplicate invocation for the same logical slot is *refused and recorded*, not silently tolerated. Also the audit trail: started, finished, rows affected, error. |
-| **L4** | Outbox natural dedup key, unique — e.g. `(account_id, kind, subject_key)` where `subject_key` is the period end being notified about | The same notice cannot be queued twice whichever path queued it. This is what makes §4.3's belt-and-braces safe rather than noisy. |
+| **L1** | `pg_try_advisory_xact_lock(job key)` | every job |
+| **L2** | **effect-keyed predicates** — `where … is null`, `where scheduled_* is not null`. The layer that actually makes double-application impossible | every job |
+| **L3** | `unique (job_name, run_key)` in `scheduled_job_runs`, `run_key = date_trunc(cadence, now())` | every job |
+| **L4** | `unique (dedupe_key)` on notifications; `unique (operation_key)` on provider operations | outbox |
+| **L5** | **reconcile-before-retry** on any operation that can create a provider resource or move money | `provider_operations` only |
 
-The same technique the founding-slot allocator already uses — an advisory lock
-for serialisation plus a unique constraint as the backstop that holds even if a
-future caller bypasses the function.
+### Deterministic operation keys
 
-**Provider commands need one more thing.** A duplicated create-subscription would
-produce two live subscriptions for one customer, which is worse than a duplicated
-email. The drainer must therefore (a) hold the outbox row's dedup key, and
-(b) **check provider state before issuing**, not merely trust its own queue.
-Whether Paystack offers an idempotency key on these endpoints is **V-2** — not
-verified, and not to be assumed.
+Derived from **state**, never from run time, so the same logical operation
+computes the same key however many times it is generated:
+
+```
+downgrade at boundary   sub:<subscription_id>:boundary:<period_end>:to:<plan_price_id>
+cancellation            sub:<subscription_id>:cancel:<period_end>
+upgrade proration       sub:<subscription_id>:upgrade:<quote_id>
+probe                   sub:<subscription_id>:probe:<period_end>
+```
+
+`unique (operation_key)` means a second generation is a conflict, not a duplicate
+charge.
+
+### Retry policy
+
+| | Attempts | Backoff | Terminal |
+|---|---|---|---|
+| Notifications | 8 | 1m, 5m, 15m, 1h, 4h, 12h, 24h, 24h | `failed_permanent` + reconciliation item |
+| Provider operations | **3**, each preceded by L5 | 2m, 15m, 2h | `needs_human` + reconciliation item + operator alert |
+
+Provider operations get **fewer** automatic attempts on purpose. The cost of a
+human looking at a stuck subscription change is trivially lower than the cost of
+an automated system creating a second one.
+
+### L5, in detail
+
+Before **any** attempt after the first on a resource-creating or money-moving
+operation, the drainer queries the provider for whether the effect already
+exists — a subscription on the target plan with the expected start date, or a
+transaction bearing our deterministic reference. Only if it is absent does it
+issue. If present, it records the provider reference and closes the operation as
+**succeeded**, not as skipped, because it did.
 
 ---
 
-## 6. Observability
+## 6. What happens when things go wrong
 
-`v_billing_job_health`: last successful run per job, consecutive failures, outbox
-depth, age of the oldest unsent item, count of open reconciliation items.
-
-Stated plainly, because it has been recorded against this project before and is
-still true: **a view is not an alert.** With P-3 in force, a stalled outbox means
-customers silently lapsing. The operator alert path is part of D-9's scope, not a
-later nicety.
-
----
-
-## 7. What this needs before implementation
-
-| | Item | Kind |
+| # | Scenario | Outcome |
 |---|---|---|
-| **V-1** | **Is `pg_cron` available on our Supabase plan and project?** Supabase's documentation is also blocked by this environment's egress proxy, so I have not verified it. Settled read-only by `list_extensions` against the project, or from the dashboard's extensions list. | Verification. If absent, fall back to B driving the same SQL functions — no design change. |
-| **V-2** | Does Paystack support an idempotency key on Create Subscription / Charge Authorization? | Verification. Affects §5's provider-command layer only. |
-| **D-18** | **Does Menu Master NG commercially permit a plan switch with no customer interaction?** P-6 makes it *technically* possible. Proposed: **yes for a decrease** (with notice), **no for an increase** — an increase requires explicit confirmation, per the standing rule against changing a billing amount without authorisation. | Commercial decision. |
-| **D-19** | Cadence: hourly for boundary work, or 15 minutes? | Minor; hourly proposed. Correctness does not depend on it (§1), only the lag between a boundary passing and its audit stamp. |
-| **D-17** | Unchanged and **OPEN**. Narrowed to one flow (`D13` §7.4.D). Nothing in this design requires it to be opened. | Security decision. |
+| **1** | **pg_cron stops for 6 hours** | Nothing breaks. Predicates are due-or-overdue, so the next run picks up everything with no catch-up mode. Entitlement and effective plan are derived, so no access is wrongly granted or removed. Audit stamps and notices are up to 6h late; against a 3-day pre-renewal window that is absorbed. Grace expiry is up to 6h late, which errs **toward** the customer. Boundary provider commands are unaffected — they were dispatched at request time (§1.1). |
+| **2** | **Edge Function fails after the database commits** | The commit is the durable **intent**; the Edge Function is at-least-once delivery over it. The row is still `pending`/`in_flight` with an attempt record, and the next drain retries. The dangerous sub-case — Paystack succeeded but the function died before recording — is exactly what **L5** exists for: the next attempt reconciles first, finds the resource, records its reference, and closes the operation as succeeded. Without L5 this case is a double charge. |
+| **3** | **Paystack succeeds, our webhook is delayed** | Harmless. `active` with a passed `current_period_end` is still entitled until grace expiry, and grace (7 days) vastly exceeds any realistic delivery delay. When the event lands, apply is effect-keyed and the period advances. |
+| **4** | **Paystack succeeds, the webhook never arrives** | J6 selects the subscription (period passed, status unmoved), enqueues a probe, and the drainer fetches the truth. Provider is ahead and consistent with a renewal → **auto-accept** per §4, recording the evidence. The customer never notices. A `reconciliation_item` marked auto-resolved records that a webhook was lost, so a pattern of them is visible rather than invisible. |
+| **5** | **The same webhook arrives twice** | Already solved in production: `body_sha256` is the exact-redelivery key and is verified live; `provider_event_id` is the second layer — **built but never exercised against a real duplicate**, which remains an open gap, not a claim. Apply itself is effect-keyed, so even a double-apply is a no-op. |
+| **6** | **The same scheduler job executes twice** | L1 stops the second from proceeding; L3 refuses and records the duplicate slot; L2 means that even if both got through, the second selects nothing. Three independent reasons, any one sufficient. |
+| **7** | **An outbox item is delivered twice** | Notifications: L4 prevents double-queueing and `delivered_at` prevents re-send, so a duplicate requires a genuine send-then-crash — an embarrassing email, no state damage. Provider operations: L4 plus L5 mean a duplicate delivery finds the effect already present and records it rather than repeating it. |
+| **8** | **Customer downgrades, then changes their mind before period end** | Local state: clear `scheduled_*` — trivial. Provider state is the real work, because the commands were already dispatched (§1.1): the pending new subscription must be cancelled and the original one re-enabled. That is a **revert operation** with its own deterministic key, not an undo. **V-3: whether Paystack permits enabling a subscription that has emitted `not_renew` but not yet disabled is unverified.** If it does not, the revert is a fresh subscription on the original plan with `start_date` at the boundary — which works, and is what the design should assume until verified. |
+| **9** | **Customer upgrades while a downgrade is already scheduled** | Compositionally: the upgrade must clear the pending downgrade *and* revert its provider commands, then dispatch new ones for the upgraded plan. **MVP proposal: refuse the upgrade while a downgrade is pending**, telling the customer to cancel the downgrade first. One extra click on a rare path, against a provider-state sequence with several failure modes. Recorded as a deliberate MVP limitation, not an oversight; the compose path is post-launch. |
+| **10** | **Renewal payment fails and Paystack performs no retry (P-3)** | `invoice.payment_failed` → `past_due`, `current_period_end` **not** advanced, entitlement retained. J5 queues the day-0 recovery notice with a checkout link, then day-3 and day-6 reminders. **The notice is the dunning system** — nothing else will act. Recovery is customer-present checkout. Two facts this design must state plainly: (a) recovery is **re-subscription, not resumption** — the failed subscription does not resume itself; (b) founding-price continuity keys on **our** entitlement continuity, not on provider subscription identity, so a customer who recovers on day 5 keeps their founding price even though the provider subscription is technically new. Getting (b) wrong would silently strip founding pricing from every customer who ever recovered from a failed card. |
 
-**Nothing here is blocked on D-17.** That is deliberate: the scheduler design
-holds whichever way D-17 goes, because the only flow that would need a stored
-credential — the one-off prorated charge — is not a scheduled job.
+---
+
+## 7. D-17 — prorated upgrade, customer-present
+
+Approved: customer-present checkout; no reusable payment credential is stored;
+the existing security boundary is unchanged, and
+`BILLING_INTEGRATION_DESIGN.md` §7 stands **unamended**.
+
+```
+1. customer requests immediate upgrade
+2. system computes the prorated amount   (PRICE_MODEL_RULINGS.md §10)
+3. if below the provider minimum -> WAIVE: grant the upgrade, write the audit
+   record (calculated amount, waived amount, reason, provider, timestamp), stop.
+4. otherwise create an `upgrade_quote`: amount, both price ids, the period it was
+   computed against, a deterministic reference, an expiry
+5. customer completes Paystack checkout for that exact amount
+6. charge.success arrives bearing our reference -> verify against the provider,
+   then check the amount matches the quote EXACTLY
+7. apply: plan_id flips, subscription_changes written, subscription_charges
+   written, provider commands dispatched to move the recurring plan at boundary
+```
+
+**Failure or abandonment changes nothing.** The quote expires; the subscription,
+the plan and the entitlement are exactly as they were. There is no partial state,
+because nothing is applied before step 6.
+
+Four guards, each closing a real hole:
+
+| Guard | Closes |
+|---|---|
+| **Quote expiry** | a stale quote paid weeks later at a proration that no longer reflects the unused period |
+| **Exact-amount match** | a customer paying a different amount and receiving the upgrade anyway |
+| **One open quote per subscription** | two quotes paid, one upgrade, one unexplained payment |
+| **Void if the period or plan changed** | a quote computed against a period that has since renewed |
+
+Note the reuse: the checkout this needs is the **same** customer-present checkout
+that P-3 forces for failed-payment recovery. One flow, two uses, no credential.
+
+---
+
+## 8. D-18 — what may happen unattended
+
+| Transition | Unattended? |
+|---|---|
+| Downgrade at the paid-period boundary | **allowed** — customer-requested, decreases commitment |
+| Cancellation / non-renewal at boundary | **allowed** |
+| Same-price administrative transition | **allowed only where no financial disadvantage exists**, and the check is explicit, not assumed |
+| Anything increasing the recurring charge | **customer authorisation required** |
+
+P-6 makes an unattended increase *technically* possible. It is prohibited here
+anyway. Technical capability is not commercial permission, and this table is the
+place that distinction is enforced.
+
+---
+
+## 9. V-1 — pg_cron, still unverified
+
+Supabase's documentation is blocked by this environment's egress proxy and the
+Supabase MCP tooling is not connected in this session, so **I have not verified
+availability and will not assert it.** One read-only query settles it:
+
+```sql
+select name, default_version, installed_version
+  from pg_available_extensions
+ where name in ('pg_cron','pg_net')
+ order by name;
+```
+
+**Minimum viable fallback if `pg_cron` is unavailable** — and the reason every
+unit of work in §3 is a SQL function rather than inline SQL:
+
+> A single scheduled Edge Function, hourly, whose entire body is
+> `select fn_billing_tick();` — one entrypoint calling J1-J7 in order — plus the
+> drainer it already runs. Nothing in §§3-6 changes: same jobs, same predicates,
+> same idempotency, same failure behaviour. What is lost is transactional
+> co-location (the tick becomes a network call), and what is gained is nothing.
+> It is a strictly worse trigger for an unchanged design.
+
+`pg_net` is **not** required by this design and should not be enabled for it. The
+database makes no outbound calls; that is the Edge Function's job, and keeping it
+that way is what keeps provider credentials out of Postgres.
+
+---
+
+## A. Final recommendation
+
+Adopt `pg_cron` → transactional SQL jobs → durable outbox → Edge Function, with:
+
+- **Rule 1 (due-or-overdue) and Rule 2 (derive, don't decide)** as invariants that
+  every job must satisfy, stated in each migration header;
+- **provider commands dispatched at request time**, not at the boundary, so a
+  scheduler outage can never cause a wrong charge;
+- **asymmetric reconciliation** — evidence may extend entitlement automatically,
+  never withdraw it;
+- **five idempotency layers**, ours, with provider idempotency treated as a bonus
+  if V-2 ever confirms it;
+- **two separate outboxes**, because a duplicate email and a duplicate
+  subscription are not the same risk;
+- **customer-present checkout** for both prorated upgrades and failed-payment
+  recovery — one flow, two uses, no stored credential.
+
+Subject to **V-1**. If `pg_cron` is unavailable, §9's fallback carries the same
+design at a worse trigger, and nothing else moves.
+
+## B. Remaining decisions, ranked
+
+### BLOCKER — implementation cannot start
+
+| | Item |
+|---|---|
+| **V-1** | `pg_cron` availability. One read-only query (§9). Decides the trigger, not the design. |
+| **D-4** | Approve R5 and set the reversal window. Decides `founding_members`' columns, and that table cannot be built twice. |
+| **D-3** | Grace when `current_period_end` is NULL. Proposed: stay entitled, raise an item. Decides the entitlement predicate and J3's guard. |
+| **D-5 / D-6** | The Level 2 boundary, and whether 1/1/3 businesses, 2/3/10 users, 20/∞/∞ recipes is the packaging you intend to sell. Nothing in the repository defines what `level = 2` unlocks. |
+| **D-9** | Email provider. **Promoted to blocker by P-3**: with no provider retry and no email, a failed card lapses an account in total silence. The notification *is* the dunning system. |
+
+### BEFORE LAUNCH — build can start, launch cannot happen
+
+| | Item |
+|---|---|
+| **D-7** | VAT treatment, confirmed by a Nigerian tax adviser. Schema is NULL-safe; no charge may be taken until it is answered. |
+| **D-2** | Six standard prices. A standard row is an INSERT — no migration changes. Blocks customer 101 and every lapsed founder's renewal. |
+| **D-8** | Twelve Paystack plan codes, created and paired. |
+| **U-3 / U-4 / U-5** | Hard NGN minimum; whether `quarterly`/`annually` advance exactly 3 and 12 calendar months; exact refund/chargeback event names. Values, not shapes — but U-4 wrong means the reconciliation sweep raises false discrepancies against every subscriber. |
+| **V-3** | Whether Paystack can re-enable a subscription that has emitted `not_renew`. Decides whether scenario 8's revert is an enable or a fresh subscription. |
+
+### DEFERRABLE
+
+| | Item |
+|---|---|
+| **V-2** | Paystack idempotency support. We build our own regardless; confirmation would only add a layer. |
+| **Scenario 9** | Upgrade-while-downgrade-pending. Refused at MVP, composed post-launch. |
+| **D-15** | Combined plan-and-interval change in one action. Refused at MVP; both single paths exist. |
+| **D-16** | Refusing upgrades while `past_due`. Proposed default, reversible. |
+| — | Trial recipe-21 behaviour; the `monthly_equivalent` reporting view. |
+
+## C. Migration sequence, once authorised
+
+Each row names what gates it. Nothing in `0001`–`0030` is modified.
+
+| | Migration | Contents | Gated by |
+|---|---|---|---|
+| **0031** | Pricing foundation — `billing_intervals` (with `months`, `provider_interval`), `plan_prices` on the triple, drop `plans.provider_plan_code` + its index (verified NULL at migration time), retire `plans.monthly_price` from read paths, repoint the ingest resolution from a plan id to the triple | D-13 ✓ · seed needs D-8 |
+| **0032** | `founding_members`, `fn_claim_founding_slot` with the advisory lock, allocation, and R5's grant states if approved | **D-4** |
+| **0033** | Subscription state — `billing_interval`, `price_tier`, `billing_plan_price_id`, `scheduled_*`, `finalised_at`; `fn_effective_plan`; `subscription_changes` | 0031, 0032 |
+| **0034** | Entitlement and grace — replace `fn_account_is_entitled` with the 7-day bound; NULL-period-end handling; update `tests/018` check 3 and `tests/019` check 10 for the changed rule, and add grace-expiry checks | **D-3** |
+| **0035** | Money record — `subscription_charges` with gross/rate/VAT/net, period and provider reference (closes C-5) | D-7 for values, not for shape |
+| **0036** | Scheduler core — `scheduled_job_runs`, both outboxes, `provider_operation_attempts`, `reconciliation_items`, J1–J7, `v_billing_job_health`, and the pg_cron schedules | **V-1** |
+| **0037** | Plan-limit enforcement (R7) — businesses, users, recipes, and the `level` boundary actually enforced server-side | **D-5 / D-6** |
+| **0038** | Upgrade proration — `upgrade_quotes`, quote/verify/apply, and D-14's waiver record | D-17 ✓ |
+
+Then, outside migrations: create the twelve Paystack plans, seed
+`plan_prices.provider_plan_code`, deploy the drainer, and run the D-9 email
+integration. **None of that is authorised by this document.**
+
+---
+
+**STOPPING HERE for approval.** Nothing above has been implemented.
