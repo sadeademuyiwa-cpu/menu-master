@@ -1,6 +1,9 @@
 # D-13 — PAYSTACK RECURRING BILLING: RESEARCH FINDINGS
 
-**Status: RESEARCH COMPLETE TO THE LIMIT OF THIS ENVIRONMENT. D-13 REMAINS OPEN.**
+**Status: RECONCILED AGAINST OWNER-VERIFIED PROVIDER FACTS, 27 Aug 2026.**
+**D-13 is CLOSED on the provider's documented behaviour** — see §7. Sections 1-6
+are the original second-hand research and are retained unaltered as the record of
+what was believed before verification; **§7 overrides them wherever they differ.**
 Read-only research. No Paystack plans created, no production contact, no
 migrations, no billing code.
 
@@ -151,3 +154,148 @@ has cleared.
 and U-2 would change design, and the exact tokens must be read rather than
 inferred before twelve plan codes are created. It is no longer a *blocker on the
 shape of `0031`*; it is a blocker on **seeding** it.
+
+
+---
+
+# 7. RECONCILIATION AGAINST VERIFIED PROVIDER FACTS
+
+The owner independently verified D-13 against Paystack's current official
+Developer Documentation on 27 Aug 2026 and supplied the facts below. **These are
+authoritative here and supersede §§1-6 on every point they touch.** Sources:
+[Subscriptions](https://paystack.com/docs/payments/subscriptions/),
+[Plan API](https://paystack.com/docs/api/plan/),
+[Subscription API](https://paystack.com/docs/api/subscription/).
+
+## 7.1 Verified facts
+
+| | Fact |
+|---|---|
+| **P-1** | Plans natively support `daily`, `weekly`, `monthly`, `quarterly`, `biannually`, `annually`; the Subscriptions documentation additionally lists `hourly`. **All three intervals Menu Master NG needs are native.** Quarterly is a real Paystack recurring interval and needs no simulation. |
+| **P-2** | A Plan is defined by `amount`, `interval`, `currency`, `plan_code`, among other fields. |
+| **P-3** | **Failed subscription charges are NOT retried by Paystack.** Stated explicitly in the current Subscriptions documentation. |
+| **P-4** | Recurring cycle events: `invoice.create` 3 days before the next payment date · `charge.success` on success · `invoice.payment_failed` on failure · `invoice.update` carrying the final invoice status. Cancellation produces `subscription.not_renew`, then `subscription.disable` at the appropriate boundary. |
+| **P-5** | Paystack returns `next_payment_date` on a subscription. |
+| **P-6** | Create Subscription accepts `customer`, `plan`, optional `authorization`, optional `start_date`. **If `authorization` is omitted, Paystack uses the customer's most recent authorization.** |
+| **P-7** | Update Plan changes **the Plan itself** and can affect existing subscriptions at their next billing cycle depending on `update_existing_subscriptions`. |
+
+## 7.2 Unknowns now resolved
+
+| | Was | Now |
+|---|---|---|
+| **U-1** | *Does Paystack retry a failed subscription charge?* Sources conflicted. | **RESOLVED — NO.** P-3. The "retries over following days" reading in §1 was **wrong** and is withdrawn. Consequences in §7.4. |
+| **U-2** | *Can a subscription be created from a stored authorisation with no customer action?* | **RESOLVED, technically — yes.** P-6: omitting `authorization` makes Paystack use the customer's most recent one, and `start_date` sets when it begins. **Whether we commercially permit it is a separate question and is now D-18.** |
+| **Q7 / Q8** | *Is there a plan-switch endpoint? Can a change take effect at the boundary without cancel/re-authorise?* §1 marked these **[B]**/**[?]**. | **RESOLVED.** There is no subscriber-level plan switch: P-7 confirms Update Plan mutates the **shared** Plan. The correct transition is disable the old subscription and create a new one on the target Plan with `start_date` at the boundary (P-6) — **which needs no re-authorisation and leaves no gap.** |
+| **Q1-Q6, Q12, Q13** | marked **[A]** in §1 | **CONFIRMED** by P-1, P-2, P-4, P-5. The `annual` → **`annually`** token difference stands, so `provider_interval` remains mandatory. |
+
+## 7.3 Genuinely unresolved D-13 questions
+
+Only three survive, and none blocks `0031`'s shape.
+
+| | Question | Why it still matters |
+|---|---|---|
+| **U-3** | Is there a **hard** minimum transaction amount in NGN, distinct from the ₦50 recommendation for a first recurring charge? | D-14's waiver threshold reads it. Our worst realistic prorated charge (₦131.50) clears ₦50 comfortably, so this sets a value, not a design. |
+| **U-4** | Does `quarterly` advance exactly 3 calendar months and `annually` exactly 12, and how does Paystack handle a start date of the 29th-31st? | `billing_intervals.months` must match the provider's own arithmetic, or our `current_period_end` drifts from their `next_payment_date` and the reconciliation sweep raises false discrepancies. |
+| **U-5** | Exact refund and chargeback event names and payload shape. | R5's reversal exception keys on them. |
+
+**U-6 is withdrawn** — P-7 answers it, and the answer is now a hard architectural
+prohibition rather than an open question (§7.4).
+
+## 7.4 What the verified facts change
+
+### A. Shared Plans are never mutated to move one subscriber — PROHIBITION
+
+P-7 makes Update Plan a **blast-radius operation**: it changes the Plan every
+subscriber on that code is attached to. Using it to move one customer would
+change the price for all of them at their next cycle.
+
+**Menu Master NG must never implement an individual upgrade or downgrade by
+altering a shared Paystack Plan's amount or interval.** Individual transitions
+use the subscription lifecycle against the correct **target** Plan. This belongs
+in the migration header as a stated prohibition, not as tribal knowledge.
+
+### B. The boundary transition is solved, and needs no credential
+
+P-6 gives the mechanism R11 needed:
+
+```
+1. disable the current subscription   -> subscription.not_renew now,
+                                         subscription.disable at the boundary
+2. create a subscription on the target Plan with start_date = current_period_end
+   (authorization omitted -> Paystack uses the customer's most recent)
+```
+
+No re-authorisation, no gap, no stored credential on our side. **This materially
+narrows D-17**: the scheduled plan/interval change — the common case — never
+needs `authorization_code`. Only the **one-off prorated upgrade charge** does,
+and §7.4.D deals with that.
+
+### C. No provider retry rewrites the meaning of the grace period
+
+§8.4 of `PRICE_MODEL_RULINGS.md` was written as though Paystack retried during
+our 7 days. **It does not.** So:
+
+- The 7-day grace is **our** recovery window, not a waiting room. Nothing
+  recovers on its own.
+- Recovery therefore requires either (i) a charge we initiate — which needs
+  `authorization_code`, i.e. D-17 — or (ii) **the customer paying through a fresh
+  checkout**, which needs nothing stored.
+- R8 stops being a courtesy. With no provider retry, **the notification is the
+  recovery mechanism**. If we do not tell the customer, nothing at all happens
+  and they silently lapse at day 7.
+
+The security-preserving option and the provider-imposed reality point the same
+way: a customer-present checkout recovery flow. That flow is needed regardless of
+D-17 — and it is the same flow a prorated upgrade could use.
+
+### D. D-17 stays OPEN, and narrows
+
+Per the owner's instruction: **do not weaken the credential-storage rule to make
+server-initiated proration convenient.** Design the payment flow around the
+security boundary, not the reverse.
+
+What the verified facts change is the **size** of the problem:
+
+| Flow | Needs `authorization_code`? |
+|---|---|
+| Recurring renewal | **No** — Paystack holds the authorisation and charges on its own schedule |
+| Scheduled plan/interval change at the boundary | **No** — P-6, `authorization` omitted |
+| Failed-payment recovery | **No**, if recovery is a customer-present checkout |
+| **One-off prorated upgrade charge** | **Yes**, if server-initiated — **the only flow that does** |
+
+So the question is no longer "should we store card credentials" but "should this
+one flow be customer-present?" A fresh checkout for the prorated amount:
+
+- stores nothing, so `BILLING_INTEGRATION_DESIGN.md` §7 stands **unamended**;
+- satisfies the standing rule against changing a billing amount without the
+  customer's authorisation;
+- reuses the same checkout the failed-payment recovery flow needs anyway;
+- costs the customer one interaction on an action they initiated.
+
+**Recommended, but not decided** — D-17 remains open, and if server-initiated
+charging is ever wanted, the prerequisite is establishing exactly what Paystack
+permits and recommends storing, and proposing the safest architecture for it
+first.
+
+### E. `invoice.create` is a trigger, never a dependency
+
+P-4 confirms the 3-day pre-renewal event. Per the owner's instruction it may
+drive the pre-renewal notification workflow, but **the state machine must not
+depend on receiving any single webhook.** The D-1 design therefore computes
+upcoming renewals independently and treats `invoice.create` as a fast path whose
+absence changes nothing. See `docs/D1_SCHEDULER_DESIGN.md` §4.3.
+
+### F. Provider dates are evidence, not authority
+
+P-5 confirms `next_payment_date`. Per the owner's instruction we keep our own
+auditable period state and treat Paystack's as **reconciliation evidence**. Where
+they disagree, the sweep raises a reconciliation item; it never silently
+overwrites ours with theirs. That is the same rule the costing engine already
+applies to incomplete data.
+
+### G. Confirmed unchanged
+
+Twelve provider Plan mappings (2 products × 2 tiers × 3 intervals), first-class
+`billing_interval`, and `provider_interval` mapping `annual` → `annually`. The
+architecture in `PRICE_MODEL_RULINGS.md` §7 is unaltered by verification. **No
+Paystack plans are to be created yet.**
