@@ -1,7 +1,8 @@
 # FOUNDING 100 — PROPOSED BEHAVIOUR, FOR APPROVAL
 
-**Status: DESIGN ONLY. Nothing implemented. Approve the behaviour below before
-any migration is written.**
+**Status: BEHAVIOUR APPROVED by the owner, 27 Aug 2026. Option A ruled for the
+final-slot checkout race. STILL NOT IMPLEMENTED — implementation of `0031`-`0033`
+is held until the remaining commercial inputs in section 5 are settled.**
 
 Supersedes the single `revoked_at` in the first draft. The owner's distinction
 between permanent status and conditional entitlement is the correct model and is
@@ -122,28 +123,55 @@ Neither a duplicate slot nor a 101st entitlement is reachable.
 
 ---
 
-## 3. One consequence that needs a decision at checkout
+## 3. The final-slot checkout race — RULED: Option A
 
 The cap is enforced **at grant time**, when the payment confirms. But the
 customer chose a plan *earlier*, at checkout — and a Paystack plan encodes its
 amount, so by then they have been quoted either the founding or the standard
-price.
+price. If the last slot fills between quote and payment, a customer pays ₦3,500
+and is not entitled to it.
 
-If the last slot fills between quote and payment, a customer **pays ₦3,500 and
-is not entitled to it**. Three ways to handle that, and it needs your ruling:
+**Owner ruling, 27 Aug 2026 — Option A, with these conditions binding:**
 
-| | Handling |
+| # | Condition |
 |---|---|
-| **A** | Honour the amount for the period they paid, mark it `price_grant_anomaly`, queue for a human. No 101st founding entitlement; no denial of paid service. |
-| **B** | Refuse and reconcile: `failed_permanent`, refund manually. |
-| **C** | Reserve the slot at checkout with an expiry. Closes the race, but a reservation that never pays wastes a permanent slot — which Option A slots cannot afford. |
+| 1 | **Honour the amount already paid** for that billing period. |
+| 2 | **Give normal access** to the plan they paid for. No degraded service. |
+| 3 | **Do NOT create Founding Member #101.** No row in `founding_members`. |
+| 4 | **Do NOT grant permanent founding-price entitlement.** |
+| 5 | **Record the price-grant anomaly** for audit and reconciliation. |
+| 6 | **The next renewal uses the applicable standard price.** |
+| 7 | **The case must be identifiable** so the customer can be told the standard renewal price *before* the next charge. |
+| 8 | **Never silently change the next billing amount** without the notification/authorisation the billing flow requires. |
 
-**Recommendation: A.** The window is small, the amount is bounded, and it is the
-only option that neither breaks the cap nor takes money for nothing. C is
-disqualified by permanence: an abandoned checkout would burn a founding number
-forever.
+Conditions 3 and 4 are structural — no `founding_members` row means no slot and
+no entitlement, and the cap holds without a special case. Conditions 5 and 7 are
+why the anomaly needs its own durable, queryable record rather than a log line:
 
----
+```
+price_grant_anomalies
+  id, account_id, subscription_id
+  occurred_at
+  quoted_price_tier      -- 'founding'
+  quoted_amount          -- what they were charged
+  applied_price_tier     -- 'standard'
+  next_renewal_amount    -- NULL until the standard price exists
+  customer_notified_at   -- NULL until condition 7 is satisfied
+  resolved_at, resolution_note
+```
+
+`next_renewal_amount` and `customer_notified_at` start NULL and stay NULL until
+they are true. Condition 8 means the renewal **must not** proceed on the old
+amount silently *or* on the new amount silently: an unnotified anomaly is an open
+item in `v_billing_reconciliation`, not something the system quietly resolves.
+
+Condition 6 also has a dependency the schema cannot supply: **there is no
+standard price yet**, so `next_renewal_amount` cannot be populated and no
+notification can be sent. Section 5 records that and the rest of the open inputs.
+
+Option C was rejected on the owner's permanence ruling — a reserved slot that
+never pays would burn a founding number forever. Option B was rejected because it
+refuses money already legitimately paid.
 
 ## 4. What is auditable afterwards
 
@@ -157,3 +185,40 @@ forever.
   `v_billing_reconciliation`.
 
 Nothing is deleted at any point.
+
+---
+
+## 5. Commercial inputs still outstanding before `0031`-`0033`
+
+Settled by the owner, 27 Aug 2026:
+
+- Founding Costing **₦3,500/month**; Founding Costing + Sales **₦7,500/month**;
+  Free Trial **₦0**, 14 days.
+- Slots permanent, capped at exactly 100, never reused.
+- Status and price entitlement remain structurally separate.
+
+Still required, and each one blocks part of the price model:
+
+| # | Open input | Blocks |
+|---|---|---|
+| 1 | **Standard post-Founding-100 price**, per plan | `plan_prices` standard rows; customer 101; anomaly condition 6 |
+| 2 | **VAT treatment of the subscription itself** — is ₦3,500 inclusive or exclusive of 7.5% VAT? D5 ruled on *menu item* tax, not on our own invoice | what `plan_prices.monthly_price` means, and the Paystack plan amount |
+| 3 | **Mid-period plan change money handling** — charge the difference now, or apply the new amount at next renewal; and does a downgrade drop features immediately or at period end | `subscription_changes.amount_applied` semantics in `0033` |
+| 4 | **Dunning outer bound** — days in `past_due` before `cancelled`. `SUBSCRIPTION_STATE_MACHINE.md` §1 already flags this as a commercial decision left open | `fn_revoke_lapsed_founding_prices()` — it is the exact moment entitlement lapses |
+| 5 | **Refund / chargeback against a permanent slot** — a first payment that succeeds and is later reversed currently mints an irreversible founding slot | whether permanence carries a single named exception |
+| 6 | **Paystack plan codes**, per plan per tier (4 codes: costing/trading × founding/standard) | `plan_prices.provider_plan_code`; `0031` cannot be seeded without them |
+
+Not blocking these three migrations, but unresolved and due before 1 September:
+
+- **`plan_features` limits are enforced nowhere.** `costing` = 1 business /
+  3 users, `trading` = 3 businesses / 10 users, `trial` = 1 / 2 / 20 recipes are
+  stored, readable, and read by no code path — the same defect class as C4.
+  Needs both a commercial confirmation of the packaging and an enforcement
+  migration.
+- **No transactional email exists.** Anomaly condition 7, renewal receipts,
+  dunning notices and trial-ending warnings all need one.
+- **How the renewal amount actually changes at Paystack** — plan codes encode the
+  amount, so moving a customer from founding to standard is a cancel-and-
+  re-authorise, not an amount edit.
+- **Commission on gross vs net** — `PRICING_ECONOMICS_DESIGN.md` assumes gross
+  (Option A) and the alternative was never ruled on. Costing engine, not billing.
