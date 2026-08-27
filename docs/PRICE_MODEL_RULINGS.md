@@ -25,9 +25,20 @@ questions.
 | R7 | **Feature enforcement is launch-critical.** The two paid products must differ by more than a stored `level` flag. Backend/database authorisation must enforce the approved limits. A Costing customer must not reach Costing + Sales capability by manipulating the client. |
 | R8 | **Transactional billing communication is launch-critical**, and auditable: activation, failed payment / grace, cancellation, trial ending, scheduled upgrade/downgrade, founding-price loss, and any renewal-price change requiring customer action. |
 | R9 | **Subscription unit is the account.** Business allowances belong to the plan. Extra businesses create neither extra subscriptions nor extra founding slots. |
+| R10 | **Billing interval is first-class.** Monthly, quarterly and annual, modelled separately from plan and from price tier. Nothing is hard-coded around monthly. One founding slot per account **regardless of interval**; changing interval mints no slot and loses no status. Cancelling auto-renewal never terminates already-paid entitlement — access and founding price run to the paid-through date, and lapse occurs only after that passes without a successful renewal. |
 
 R9 matches the schema exactly: `subscriptions.account_id`, `businesses.account_id`,
 `ux_subscriptions_account` unique per account. Nothing to change.
+
+R10's proposed founding amounts, VAT-inclusive, for design purposes:
+
+| | Monthly | Quarterly | Annual |
+|---|---|---|---|
+| **Costing** | ₦3,500 | ₦10,000 | ₦35,000 |
+| **Costing + Sales** | ₦7,500 | ₦21,500 | ₦75,000 |
+
+The revised price model is §7. It replaces the `plan_prices` sketch that
+appeared in earlier drafts.
 
 ---
 
@@ -329,3 +340,265 @@ divergence), C-5 (charge/invoice record), R7 (limit enforcement), R8 (notificati
 outbox) and D-1 (scheduler) are each additional work. The realistic set is
 `0031`–`0036`. That is a consequence of the rulings, not scope creep, and the
 register should be corrected before implementation rather than after.
+
+---
+
+## 7. R10 — the revised price model, interval first-class
+
+**Not implemented. This section replaces every earlier `plan_prices` sketch.**
+
+The requirement is that nothing hard-codes monthly. The way to guarantee that is
+not discipline — it is to make the **duration of a billing cycle a stored fact**
+rather than an assumption spread across functions. One table owns it, and every
+piece of period arithmetic reads that table.
+
+### 7.1 `billing_intervals` — the cycle, as data
+
+```
+billing_intervals
+  code               text primary key      -- 'monthly' | 'quarterly' | 'annual'
+  name               text not null         -- customer-facing label
+  months             int  not null check (months > 0)   -- 1, 3, 12
+  provider_interval  text                  -- Paystack's own token for this cycle
+  sort_order         int  not null
+  is_active          boolean not null default true
+```
+
+Two columns carry the whole point:
+
+- **`months`** is why nothing is hard-coded. Every period advance in the system
+  becomes `current_period_end + (months || ' months')::interval`, read from this
+  row. Adding a six-monthly cycle later is one INSERT and no code change. Months
+  rather than days deliberately: calendar arithmetic keeps a 31 January renewal
+  on the last of the month instead of drifting.
+- **`provider_interval`** is why a naming mismatch is data, not a defect.
+  Paystack's interval tokens are its own vocabulary and must be read from
+  Paystack's documentation rather than assumed — the boundary-mapping discipline
+  `SUBSCRIPTION_STATE_MACHINE.md` already applies to statuses, applied to cycles.
+
+### 7.2 `plan_prices` — keyed on the triple
+
+```
+plan_prices
+  id                  uuid primary key
+  plan_id             text not null references plans(id)
+  price_tier          text not null check (price_tier in ('founding','standard'))
+  billing_interval    text not null references billing_intervals(code)
+
+  gross_amount        numeric(14,2) not null check (gross_amount > 0)
+  currency            text not null default 'NGN'
+  vat_rate            numeric(6,4)          -- NULL until D-7 is answered
+  vat_amount          numeric(14,2) generated always as (
+                        round(gross_amount - gross_amount / (1 + vat_rate), 2)
+                      ) stored
+  net_amount          numeric(14,2) generated always as (
+                        gross_amount - round(gross_amount - gross_amount / (1 + vat_rate), 2)
+                      ) stored
+
+  provider_plan_code  text
+  effective_from      timestamptz not null default now()
+  effective_to        timestamptz             -- NULL = current
+  is_active           boolean not null default true
+
+  unique (provider_plan_code)                        -- where not null
+  unique (plan_id, price_tier, billing_interval)     -- where effective_to is null
+```
+
+Four properties, each deliberate:
+
+1. **`gross_amount` is the source of truth**, because R1 says the customer pays
+   ₦3,500 in total. VAT and net are *derived downward* from it, never added to
+   it. There is no path by which a stored figure becomes a bigger charge.
+2. **`vat_rate` NULL propagates to NULL**, not to zero. Until D-7 is answered,
+   `vat_amount` and `net_amount` are NULL — incomplete, visibly, in exactly the
+   way the governing rule requires. A zero there would be a fabricated tax
+   position.
+3. **`net = gross − round(vat)`**, not `gross / (1 + rate)` rounded
+   independently. The two rounded figures then sum to the gross exactly, every
+   time. An invoice whose parts do not add up is not an invoice.
+4. **Effective-dated and append-only.** A standard price rises by inserting a row
+   and closing the old one. Nothing that was charged is ever rewritten — the same
+   discipline `0008` already applies to cost snapshots.
+
+`trial` gets **no rows at all**. It is not purchasable. Twelve rows exist when
+the model is complete: 2 plans × 2 tiers × 3 intervals.
+
+### 7.3 The normalised figure, for comparison only
+
+```
+  monthly_equivalent  numeric(14,2) generated always as (
+                        round(gross_amount / <months>, 2))   -- via a view, see note
+```
+
+`months` lives in the other table, so this belongs in a view rather than a stored
+generated column. It exists for two purposes and no others: showing
+"₦2,916.67/month, billed annually" honestly, and normalising mixed-interval
+revenue into a comparable monthly figure for reporting. **It is never charged.**
+
+At the proposed amounts, the implied discounts are:
+
+| | Monthly | Quarterly | Annual |
+|---|---|---|---|
+| Costing | ₦3,500 | ₦3,333/mo — **4.8% off** | ₦2,916.67/mo — **16.7% off** |
+| Costing + Sales | ₦7,500 | ₦7,166.67/mo — **4.4% off** | ₦6,250/mo — **16.7% off** |
+
+Noted for your visibility rather than as a recommendation: the two annual
+discounts match at 16.7%, the two quarterly ones differ slightly (4.8% vs 4.4%).
+If that asymmetry is intentional, nothing needs to change.
+
+---
+
+## 8. What R10 changes elsewhere
+
+### 8.1 Paystack plan mapping — `0030`'s column is now structurally wrong
+
+`0030` added **`plans.provider_plan_code`**: one code per plan, with
+`ux_plans_provider_plan_code` unique on it, and `fn_billing_apply` resolving
+`data.plan.plan_code` to a single `plans` row.
+
+Under R10 a plan has **six** codes (2 tiers × 3 intervals), so a column on
+`plans` cannot hold them. The code must live on `plan_prices`, where the triple
+is the key.
+
+The migration is clean because of how `0030` was written: it deliberately seeded
+**no** codes, and the deploy verification returned `0` seeded. The column is NULL
+on all three rows, so dropping it and its index **loses no data** — this is a
+relocation, not a data migration. It should still be verified as NULL at
+migration time rather than assumed.
+
+What changes in the ingest: resolution stops returning a `plan_id` and starts
+returning **`(plan_id, price_tier, billing_interval)`**. The `unmapped_plan_code`
+refusal path that `0030` built is unchanged and still correct — it simply now
+guards a richer target.
+
+**Twelve Paystack plans must be created, not four.** D-8 grows accordingly.
+
+### 8.2 Subscription state — the date-derived rule already scales
+
+The best news in this revision: `fn_account_is_entitled` needs **no change for
+intervals at all**.
+
+```
+status IN ('trialing','active','past_due')
+  OR (status = 'cancelled' AND current_period_end > now())
+```
+
+It reads a date, not a cycle. An annual subscriber who cancels in month 2 keeps
+access — and founding price — for the remaining ten months, automatically,
+because `current_period_end` says so. That is exactly R10's requirement that
+cancelling auto-renewal never terminates paid entitlement, and it is already
+true. The date-derived design chosen to survive the absence of a scheduler turns
+out to survive multiple intervals too.
+
+What `subscriptions` does need:
+
+```
+  billing_interval        text references billing_intervals(code)
+  price_tier              text          -- what is actually being charged
+  scheduled_interval      text          -- pending, alongside scheduled_plan_id
+```
+
+`scheduled_plan_id` / `scheduled_effective_at` from C-2 now carry an interval and
+a tier as well: a pending change may move any of the three axes.
+
+### 8.3 Upgrades and downgrades — R2/R3 need one clarifying sentence
+
+R2 and R3 were written for one axis: plan. There are now two, and "upgrade" is
+ambiguous on the interval axis — monthly → annual costs **more per charge** and
+**less per month**. Neither R2 nor R3 decides it.
+
+**Proposed unification, which resolves all six transitions with no special
+cases:**
+
+> Money always moves at the renewal boundary. Only *features* may move early, and
+> only upward.
+
+- Plan upgrade → features immediately, higher amount at the boundary. (R2, kept.)
+- Plan downgrade → both at the boundary. (R3, kept.)
+- Interval change, either direction → no feature effect; the new interval and
+  amount begin at the boundary.
+- Combined change → the same rule applied per axis.
+
+**One case this exposes, and it costs real money.** A customer on **annual
+Costing** who upgrades to Costing + Sales in month 2 receives Sales features
+immediately and pays nothing further **for eleven months** — ₦35,000 against
+₦75,000. On monthly the same rule risks at most thirty days; on annual it risks
+almost a year. Three ways to handle it, and it needs a ruling (D-10):
+
+| | Handling |
+|---|---|
+| **A** | Accept it. Simplest, and consistent with "no proration" everywhere. |
+| **B** | Plan upgrades on a multi-month interval require paying the difference for the remaining cycle — proration on this one path only. |
+| **C** | Plan upgrades on a multi-month interval take effect at the boundary; features wait. |
+
+**Recommendation: B.** It is the only path where R2's simplicity has a material
+cost, C makes the customer wait up to a year for something they are trying to
+pay more for, and B leaves the no-proration rule intact everywhere else.
+
+### 8.4 Dunning — mechanically unchanged, commercially worth a look
+
+`grace_ends_at = current_period_end + 7 days` is interval-independent and needs
+no change. The 7 days is the same 7 days whatever the cycle.
+
+Two observations rather than defects:
+
+- A failed **₦75,000** renewal is a different event from a failed ₦3,500 one —
+  larger amounts fail more often for insufficient funds and take longer to
+  resolve. Whether an annual renewal deserves a longer grace is a commercial
+  question (D-11). Uniform 7 days is defensible and simpler; I have not assumed
+  either.
+- Lapse consequences differ in size. An annual founder who lapses loses the
+  founding tier permanently, and only discovers it a year later at renewal. R8's
+  notification requirement matters more here, not less.
+
+### 8.5 Founding 100 — already correct, three points to confirm
+
+R10's slot requirements are **structurally satisfied by the approved design**,
+not by new logic:
+
+- **One slot per account regardless of interval** — `founding_members.account_id`
+  is the primary key. A second slot is not reachable however many times the
+  customer changes plan or interval.
+- **Interval change mints nothing and loses nothing** — no code path touches
+  `slot_number` on a plan or interval change, and the PK forbids a second row.
+- **Cancelling auto-renewal keeps founding price to the paid-through date** —
+  the `cancelled AND current_period_end > now()` clause, unchanged.
+
+Three points that do need recording:
+
+1. `founding_members` gains **`granted_interval`** alongside `granted_price`, so
+   the grant records what was actually bought. Slot allocation is untouched.
+2. **Founding remains a tier, not a frozen amount** — already approved for plan
+   changes, now stated for intervals too. A founding member switching monthly →
+   annual pays **₦35,000**, the founding annual price, not twelve times ₦3,500
+   and not a legacy monthly rate. Confirm this reading.
+3. **R5's reversal window interacts with annual.** A reversed ₦75,000 first
+   payment is a much larger exposure than a reversed ₦3,500 one, which argues for
+   a longer provisional window — directly against keeping a member's status
+   provisional for as short a time as possible. This sharpens D-4; it does not
+   change the mechanism.
+
+### 8.6 Two smaller consequences
+
+- **`plans.monthly_price` is now actively misleading**, not merely duplicated
+  (C-6). Under R10 there is no single monthly price for a plan. It should be
+  retired from every read path in `0031` and documented as legacy.
+- **Checkout must ask for an interval.** The signup flow currently chooses a plan
+  only. Plan × interval is a two-axis choice at checkout, and the quoted amount —
+  the one the founding-race anomaly is measured against — is the interval's
+  amount. A frontend change, recorded here so it is not discovered late.
+
+---
+
+## 9. Decisions added by R10
+
+| | Decision | Blocks |
+|---|---|---|
+| **D-10** | **Plan upgrade on a multi-month interval** — accept the gap (A), prorate this path only (B, recommended), or defer features to the boundary (C). | `0033`, the upgrade path |
+| **D-11** | **Does an annual renewal get a longer grace than 7 days?** Uniform 7 is defensible; I have not assumed otherwise. | `fn_account_is_entitled` |
+| **D-12** | **Confirm founding-as-tier across intervals** — a founding member switching to annual pays ₦35,000. | `0031` price resolution |
+| **D-13** | **Paystack's interval tokens**, read from its documentation, for `billing_intervals.provider_interval`. | `0031` seed |
+
+D-8 is restated: **twelve** Paystack plan codes, not four.
+D-2 is restated: the standard price is now **six** numbers — 2 plans × 3
+intervals — not two.
