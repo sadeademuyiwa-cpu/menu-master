@@ -139,7 +139,8 @@ outbox would force one retry policy onto both risks.
 
 ## 3. Reconciling the event set against the approved state machine
 
-Requested before freezing the enumeration. Six findings.
+Requested before freezing the enumeration. Six findings, **all ruled by the owner
+on 27 Aug 2026** — each finding below now records the ruling, not a proposal.
 
 ### F-1 — `SUBSCRIPTION_STATE_MACHINE.md` §3.2 now contains two false statements
 
@@ -162,15 +163,20 @@ grace bound.
 The first `charge.success` is both "subscription activated" and "payment
 received". Firing both sends a new customer two emails seconds apart.
 
-**Proposed:** the activation confirmation *carries* the first receipt; the
-standalone receipt fires only on **subsequent** charges.
+**RULED — approved.** Activation carries the initial successful-payment
+information. No second receipt seconds later. The standalone receipt type applies
+to **subsequent** successful charges only.
 
 ### F-3 — "Lapse / access-change confirmation" is misleading as named
 
 At lapse, `0028` gates **writes only** — every `SELECT` remains open, deliberately
 and permanently: *"Their data is theirs."* A message saying access has ended
-would be false. The copy must say that recording new work has stopped and that
-everything already entered stays readable and exportable.
+would be false.
+
+**RULED — renamed and reframed.** The message states that **new work and write
+access have stopped**, and that **existing data remains readable and
+exportable**. It must not imply that historical data has disappeared. Type
+renamed accordingly.
 
 ### F-4 — A cancelled subscription's period end has no notification
 
@@ -178,26 +184,27 @@ The set covers cancellation *at request* (#7) and lapse *after grace* (#6), but
 not the third moment: a cancelled subscription reaching `current_period_end`,
 which J2 finalises. Today that passes in silence.
 
-**Proposed:** rather than a twelfth type, let #6 cover both endings with the
-reason as a parameter — lapse-unpaid or cancellation-ran-out. Same customer
-situation, same copy skeleton, different sentence.
+**RULED — approved.** One subscription-ending notification with a **reason
+parameter** (`lapsed_unpaid` | `cancellation_ran_out`) rather than two redundant
+types.
 
 ### F-5 — Two types are missing that the state machine makes reachable
 
-- **Trial ending.** `trialing → cancelled` (trial ends unconverted) is a legal
-  transition, and today a trial would expire in silence. This was in the earlier
-  R8 list and is absent from the ruled set — flagging in case that was a slip
-  rather than a decision.
-- **Upgrade confirmed**, including D-14's **waiver** case where no charge is
-  taken. The prorated charge can be covered by the receipt type; the waiver
-  cannot, because there is no payment to receipt.
+- **Trial ending — RULED: add it.** A customer must never move from `trialing`
+  to an ended state in silence. **Exact timing to be proposed and approved before
+  implementation** (§3.2).
+- **Upgrade waiver — RULED.** Where an upgrade is confirmed under D-14's waiver
+  and **no payment occurred, no payment receipt is generated.** An
+  upgrade/plan-change confirmation is sent instead, stating what changed and that
+  no additional payment was taken. Sending a receipt for a payment that never
+  happened would be a fabricated financial document.
 
 ### F-6 — The founding anomaly notice has two audiences
 
 "Founding-pricing anomaly / manual-review notice" mixes a customer message ("your
-next renewal will be ₦X") with an operator task. The operator side already exists
-as `reconciliation_items` and should **not** be an email to the customer. The
-notification type should be customer-facing only.
+next renewal will be ₦X") with an operator task. **RULED — approved.** The notification type is **customer-facing only**;
+operator remediation stays in `reconciliation_items` and is never duplicated as a
+customer notification.
 
 ### 3.1 Resulting enumeration
 
@@ -208,7 +215,7 @@ notification type should be customer-facing only.
 | 3 | **payment failed** | ✅ | ✅ |
 | 4 | **recovery reminder** | ✅ | ✅ |
 | 5 | **final notice before lapse** | ✅ | ✅ |
-| 6 | access changed — subscription ended *(reason: lapsed \| cancellation ran out, F-3/F-4)* | ✅ | — |
+| 6 | **write access ended, data still readable** — subscription ended *(reason: `lapsed_unpaid` \| `cancellation_ran_out`)* | ✅ | — |
 | 7 | cancellation / non-renewal confirmed | ✅ | — |
 | 8 | downgrade scheduled | ✅ | — |
 | 9 | downgrade now in effect | ✅ | — |
@@ -216,8 +223,24 @@ notification type should be customer-facing only.
 | 11 | founding-price ended | ✅ | — |
 | 12 | founding-price anomaly — next renewal amount *(customer-facing only, F-6)* | ✅ | — |
 | 13 | recovery succeeded *(§4)* | ✅ | conditional |
-| — | *trial ending* — **awaiting your ruling (F-5)** | ? | — |
-| — | *upgrade confirmed / charge waived* — **awaiting your ruling (F-5)** | ? | — |
+| 14 | **trial ending** *(timing per §3.2)* | ✅ | — |
+| 15 | upgrade / plan change confirmed — **no receipt when waived** | ✅ | — |
+
+### 3.2 Trial-ending timing — proposal, for approval
+
+`0020` sets both `trial_ends_at` and `current_period_end` to `now() + 14 days`,
+so the trial's end is known from the moment of signup and needs no provider
+evidence. Proposed:
+
+| When | Notice |
+|---|---|
+| **T−3 days** | trial ending — what happens next, and the price |
+| **T+0**, only if unconverted | trial ended — data stays readable, here is how to subscribe |
+
+T−3 mirrors Paystack's own `invoice.create` lead time, so a customer sees the
+same warning interval whether the money is about to move or the trial is about to
+close. Both are queued by J5, both use due-or-overdue predicates, and neither
+depends on a webhook. **Awaiting approval before the enumeration freezes.**
 
 ---
 
