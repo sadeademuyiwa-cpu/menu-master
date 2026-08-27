@@ -404,7 +404,7 @@ do. `pg_net` 0.20.4 is also available and is deliberately **not** adopted.
 |---|---|
 | **D-3** | Grace when `current_period_end` is NULL. Proposed: stay entitled, raise an item. Decides the entitlement predicate and J3's guard. |
 | **D-5 / D-6** | The Level 2 boundary, and whether 1/1/3 businesses, 2/3/10 users, 20/∞/∞ recipes is the packaging you intend to sell. Nothing in the repository defines what `level = 2` unlocks. |
-| **D-9** | **Channel and provider for billing communication.** Promoted to blocker by P-3: with no provider retry, the notification *is* the dunning system. Longest lead time on the list — sender domain verification is DNS work with a warm-up period — so it should run **in parallel**, not in sequence. |
+| **D-9** | **RULED — email + WhatsApp**, provider-agnostic. `docs/D9_NOTIFICATION_ARCHITECTURE.md`. Remaining lead-time work (sender domain verification, Meta template approval) runs **in parallel** and gates launch, not migrations. |
 
 ### BEFORE LAUNCH — build can start, launch cannot happen
 
@@ -437,9 +437,10 @@ Each row names what gates it. Nothing in `0001`–`0030` is modified.
 | **0033** | Subscription state — `billing_interval`, `price_tier`, `billing_plan_price_id`, `scheduled_*`, `finalised_at`; `fn_effective_plan`; `subscription_changes` | 0031, 0032 |
 | **0034** | Entitlement and grace — replace `fn_account_is_entitled` with the 7-day bound; NULL-period-end handling; update `tests/018` check 3 and `tests/019` check 10 for the changed rule, and add grace-expiry checks | **D-3** |
 | **0035** | Money record — `subscription_charges` with gross/rate/VAT/net, period and provider reference (closes C-5) | D-7 for values, not for shape |
-| **0036** | Scheduler core — `scheduled_job_runs`, both outboxes, `provider_operation_attempts`, `reconciliation_items`, J1–J7, `v_billing_job_health`, and the pg_cron schedules | V-1 ✓ · needs separate authorisation for `create extension pg_cron` |
-| **0037** | Plan-limit enforcement (R7) — businesses, users, recipes, and the `level` boundary actually enforced server-side | **D-5 / D-6** |
-| **0038** | Upgrade proration — `upgrade_quotes`, quote/verify/apply, and D-14's waiver record | D-17 ✓ |
+| **0036** | Scheduler core — `scheduled_job_runs`, `provider_operations`, `provider_operation_attempts`, `reconciliation_items`, J1–J7, `v_billing_job_health`, and the pg_cron schedules | V-1 ✓ · needs separate authorisation for `create extension pg_cron` |
+| **0037** | Notification model (D-9) — `notification_channels`, `notification_types`, `account_contacts`, `communication_consents`, `notification_outbox`, `notification_attempts`, and the gap-item path. **Split out of `0036`**, which grew too large once D-9 was ruled; the two are separately reviewable and separately reversible | D-9 ✓ |
+| **0038** | Plan-limit enforcement (R7) — businesses, users, recipes, and the `level` boundary actually enforced server-side | **D-5 / D-6** |
+| **0039** | Upgrade proration — `upgrade_quotes`, quote/verify/apply, and D-14's waiver record | D-17 ✓ |
 
 Then, outside migrations: create the twelve Paystack plans, seed
 `plan_prices.provider_plan_code`, deploy the drainer, and run the D-9 email
