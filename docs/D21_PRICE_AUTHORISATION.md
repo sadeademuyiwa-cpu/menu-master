@@ -158,6 +158,10 @@ days' notice and an annual subscriber deserves more than three. The schedule is
 | quarterly | 21, 10, 3 |
 | annual | 45, 21, 7 |
 
+**These figures are PROPOSALS, not approved commercial policy** — recorded as
+**D-23**. What *is* ruled is that the schedule is stored as data, is
+deterministic, and is appropriate to the billing interval rather than uniform.
+
 Constrained so no offset exceeds the period length. J5 queues them on
 due-or-overdue predicates; the final notice goes on **both** channels.
 
@@ -199,19 +203,31 @@ currently applicable standard price. **Founding pricing is never automatically
 restored** — which is already structural, since eligibility checks the revocation
 stamp on a row that survives forever.
 
-## 7. When there is no standard price to require
+## 7. Missing standard price — WITHDRAWN as a designed path
 
-If `to_plan_price_id` cannot be resolved, we cannot require authorisation for a
-price that does not exist. The design then **raises a blocking reconciliation
-item and lets the renewal proceed at the existing price.**
+This section previously described letting the renewal continue at the obsolete
+founding price when no standard price existed.
 
-That is the lesser evil deliberately chosen: stopping a customer's service
-because *we* failed to set a price would punish them for our omission, and the
-money still arrives. But it means an unentitled founding price continues until a
-human acts — which is the strongest practical argument yet for seeding standard
-prices **before the 100th paying customer**, not after.
+**D-2 closed on 27 Aug 2026 and the sellable-price invariant
+(`PRICE_MODEL_RULINGS.md` §12) makes that state unreachable by design** — a
+missing required row now blocks deployment and blocks checkout.
 
-**D-21 does not define the standard price. That remains D-2, unresolved.**
+So D-21 operates **deterministically**: a founder whose entitlement has ended is
+quoted the exact applicable standard price for their plan and interval, and there
+is no fallback branch. If a required row is ever missing in production it is an
+**operational incident**, alerted as one; the customer's service is not stopped
+for our configuration error, but nothing about that is a commercial design.
+
+### 7.1 The increase is now material, which raises the stakes on §5
+
+Under the ruled pricing a lapsed founder moves from **₦3,500 to ₦7,500** — the
+charge **doubles**. On Costing + Sales it doubles again in absolute terms.
+
+That is a deliberate commercial position, not a problem to solve. But it means
+§4's stop-at-boundary path will be exercised more often than a modest step would
+have produced, and the quality of §5's notices matters proportionately more. The
+final notice is doing real work: it is the difference between a customer who
+chooses to continue and one who discovers the change after their access ends.
 
 ## 8. Reconciliation summary
 

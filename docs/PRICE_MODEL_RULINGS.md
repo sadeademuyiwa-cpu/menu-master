@@ -32,19 +32,42 @@ questions.
 R9 matches the schema exactly: `subscriptions.account_id`, `businesses.account_id`,
 `ux_subscriptions_account` unique per account. Nothing to change.
 
-R10's founding amounts, VAT-inclusive. **Corrected by the owner on 27 Aug 2026 —
-these supersede the discounted figures that appeared in the first R10 draft:**
+**AUTHORITATIVE PRICING — ruled 27 Aug 2026. VAT-inclusive customer-facing
+amounts. No interval discount: quarterly = monthly × 3, annual = monthly × 12.**
 
-| | Monthly | Quarterly | Annual |
-|---|---|---|---|
-| **Costing** | ₦3,500 | ₦10,500 | ₦42,000 |
-| **Costing + Sales** | ₦7,500 | ₦22,500 | ₦90,000 |
+| | | Monthly | Quarterly | Annual |
+|---|---|---|---|---|
+| **Costing** | founding | ₦3,500 | ₦10,500 | ₦42,000 |
+| | **standard** | **₦7,500** | **₦22,500** | **₦90,000** |
+| **Costing + Sales** | founding | ₦7,500 | ₦22,500 | ₦90,000 |
+| | **standard** | **₦15,000** | **₦45,000** | **₦180,000** |
 
-**There is no quarterly or annual discount for the Founding 100.** Quarterly and
-annual are prepaid convenience options at exactly **3×** and **12×** the
-applicable founding monthly price. Any earlier statement in this repository that
-the founding annual price is ₦35,000 or ₦75,000, or that the annual founding
-discount is 16.7%, is **withdrawn and wrong**.
+Arithmetic verified: the founding advantage is **53.33%** on Costing and **50%**
+on Costing + Sales — **₦48,000 and ₦90,000 a year** respectively. Every interval
+is an exact multiple; no rounding is involved anywhere.
+
+**D-2 is closed.** Earlier drafts proposing a modest standard step are superseded,
+and any statement that the founding annual price is ₦35,000 or ₦75,000, or that
+an interval carries a discount, remains withdrawn.
+
+Founding remains a **tier, not a frozen amount**: a founder on Costing monthly
+pays ₦3,500, the same founder upgrading to Costing + Sales monthly pays the
+founding ₦7,500, and an interval change resolves the founding price for that
+plan × interval. Historical founding-member identity stays governed separately
+from current founding-price entitlement (§5).
+
+### One collision worth naming
+
+**Founding Costing + Sales and standard Costing are the same amount at every
+interval** — ₦7,500 / ₦22,500 / ₦90,000. Commercially that is a clean story: a
+founder's upgrade costs exactly what a standard Costing customer pays.
+
+Technically it forecloses one thing permanently: **a payment can never be
+attributed by its amount.** Four of the twelve sellable rows share amounts with
+another. Resolution is by our own `checkout_reference` first (D-20) and the
+provider plan code second — never by matching a figure. Recorded here so that a
+future "just match the amount" shortcut is recognised as broken rather than
+merely inelegant.
 
 The revised price model is §7; the upgrade proration specification is §10.
 
@@ -817,3 +840,68 @@ subscription charges, so the 7-day grace is our recovery window and R8's
 notification *is* the dunning system rather than a courtesy alongside it. That
 raises D-9's priority: with no provider retry and no email, a failed card lapses
 an account in silence.
+
+
+---
+
+## 12. The sellable-price invariant (ruled with D-2)
+
+A missing required price row is **not a commercial state**. It is a
+configuration defect, and it must be caught before deployment or at checkout —
+never discovered during someone's renewal.
+
+### 12.1 What "sellable" means
+
+A combination is sellable only when **all four** hold:
+
+```
+1. a plan_prices row exists for (plan_id, price_tier, billing_interval)
+2. it is active and current            (is_active, effective_to is null)
+3. gross_amount is present and > 0
+4. provider_plan_code is not null      -- without it, checkout cannot initialise
+```
+
+Point 4 matters: a priced row with no plan code is **not sellable**, because
+D-20 cannot initialise a Paystack transaction from it. A completeness check that
+only counted price rows would pass while checkout still failed.
+
+### 12.2 The required set is derived, never hard-coded
+
+```
+required = { p × t × i :
+               p in plans where is_active and id <> 'trial'
+               t in ('founding','standard')
+               i in billing_intervals where is_active }
+```
+
+Today that is **12**. Hard-coding 12 would mean that adding a six-monthly
+interval silently reduces coverage rather than raising a failure. Deriving it
+means a new interval is **unsellable until priced**, which is the correct and
+safe direction.
+
+`trial` is excluded because it is not purchasable and carries no price rows at
+all — its absence must never read as an incompleteness.
+
+### 12.3 Three enforcement points, deliberately layered
+
+| | Where | Behaviour |
+|---|---|---|
+| **Deployment** | migration self-check | refuses to finish while any required combination is missing, inactive, unpriced or lacking a plan code |
+| **Checkout** | D-20, **before** Paystack initialisation | refuses with `no_active_price` — generalised from the earlier `no_standard_price`, since any of the twelve can be the missing one — and raises a reconciliation item |
+| **Continuous** | `v_pricing_completeness` | required versus present, so a row deactivated by hand is visible immediately rather than at the next renewal |
+
+**Never** invent, interpolate, or fall back to another price — including falling
+back from standard to founding, which would hand out an entitlement nobody
+granted.
+
+### 12.4 D-21's missing-price fallback is withdrawn
+
+`D21_PRICE_AUTHORISATION.md` §7 previously described continuing at the obsolete
+founding price when no standard price existed. **With D-2 closed and §12.1
+enforced, that state is unreachable by design.**
+
+It is therefore reclassified: not a commercial branch but an **operational
+incident** — a required row deactivated in error. If it ever occurs, the system
+alerts and does not stop the customer's service, because punishing a customer for
+our configuration error is the wrong response to our own defect. But it is a
+defect, and it is recorded as one, not as a designed path.
