@@ -1,5 +1,12 @@
 # SEPTEMBER 1 LAUNCH GATES
 
+> **CURRENT TARGET: 7 SEPTEMBER 2026.** The 1 September plan below is retained
+> as the historical record and is not deleted. The date moved on the owner's
+> ruling of 28 Aug 2026 after the Track C inventory showed the costing journey
+> had no frontend. **Gate A (public product and trial launch) is 7 September.
+> Gate B (paid billing) remains a separate activation gate.**
+
+
 **RULED 27 Aug 2026 — Option C.** Two separate gates, deliberately decoupled:
 
 > **Gate A — 1 September: safe, usable product launch.** Registration, onboarding

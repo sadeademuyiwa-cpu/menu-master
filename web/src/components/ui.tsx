@@ -82,3 +82,66 @@ export function DataList<T>({
 export function BackLink({ href, children }: { href: string; children: React.ReactNode }) {
   return <Link href={href} className="text-sm underline">{children}</Link>
 }
+
+/**
+ * A refusal the customer can act on. Used wherever the database declined to
+ * produce a truthful answer -- a missing price, a missing conversion, a write
+ * the entitlement gate refused. Never used to dress up a value we guessed.
+ */
+export function Notice({ children, tone = 'warn' }: {
+  children: React.ReactNode
+  tone?: 'warn' | 'info'
+}) {
+  return (
+    <div
+      role="status"
+      className="rounded border px-3 py-2 text-sm"
+      style={{
+        borderColor: tone === 'warn' ? 'var(--mm-warn)' : 'var(--mm-line)',
+        color: tone === 'warn' ? 'var(--mm-warn)' : 'inherit',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** A single figure with its label. Wraps to one column on a phone. */
+export function Stat({ label, value, sub }: {
+  label: string
+  value: React.ReactNode
+  sub?: React.ReactNode
+}) {
+  return (
+    <div className="rounded border p-3" style={{ borderColor: 'var(--mm-line)' }}>
+      <div className="text-xs" style={{ color: 'var(--mm-muted)' }}>{label}</div>
+      <div className="mt-1 text-lg font-medium tabular-nums">{value}</div>
+      {sub && <div className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>{sub}</div>}
+    </div>
+  )
+}
+
+export function StatRow({ children }: { children: React.ReactNode }) {
+  return <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">{children}</div>
+}
+
+/** Destructive-ish inline action inside a list row. */
+export function InlineSubmit({ children }: { children: React.ReactNode }) {
+  return (
+    <button type="submit" className="text-sm underline" style={{ color: 'var(--mm-muted)' }}>
+      {children}
+    </button>
+  )
+}
+
+export function SectionHeading({ children, sub }: {
+  children: React.ReactNode
+  sub?: React.ReactNode
+}) {
+  return (
+    <div>
+      <h2 className="text-base font-medium">{children}</h2>
+      {sub && <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>{sub}</p>}
+    </div>
+  )
+}

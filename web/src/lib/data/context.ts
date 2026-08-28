@@ -1,0 +1,73 @@
+import 'server-only'
+import { createClient } from '@/lib/supabase/server'
+
+/**
+ * The caller's account and default business.
+ *
+ * This is a CONVENIENCE LOOKUP, never an authorization decision. Every write
+ * still passes through RLS, which refuses a foreign account_id regardless of
+ * what this returns.
+ */
+export async function currentContext() {
+  const supabase = await createClient()
+
+  const [{ data: membership }, { data: business }] = await Promise.all([
+    supabase.from('memberships').select('account_id, role').limit(1).maybeSingle(),
+    supabase.from('businesses').select('id, name').is('deleted_at', null)
+      .order('created_at').limit(1).maybeSingle(),
+  ])
+
+  return {
+    supabase,
+    accountId: membership?.account_id as string | undefined,
+    role: membership?.role as string | undefined,
+    businessId: business?.id as string | undefined,
+    businessName: business?.name as string | undefined,
+  }
+}
+
+type PgError = { code?: string; message?: string; details?: string | null } | null
+
+/**
+ * Turn a database refusal into something a food-business owner can act on.
+ *
+ * A raw RLS denial reads as "new row violates row-level security policy" and
+ * tells the customer nothing. The database is still the authority -- this only
+ * translates its verdict. It never decides whether a write is allowed, and it
+ * never invents a reason the database did not give.
+ */
+export function describeWriteError(error: PgError): string | null {
+  if (!error) return null
+
+  const code = error.code ?? ''
+  const message = error.message ?? ''
+
+  // Row-level security refused. During a live trial this is a role problem;
+  // after the trial boundary it is the entitlement gate. Both are "you cannot
+  // record new work right now", and neither should surface as SQL.
+  if (code === '42501' || /row-level security/i.test(message)) {
+    return 'Menu Master could not save that. Your subscription or your role on ' +
+      'this account does not allow recording new work at the moment. Everything ' +
+      'you have already entered is still here and still readable.'
+  }
+
+  if (code === '23505') return 'That already exists. Give it a different name.'
+  if (code === '23503') return 'That refers to something which no longer exists. Reload and try again.'
+  if (code === '23514' || code === '23502') {
+    return 'Some of those values are not valid. Quantities and amounts must be ' +
+      'greater than zero, and every field marked required must be filled in.'
+  }
+
+  // A raise exception from one of our own guards already reads as English.
+  if (message) return message
+
+  return 'Menu Master could not save that. Nothing was changed.'
+}
+
+/** Server actions cannot return values to a plain form, so the outcome rides
+ *  on the URL. It survives a refresh, which a client-side toast does not. */
+export function withNotice(path: string, notice: string | null): string {
+  if (!notice) return path
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}notice=${encodeURIComponent(notice)}`
+}

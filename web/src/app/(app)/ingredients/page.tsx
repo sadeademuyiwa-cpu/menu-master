@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { PageHeader, Card, Field, Submit, inputClass, inputStyle, DataList } from '@/components/ui'
+import Link from 'next/link'
+import { PageHeader, Card, Field, Submit, inputClass, inputStyle, Empty } from '@/components/ui'
 import { NOT_ENTERED, money } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
@@ -98,23 +99,37 @@ export default async function IngredientsPage() {
         <h2 className="text-base font-medium">
           Your items {ingredients ? `(${ingredients.length})` : ''}
         </h2>
+        <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+          Open an item to record what you paid for it and how your local
+          measures convert.
+        </p>
         <div className="mt-3">
-          <DataList
-            rows={ingredients ?? []}
-            keyOf={(r) => r.id}
-            empty="No ingredients yet."
-            render={(r) => [
-              { label: 'Name', value: r.name },
-              { label: 'Kind', value: r.kind },
-              { label: 'Base unit', value: unitCode.get(r.base_unit_id) ?? NOT_ENTERED },
-              {
-                label: 'Purchase yield',
-                value: r.purchase_yield_pct === null
-                  ? <span className="mm-absent">{NOT_ENTERED}</span>
-                  : `${r.purchase_yield_pct}%`,
-              },
-            ]}
-          />
+          {!ingredients || ingredients.length === 0 ? (
+            <Empty>No ingredients yet.</Empty>
+          ) : (
+            <ul className="space-y-3">
+              {ingredients.map((r) => (
+                <li key={r.id}>
+                  <Link href={`/ingredients/${r.id}`} className="block">
+                    <Card>
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium">{r.name}</span>
+                        <span className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+                          {r.kind} · base {unitCode.get(r.base_unit_id) ?? NOT_ENTERED}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                        Purchase yield{' '}
+                        {r.purchase_yield_pct === null
+                          ? <span className="mm-absent">{NOT_ENTERED}</span>
+                          : `${r.purchase_yield_pct}%`}
+                      </div>
+                    </Card>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </section>
 
