@@ -287,6 +287,81 @@ select 21, 'no line ever reports a cost of exactly 0 where an input is unknown',
 from v_recipe_line_costs
 where problem in ('missing_price','missing_conversion') and line_cost is not null;
 
+-- ---------------------------------------------------------------------------
+-- 22-24. THE PURCHASE EVIDENCE MUST RECONSTRUCT THE COST IT SITS BESIDE.
+--
+-- fn_ingredient_unit_cost computes a WEIGHTED AVERAGE over wavg_window_days
+-- (default 90) and only falls back to the latest price when that window is
+-- empty. An earlier draft of the view showed the newest purchase instead, so a
+-- customer with two purchases saw "1,000 g for N3,000" beside a cost of
+-- N2.00/g -- a division that does not come out. These checks pin the evidence
+-- to the engine so the two cannot drift apart again.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  a uuid; u uuid := gen_random_uuid(); b uuid; rice uuid := gen_random_uuid();
+  rec uuid := gen_random_uuid(); g uuid; res jsonb; v record;
+begin
+  select id into g from units where account_id is null and code='g';
+  insert into auth.users(id,email) values (u,'evidence23@t.test');
+  res := fn_create_account_and_business('Ev Co','Ev K','caterer',u,
+           p_idempotency_key=>gen_random_uuid()::text);
+  a := (res->>'account_id')::uuid; b := (res->>'business_id')::uuid;
+  insert into ingredients(id,account_id,kind,name,base_unit_id)
+  values (rice,a,'ingredient','Evidence Rice',g);
+
+  -- Two purchases inside the window: 1,000 g at N1,000 then 1,000 g at N3,000.
+  -- The engine charges the weighted average, N2.00/g -- not the newest N3.00/g.
+  insert into ingredient_prices(account_id,ingredient_id,qty_base,amount,source,effective_date)
+  values (a,rice,1000,1000,'manual',current_date - 10),
+         (a,rice,1000,3000,'manual',current_date - 1);
+
+  insert into recipes(id,account_id,business_id,name,batch_yield_qty,yield_unit_id,portion_qty,status)
+  values (rec,a,b,'Evidence Recipe',1000,g,500,'active');
+  insert into recipe_lines(account_id,recipe_id,ingredient_id,qty,unit_id,is_cost_bearing)
+  values (a,rec,rice,1000,g,true);
+
+  select * into v from v_recipe_line_costs where recipe_id = rec;
+
+  insert into t23 values (22,
+    'averaged evidence reconstructs the unit cost the engine charges',
+    case when round(v.purchase_amount / v.purchase_qty_base, 6) = round(v.unit_cost, 6)
+         then 'PASS' else 'FAIL' end,
+    format('evidence %s/%s = %s vs engine %s',
+           v.purchase_amount, v.purchase_qty_base,
+           round(v.purchase_amount / v.purchase_qty_base, 4), round(v.unit_cost, 4)));
+
+  insert into t23 values (23,
+    'the page is told how many purchases the average covers',
+    case when v.purchase_count = 2 then 'PASS' else 'FAIL' end,
+    coalesce(v.purchase_count::text,'null')||' purchase(s)');
+
+  -- A reversed purchase is excluded by the engine and must be excluded here.
+  update ingredient_prices set reversed_at = now()
+   where ingredient_id = rice and amount = 3000;
+
+  select * into v from v_recipe_line_costs where recipe_id = rec;
+  insert into t23 values (24,
+    'a reversed purchase leaves the evidence exactly as it leaves the cost',
+    case when v.purchase_count = 1
+          and round(v.purchase_amount / v.purchase_qty_base, 6) = round(v.unit_cost, 6)
+         then 'PASS' else 'FAIL' end,
+    format('%s purchase(s), evidence %s vs engine %s', v.purchase_count,
+           round(v.purchase_amount / v.purchase_qty_base, 4), round(v.unit_cost, 4)));
+end $$;
+
+-- 25. The invariant, stated once over every costed line in the database.
+insert into t23
+select 25, 'every costed line''s evidence reconstructs its unit cost',
+       case when count(*) = 0 then 'PASS' else 'FAIL' end,
+       count(*)||' line(s) whose evidence contradicts the engine'
+from v_recipe_line_costs v
+join ingredients ing on ing.id = v.ingredient_id
+where v.problem = 'ok'
+  and v.purchase_qty_base > 0
+  and round(v.purchase_amount / v.purchase_qty_base
+            / (ing.purchase_yield_pct / 100.0), 6) <> round(v.unit_cost, 6);
+
 select * from t23 order by n;
 select count(*) filter (where verdict='PASS') as pass,
        count(*) filter (where verdict<>'PASS') as fail

@@ -19,6 +19,7 @@ type LineCost = {
   recipe_qty: string; recipe_unit: string | null; base_unit: string | null
   base_qty: string | null; unit_cost: string | null; line_cost: string | null
   purchase_qty_base: string | null; purchase_amount: string | null; purchase_date: string | null
+  purchase_count: number | null
   problem: 'ok' | 'missing_price' | 'missing_conversion' | 'excluded' | 'sub_recipe'
 }
 type Snapshot = {
@@ -524,11 +525,20 @@ function LineGroup({ title, lines, recipeId, pro }: {
                   </p>
                 )}
 
+                {/*
+                  The unit cost is a weighted average over the business's
+                  wavg_window_days, not the newest receipt, so this must say
+                  how many purchases it averages. Saying "you bought X for Y"
+                  beside an averaged cost invites a division that does not come
+                  out, and the owner would rightly stop trusting the number.
+                */}
                 {pro && pAmt !== null && pQty !== null && l.base_unit && (
                   <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                    You bought {pQty} {l.base_unit} for {money(pAmt)}
-                    {l.purchase_date ? ` on ${l.purchase_date}` : ''} · uses{' '}
-                    {n(l.base_qty) ?? '?'} {l.base_unit} of it
+                    {(l.purchase_count ?? 1) > 1
+                      ? <>Averaged across {l.purchase_count} purchases: {pQty} {l.base_unit} for {money(pAmt)}</>
+                      : <>You bought {pQty} {l.base_unit} for {money(pAmt)}
+                          {l.purchase_date ? ` on ${l.purchase_date}` : ''}</>}
+                    {' '}· uses {n(l.base_qty) ?? '?'} {l.base_unit} of it
                   </p>
                 )}
 

@@ -79,11 +79,26 @@ select
       * fn_ingredient_usable_unit_cost(rl.ingredient_id, r.business_id)
   end                                as line_cost,
 
-  -- The most recent purchase behind that unit cost, so the page can show the
-  -- customer their own evidence: "50 kg for 85,000 = 1,700 per kg".
-  p.qty_base                         as purchase_qty_base,
-  p.amount                           as purchase_amount,
-  p.effective_date                   as purchase_date,
+  -- The purchases that ACTUALLY produced that unit cost, so the page can show
+  -- the customer their own evidence and they can reproduce the division.
+  --
+  -- This is not "the latest purchase". fn_ingredient_unit_cost (0007) computes
+  -- a WEIGHTED AVERAGE over business_settings.wavg_window_days -- default 90 --
+  -- and only falls back to the single latest price when that window is empty.
+  -- Showing the newest receipt beside an averaged cost states a division the
+  -- customer cannot reproduce: with 1,000 g at N1,000 then 1,000 g at N3,000,
+  -- the engine charges N2.00/g while the newest receipt implies N3.00/g.
+  -- These columns therefore mirror the function's own selection exactly --
+  -- same window, same reversed_at filter, same as-of cut, same fallback --
+  -- and purchase_count tells the page whether to say "you bought" or
+  -- "across N purchases". tests/023 asserts amount/qty_base (after purchase
+  -- yield) reconstructs unit_cost for every costed line, so the two cannot
+  -- drift apart silently.
+  case when w.qty_base > 0 then w.qty_base       else l.qty_base       end as purchase_qty_base,
+  case when w.qty_base > 0 then w.amount         else l.amount         end as purchase_amount,
+  case when w.qty_base > 0 then w.last_date      else l.effective_date end as purchase_date,
+  case when w.qty_base > 0 then w.purchase_count
+       when l.qty_base is not null then 1 else 0 end                       as purchase_count,
 
   case
     when not rl.is_cost_bearing                                              then 'excluded'
@@ -99,13 +114,31 @@ left join ingredients i on i.id = rl.ingredient_id
 left join recipes sr    on sr.id = rl.sub_recipe_id
 left join units u       on u.id = rl.unit_id
 left join units bu      on bu.id = i.base_unit_id
+left join business_settings bs on bs.business_id = r.business_id
+-- The weighted-average window: the same rows fn_ingredient_unit_cost sums.
+left join lateral (
+  select sum(ip.qty_base)        as qty_base,
+         sum(ip.amount)          as amount,
+         max(ip.effective_date)  as last_date,
+         count(*)::int           as purchase_count
+    from ingredient_prices ip
+   where ip.ingredient_id = rl.ingredient_id
+     and ip.account_id    = r.account_id
+     and ip.reversed_at is null
+     and ip.effective_date <= current_date
+     and ip.effective_date >  current_date - (bs.wavg_window_days || ' days')::interval
+) w on true
+-- The fallback the function uses when that window is empty: the latest price.
 left join lateral (
   select ip.qty_base, ip.amount, ip.effective_date
     from ingredient_prices ip
    where ip.ingredient_id = rl.ingredient_id
+     and ip.account_id    = r.account_id
+     and ip.reversed_at is null
+     and ip.effective_date <= current_date
    order by ip.effective_date desc, ip.created_at desc
    limit 1
-) p on true;
+) l on true;
 
 comment on view v_recipe_line_costs is
   'Per-line cost contribution, computed by the same two functions the costing '
