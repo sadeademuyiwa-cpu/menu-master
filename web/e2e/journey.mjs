@@ -25,16 +25,33 @@ const mark = (name, ok, detail = '') => {
 }
 
 async function text(page) { return page.locator('body').innerText() }
+/**
+ * innerText returns text AFTER CSS text-transform, so a heading styled
+ * `uppercase` reads back as "COST PER PORTION" and a literal match fails on
+ * copy that is in fact present. Case is presentational here; the words are the
+ * assertion. Everything else stays exact -- amounts and percentages are
+ * compared character for character.
+ */
+const has = (body, needle) => body.toLowerCase().includes(needle.toLowerCase())
 async function must(page, name, ...needles) {
   const body = await text(page)
-  const missing = needles.filter((n) => !body.includes(n))
+  const missing = needles.filter((n) => !has(body, n))
   mark(name, missing.length === 0, missing.length ? `missing ${JSON.stringify(missing)}` : '')
   return missing.length === 0
 }
 async function mustNot(page, name, ...needles) {
   const body = await text(page)
-  const present = needles.filter((n) => body.includes(n))
-  mark(name, present.length === 0, present.length ? `unexpectedly present ${JSON.stringify(present)}` : '')
+  const present = needles.filter((n) => has(body, n))
+  // Report WHERE a forbidden value appeared. "unexpectedly present" alone sent
+  // me guessing once; the surrounding line says whether it is a recipe total
+  // (a real fault) or a labelled per-line figure (not one).
+  const context = present.map((n) => {
+    const line = body.split('\n').find((l) => has(l, n)) ?? ''
+    const i = body.split('\n').findIndex((l) => has(l, n))
+    const near = body.split('\n').slice(Math.max(0, i - 2), i + 2).join(' / ')
+    return `${n} in "${line.trim()}" [context: ${near.trim()}]`
+  })
+  mark(name, present.length === 0, present.length ? `unexpectedly present -> ${context.join(' ;; ')}` : '')
 }
 /** Playwright needs an exact label; the unit list is data, so match on text. */
 async function pick(scope, selector, needle) {
@@ -55,6 +72,7 @@ const go = async (page, path) => {
 const submit = async (page, selector) => {
   steps++
   await Promise.all([page.waitForLoadState('domcontentloaded'), page.click(selector)])
+  await page.waitForLoadState('networkidle').catch(() => {})
   await page.waitForTimeout(400)
 }
 
@@ -63,14 +81,27 @@ async function signUp(page, who) {
   await page.fill('input[type=email]', who.email)
   await page.fill('input[type=password]', who.pass)
   await submit(page, 'button[type=submit]')
-  await page.waitForTimeout(600)
+  // The auth cookie is written by a server action. Poll a protected route
+  // until it actually renders for this user rather than sleeping and hoping:
+  // a fixed delay passed locally and raced under load.
+  await settled(page, '/onboarding', 'Set up your business')
+}
+/** Navigate until the page proves the session is live, or fail loudly. */
+async function settled(page, path, needle, tries = 15) {
+  for (let i = 0; i < tries; i++) {
+    await go(page, path)
+    const body = await text(page)
+    if (body.includes(needle)) return true
+    await page.waitForTimeout(400)
+  }
+  throw new Error(`session never settled: ${path} never showed ${JSON.stringify(needle)}`)
 }
 async function logIn(page, who) {
   await go(page, '/login')
   await page.fill('input[type=email]', who.email)
   await page.fill('input[type=password]', who.pass)
   await submit(page, 'button[type=submit]')
-  await page.waitForTimeout(600)
+  await settled(page, '/dashboard', 'Menu Master NG')
 }
 async function onboard(page, account, business) {
   await go(page, '/onboarding')
@@ -100,7 +131,7 @@ page.on('requestfailed', (r) => {
 })
 
 await signUp(page, A)
-mark('signup completes and lands inside the app', !page.url().includes('/login'), page.url())
+mark('signup completes and lands inside the app', (await text(page)).includes('Set up your business'), page.url())
 
 await onboard(page, 'Ada Foods', 'Ada Kitchen')
 await must(page, 'onboarding reaches the dashboard', 'Menu Master NG')
@@ -132,6 +163,7 @@ await buyForm.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
 await must(page, 'a purchase in an unknown local unit is REFUSED with a plain explanation',
   'does not know how much of the base unit')
+await page.screenshot({ path: 'e2e/shots/rc-ingredient-unknown-unit.png', fullPage: true })
 await mustNot(page, 'no cost is invented for the refused purchase', '₦0.00', 'NaN')
 
 // --- 2. conversion, then the purchase ---------------------------------------
@@ -161,12 +193,13 @@ await page.fill('input[name=batch_yield_qty]', '4000')
 await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
 await page.fill('input[name=portion_qty]', '500')
 await submit(page, 'form button[type=submit]')
-await must(page, 'the recipe is created and opens', 'Ofada Special', 'Ingredients used')
+await must(page, 'the recipe is created and opens', 'Ofada Special', 'Ingredients')
 const recipeUrl = page.url().split('?')[0]
 const tFirstRecipe = Date.now() - t0
 const stepsFirstRecipe = steps
 
 // --- 1. a complete, costed recipe -------------------------------------------
+await page.locator('summary:has-text("Add an ingredient")').first().click()
 const addLine = page.locator('form:has(select[name=ingredient_id])')
 await pick(addLine, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
 await addLine.locator('input[name=qty]').fill('2000')
@@ -174,8 +207,9 @@ await pick(addLine, 'select[name=unit_id]', 'g — Gram')
 steps++
 await addLine.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
-await must(page, 'THE FIRST VALUE MOMENT: a real cost and a real cost per portion',
-  '₦2,250.00', '₦281.25')
+await must(page, 'THE FIRST VALUE MOMENT: cost per portion, above the fold',
+  'Cost per portion', '₦281.25')
+await page.screenshot({ path: 'e2e/shots/rc-desktop-costed.png', fullPage: true })
 const tFirstCost = Date.now() - t0
 const stepsFirstCost = steps
 
@@ -185,7 +219,8 @@ await priceForm.locator('input[name=price]').fill('500')
 steps++
 await priceForm.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
-await must(page, 'margin and profit appear from v_price_check', '43.75%', '₦218.75')
+await must(page, 'profit, margin and a plain-language verdict appear',
+  '₦218.75', '43.75%', 'Healthy')
 const tFirstMargin = Date.now() - t0
 const stepsFirstMargin = steps
 
@@ -195,6 +230,7 @@ await page.fill('input[name=name]', `Palm Oil ${stamp}`)
 await pick(page, 'select[name=base_unit_id]', 'ml — Millilitre')
 await submit(page, 'form button[type=submit]')
 await go(page, recipeUrl)
+await page.locator('summary:has-text("Add an ingredient")').first().click()
 const addLine2 = page.locator('form:has(select[name=ingredient_id])')
 await pick(addLine2, 'select[name=ingredient_id]', `Palm Oil ${stamp}`)
 await addLine2.locator('input[name=qty]').fill('100')
@@ -202,9 +238,24 @@ await pick(addLine2, 'select[name=unit_id]', 'ml — Millilitre')
 steps++
 await addLine2.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
-await must(page, 'an unpriced ingredient blocks the cost and names the item',
-  'cannot be costed yet', `Palm Oil ${stamp}`, 'no purchase price recorded')
-await mustNot(page, 'no cost or margin is shown while incomplete', '₦2,250.00', '43.75%')
+await must(page, 'an unpriced ingredient blocks the cost and NAMES the item',
+  'Cost incomplete', `Palm Oil ${stamp}`, 'has no purchase price')
+// The engine counts portion size as a required input, so a "priced of required"
+// ratio shows a number the owner cannot account for on screen.
+await mustNot(page, 'the blocker count does not cite items the page never shows',
+  '2 of 3 items', 'of 3 items are ready')
+await page.screenshot({ path: 'e2e/shots/rc-desktop-missing-price.png', fullPage: true })
+// While a recipe is incomplete, no RECIPE-LEVEL figure may appear: not the cost
+// per portion, not the batch cost, not the profit, not the margin. A per-line
+// cost is a different thing and is deliberately still shown -- ₦2,250.00 is the
+// true cost of the rice line, derived from the owner's own purchase, and
+// hiding it would hide what they already know. The blocker names what is
+// missing; the lines show what is not.
+await mustNot(page, 'no recipe cost, profit or margin is shown while incomplete',
+  '₦281.25', '₦218.75', '43.75%', 'Cost per portion', 'Profit per portion')
+await must(page, 'the priced line still shows its own true cost while incomplete',
+  '₦2,250.00', '₦1.13 per g')
+await mustNot(page, 'and no ₦0.00 stands in for the unknown cost', '₦0.00')
 
 // remove it again so the rest of the journey has a complete recipe
 const removeForms = page.locator('form:has(input[name=line_id])')
@@ -225,8 +276,56 @@ await mustNot(page, 'the stale cost is gone', '₦2,250.00')
 // The margin must follow the cost. At ₦500 a portion costing ₦562.50 now loses
 // money, and the product has to say so rather than keep showing the old 43.75%.
 await must(page, 'the margin follows the cost and turns negative',
-  '-12.50%', 'selling this below what it costs')
+  '-12.50%', 'Loss', 'less than it costs you to make')
+await page.screenshot({ path: 'e2e/shots/rc-desktop-below-cost.png', fullPage: true })
 await mustNot(page, 'the stale margin is gone', '43.75%')
+
+// --- full costing view -------------------------------------------------------
+await go(page, recipeUrl + '?view=pro')
+await must(page, 'the full costing view shows the batch breakdown',
+  'Full costing', 'Batch cost', 'Where the batch cost goes', 'Portions per batch')
+await page.screenshot({ path: 'e2e/shots/rc-desktop-pro.png', fullPage: true })
+
+// --- 3. the RECIPE-level missing-conversion blocker --------------------------
+// Distinct from the ingredient page refusing an unknown purchase unit: here the
+// ingredient IS priced, but the recipe asks for it in a unit that has no
+// conversion for this item, so the engine cannot resolve the quantity. The
+// recipe must name that, and must not fall back to a guess.
+await go(page, '/ingredients')
+await page.fill('input[name=name]', `Garri ${stamp}`)
+await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await submit(page, 'form button[type=submit]')
+await page.locator(`a:has-text("Garri ${stamp}")`).first().click()
+await page.waitForLoadState('domcontentloaded')
+const garriBuy = page.locator('form:has(input[name=amount])')
+await garriBuy.locator('input[name=qty]').fill('1000')
+await pick(garriBuy, 'select[name=unit_id]', 'g — Gram')
+await garriBuy.locator('input[name=amount]').fill('2000')
+steps++
+await garriBuy.locator('button[type=submit]').click()
+await page.waitForTimeout(900)
+
+await go(page, '/recipes')
+await page.fill('input[name=name]', 'Garri Test')
+await page.fill('input[name=batch_yield_qty]', '1000')
+await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
+await page.fill('input[name=portion_qty]', '250')
+await submit(page, 'form button[type=submit]')
+const convRecipeUrl = page.url().split('?')[0]
+await page.locator('summary:has-text("Add an ingredient")').first().click()
+const addConv = page.locator('form:has(select[name=ingredient_id])')
+await pick(addConv, 'select[name=ingredient_id]', `Garri ${stamp}`)
+await addConv.locator('input[name=qty]').fill('2')
+await pick(addConv, 'select[name=unit_id]', 'paint')
+steps++
+await addConv.locator('button[type=submit]').click()
+await page.waitForTimeout(1200)
+await must(page, 'a recipe line in an unconvertible unit blocks and says what is needed',
+  'Cost incomplete', `Garri ${stamp}`, 'paint')
+await mustNot(page, 'no cost is guessed for the unconvertible line', '₦0.00', 'NaN')
+await page.screenshot({ path: 'e2e/shots/rc-desktop-missing-conversion.png', fullPage: true })
+
+await go(page, recipeUrl)
 
 // --- 5. persistence after refresh -------------------------------------------
 steps++
@@ -238,6 +337,7 @@ await go(page, recipeUrl)
 await must(page, 'the recipe opens from a direct URL', 'Ofada Special', '₦4,500.00')
 
 // --- 8. validation ----------------------------------------------------------
+await page.locator('summary:has-text("Add an ingredient")').first().click()
 const addLine3 = page.locator('form:has(select[name=ingredient_id])')
 await pick(addLine3, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
 await addLine3.locator('input[name=qty]').fill('0')
@@ -282,20 +382,45 @@ await ctxB.close()
 // ===========================================================================
 // MOBILE — the value moment on a phone
 // ===========================================================================
-const ctxM = await browser.newContext({ viewport: { width: 390, height: 844 } })
-const pageM = await ctxM.newPage()
-await logIn(pageM, A)
-await go(pageM, recipeUrl)
-await must(pageM, 'mobile shows the cost, the portion cost and the margin',
-  '₦4,500.00', '₦562.50', '-12.50%')
-const overflow = await pageM.evaluate(
-  () => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-mark('no horizontal overflow on a 390px viewport', overflow === 0, `${overflow}px`)
-await pageM.screenshot({ path: 'e2e/shots/real-mobile-recipe.png', fullPage: true })
-await go(pageM, '/ingredients')
-await must(pageM, 'mobile ingredient list renders', `Ofada Rice ${stamp}`)
-await pageM.screenshot({ path: 'e2e/shots/real-mobile-ingredients.png', fullPage: true })
-await ctxM.close()
+for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'tablet']]) {
+  const ctxM = await browser.newContext({ viewport: { width: w, height: h } })
+  const pageM = await ctxM.newPage()
+  await logIn(pageM, A)
+  await go(pageM, recipeUrl)
+  await must(pageM, `${tag}px shows the portion cost and the margin above the fold`,
+    'Cost per portion', '₦562.50', '-12.50%')
+  const overflow = await pageM.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  mark(`no horizontal overflow at ${tag}px`, overflow === 0, `${overflow}px`)
+
+  // The bottom nav is position:fixed on phones. A fullPage screenshot renders
+  // it mid-page, which LOOKS like it covers the ingredient rows. That is a
+  // capture artifact -- but whether it covers real content at the true bottom
+  // of the page is a real question, so measure it instead of trusting a class.
+  const occluded = await pageM.evaluate(() => {
+    window.scrollTo(0, document.body.scrollHeight)
+    const nav = document.querySelector('nav')
+    if (!nav || getComputedStyle(nav).position !== 'fixed') return []
+    const bar = nav.getBoundingClientRect()
+    const hidden = []
+    for (const el of document.querySelectorAll('main button, main input, main a, main select')) {
+      const r = el.getBoundingClientRect()
+      if (r.height === 0) continue
+      if (r.bottom > bar.top && r.top < bar.bottom) hidden.push(el.textContent?.trim() || el.tagName)
+    }
+    return hidden
+  })
+  mark(`the fixed nav covers no control at ${tag}px`, occluded.length === 0,
+    occluded.length ? `covered: ${JSON.stringify(occluded.slice(0, 3))}` : 'scrolled to bottom')
+  if (tag === '390') {
+    await pageM.screenshot({ path: 'e2e/shots/rc-mobile-costed.png', fullPage: true })
+    await go(pageM, recipeUrl + '?view=pro')
+    await pageM.screenshot({ path: 'e2e/shots/rc-mobile-pro.png', fullPage: true })
+    await go(pageM, '/ingredients')
+    await must(pageM, 'mobile ingredient list renders', `Ofada Rice ${stamp}`)
+  }
+  await ctxM.close()
+}
 
 await page.screenshot({ path: 'e2e/shots/real-desktop-recipe.png', fullPage: true })
 

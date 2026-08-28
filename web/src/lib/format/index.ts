@@ -60,3 +60,65 @@ export function coverageLabel(pct: number | string | null | undefined): string {
   if (!Number.isFinite(n)) return 'coverage unknown'
   return `${n.toFixed(0)}% of revenue has a verified cost`
 }
+
+/**
+ * Margin health, as words a food-business owner uses.
+ *
+ * PRESENTATION ONLY. The threshold is the business's own
+ * `default_target_margin` (or the channel's, where one is set) -- it is not
+ * invented here, and this function decides nothing financial. It is isolated so
+ * it can become configurable without touching any page.
+ *
+ * A negative margin is NEVER "fair". Selling below cost is its own verdict.
+ */
+export type MarginVerdict = {
+  label: 'Loss' | 'Low' | 'Fair' | 'Healthy'
+  tone: 'bad' | 'warn' | 'ok' | 'good'
+  sentence: string
+}
+
+export function marginVerdict(
+  marginPct: number | null,
+  targetPct: number | null,
+): MarginVerdict | null {
+  if (marginPct === null || !Number.isFinite(marginPct)) return null
+
+  if (marginPct < 0) {
+    return {
+      label: 'Loss',
+      tone: 'bad',
+      sentence: 'You are selling this for less than it costs you to make.',
+    }
+  }
+
+  const target = targetPct !== null && Number.isFinite(targetPct) && targetPct > 0
+    ? targetPct
+    : null
+
+  if (target === null) {
+    return {
+      label: 'Fair',
+      tone: 'ok',
+      sentence: 'Set a target margin in your settings to see whether this is where you want it.',
+    }
+  }
+  if (marginPct >= target) {
+    return {
+      label: 'Healthy',
+      tone: 'good',
+      sentence: `At or above your ${target}% target.`,
+    }
+  }
+  if (marginPct >= target * 0.75) {
+    return {
+      label: 'Fair',
+      tone: 'ok',
+      sentence: `A little under your ${target}% target.`,
+    }
+  }
+  return {
+    label: 'Low',
+    tone: 'warn',
+    sentence: `Well under your ${target}% target.`,
+  }
+}

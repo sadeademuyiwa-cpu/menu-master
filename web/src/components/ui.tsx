@@ -145,3 +145,70 @@ export function SectionHeading({ children, sub }: {
     </div>
   )
 }
+
+/** The one number a customer came for. Larger than everything around it. */
+export function HeroStat({ label, value, sub, tone = 'plain' }: {
+  label: string
+  value: React.ReactNode
+  sub?: React.ReactNode
+  tone?: 'plain' | 'good' | 'bad' | 'warn'
+}) {
+  const colour =
+    tone === 'good' ? 'var(--mm-accent)' :
+    tone === 'bad' ? 'var(--mm-warn)' :
+    tone === 'warn' ? 'var(--mm-warn)' : 'inherit'
+  return (
+    <div className="rounded border p-4" style={{ borderColor: 'var(--mm-line)' }}>
+      <div className="text-xs uppercase tracking-wide" style={{ color: 'var(--mm-muted)' }}>
+        {label}
+      </div>
+      <div className="mt-1 text-3xl font-semibold tabular-nums" style={{ color: colour }}>
+        {value}
+      </div>
+      {sub && <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>{sub}</div>}
+    </div>
+  )
+}
+
+/** A proportional bar. Rendered only for costs that are actually tracked. */
+export function CostBar({ parts }: {
+  parts: { label: string; amount: number; pct: number }[]
+}) {
+  if (parts.length === 0) return null
+  const shade = ['var(--mm-accent)', 'var(--mm-warn)', 'var(--mm-muted)', 'var(--mm-line)']
+  return (
+    <div>
+      <div className="flex h-3 w-full overflow-hidden rounded" style={{ background: 'var(--mm-line)' }}>
+        {parts.map((p, i) => (
+          <div key={p.label} style={{ width: `${p.pct}%`, background: shade[i % shade.length] }} />
+        ))}
+      </div>
+      <ul className="mt-2 space-y-1 text-sm">
+        {parts.map((p, i) => (
+          <li key={p.label} className="flex items-center gap-2">
+            <span className="inline-block h-2 w-2 rounded-full"
+              style={{ background: shade[i % shade.length] }} />
+            <span className="flex-1">{p.label}</span>
+            <span className="tabular-nums">{p.pct.toFixed(0)}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** Collapsible on a phone, open on a wide screen. No JavaScript required. */
+export function Disclosure({ summary, children, open = false }: {
+  summary: React.ReactNode
+  children: React.ReactNode
+  open?: boolean
+}) {
+  return (
+    <details open={open} className="rounded border" style={{ borderColor: 'var(--mm-line)' }}>
+      <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{summary}</summary>
+      <div className="border-t px-3 py-3" style={{ borderColor: 'var(--mm-line)' }}>
+        {children}
+      </div>
+    </details>
+  )
+}
