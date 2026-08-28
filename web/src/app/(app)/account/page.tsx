@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { currentContext } from '@/lib/data/context'
+import { currentContext, entitlementStatus } from '@/lib/data/context'
 import { PageHeader, Card, SectionHeading, Notice, Empty, BackLink } from '@/components/ui'
 import { NOT_ENTERED } from '@/lib/format'
 
@@ -24,19 +24,19 @@ export default async function AccountPage() {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: sub }, { data: plans }] = await Promise.all([
+  const [{ data: sub }, { data: plans }, entitlement] = await Promise.all([
     supabase.from('subscriptions')
       .select('plan_id,status,trial_ends_at,current_period_end').maybeSingle<Sub>(),
     supabase.from('plans').select('id,name').returns<{ id: string; name: string }[]>(),
+    entitlementStatus(),
   ])
 
   const planName = plans?.find((p) => p.id === sub?.plan_id)?.name ?? sub?.plan_id ?? NOT_ENTERED
 
-  // The boundary is a stored fact, read and displayed. Whether an account is
-  // entitled is decided by the database, never here -- when
-  // fn_my_entitlement_status() ships this page reads that instead of dates.
-  const boundary = sub?.current_period_end ?? null
-  const boundaryPassed = boundary !== null && new Date(boundary).getTime() <= Date.now()
+  // Entitlement is the DATABASE's verdict, read through
+  // fn_my_entitlement_status(). This page never interprets a date to decide
+  // whether someone may work -- it only displays the dates as facts.
+  const boundary = entitlement?.boundary ?? sub?.current_period_end ?? null
 
   return (
     <div className="space-y-8">
@@ -44,16 +44,22 @@ export default async function AccountPage() {
 
       <PageHeader title="Account" sub="Your business, your plan and your access." />
 
-      {sub?.status === 'trialing' && boundary && (
-        boundaryPassed ? (
-          <Notice>
-            Your free trial ended on {fmtDate(boundary)}. Everything you entered is
-            still here — you can open and export every recipe and price. To record
-            new work again, subscribe when paid plans open.
+      {entitlement && (
+        entitlement.entitled ? (
+          <Notice tone="info">
+            {entitlement.reason === 'trial_active'
+              ? `You are on the free trial${boundary ? ` until ${fmtDate(boundary)}` : ''}.`
+              : entitlement.reason === 'payment_failed_in_grace'
+                ? 'We could not take your last payment. Your access continues while you sort it out.'
+                : 'Your subscription is active.'}
           </Notice>
         ) : (
-          <Notice tone="info">
-            You are on the free trial until {fmtDate(boundary)}.
+          <Notice>
+            {entitlement.reason === 'trial_ended'
+              ? `Your free trial ended${boundary ? ` on ${fmtDate(boundary)}` : ''}.`
+              : 'Your subscription has ended.'}{' '}
+            Everything you entered is still here — you can open and export every
+            recipe and price. To record new work again, you will need to subscribe.
           </Notice>
         )
       )}

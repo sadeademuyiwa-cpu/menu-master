@@ -151,12 +151,21 @@ begin
 
   select count(*) into n from pg_policies where schemaname='public'
     and coalesce(qual,'')||coalesce(with_check,'') like '%fn_account_is_entitled%';
-  insert into t9 values (13,'60 write policies carry the gate',
-    case when n=60 then 'PASS' else 'FAIL' end, n||' policy(ies)');
+  -- 0032 DELIBERATELY widened this. V-7: ingredient_prices, cost_snapshots and
+  -- recipe_prices carried 0004 blanket `for all` policies, which 0028's
+  -- name-pattern selection could never match, so those three tables were never
+  -- entitlement-gated. 0032 splits each into named per-verb policies, adding 9
+  -- gated write policies. THE RULE CHANGED; THE TEST IS NOT BEING WEAKENED --
+  -- the expected count went UP, and check 12 still proves no read is gated.
+  insert into t9 values (13,'write policies carrying the gate: 60 before 0032, 69 after',
+    case when n in (60, 69) then 'PASS' else 'FAIL' end,
+    n||' policy(ies)'||case when n=69 then ' (0032 applied)' else ' (pre-0032)' end);
 
   select count(*) into n from pg_policies where schemaname='public';
-  insert into t9 values (14,'the policy count did not move',
-    case when n=105 then 'PASS' else 'FAIL' end, n::text);
+  -- 105 before 0031/0032. After them: +12 -3 on the cost tables, +1 for
+  -- subscription_changes, +1 for billing_config = 116.
+  insert into t9 values (14,'the policy count moved only by what 0031/0032 declare',
+    case when n in (105, 116) then 'PASS' else 'FAIL' end, n::text);
 
   select count(*) into n from pg_proc p where p.proname='fn_account_is_entitled'
     and has_function_privilege('anon', p.oid, 'EXECUTE');

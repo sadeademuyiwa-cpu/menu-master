@@ -159,3 +159,31 @@ grant execute on function auth.role() to anon, authenticated, service_role;
 --   - It does not create a `postgres` superuser. Test 003 expects
 --     `SET ROLE postgres` to fail from the authenticator connection.
 -- ----------------------------------------------------------------------------
+
+
+-- ----------------------------------------------------------------------------
+-- PostgREST pre-request hook, LOCAL ONLY. Deliberately NOT named fn_*, because
+-- 0021 and later migrations count public.fn_* functions in their preflights.
+--
+-- PostgREST 12 exposes the token as the JSON GUC `request.jwt.claims`. The
+-- Supabase platform additionally publishes the individual legacy GUCs, and
+-- auth.uid() above reads `request.jwt.claim.sub`. This bridges the two so a
+-- locally hosted PostgREST behaves like the hosted one.
+--
+-- Never run against Supabase: the platform provides this itself.
+-- ----------------------------------------------------------------------------
+create or replace function public.local_pre_request()
+returns void
+language plpgsql
+as $$
+declare
+  v_claims json := nullif(current_setting('request.jwt.claims', true), '')::json;
+begin
+  perform set_config('request.jwt.claim.sub',
+                     coalesce(v_claims ->> 'sub', ''), true);
+  perform set_config('request.jwt.claim.role',
+                     coalesce(v_claims ->> 'role', ''), true);
+end;
+$$;
+
+grant execute on function public.local_pre_request() to anon, authenticated, service_role;

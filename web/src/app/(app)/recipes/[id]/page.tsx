@@ -301,7 +301,8 @@ export default async function RecipeDetail(props: {
             </p>
             <p className="mt-1">
               Menu Master will not show a cost it cannot stand behind, and it will
-              not treat a missing price as nothing.
+              not treat a missing price as nothing. Add what you paid for the
+              items below and the cost appears straight away.
             </p>
             {blockers && blockers.length > 0 && (
               <ul className="mt-2 list-disc pl-5">
@@ -310,7 +311,7 @@ export default async function RecipeDetail(props: {
                     {b.ingredient_name ?? b.item ?? 'An ingredient'}
                     {b.problem === 'missing_price' && ' — no purchase price recorded'}
                     {b.problem === 'missing_conversion' &&
-                      ` — no conversion for ${b.unit_code ?? 'that unit'}`}
+                      ` — tell us how much one ${b.unit_code ?? 'of that measure'} weighs`}
                     {b.problem !== 'missing_price' && b.problem !== 'missing_conversion' &&
                       ` — ${b.problem}`}
                   </li>
@@ -334,6 +335,18 @@ export default async function RecipeDetail(props: {
           </Field>
           <Submit>Save price</Submit>
         </form>
+
+        {check && check.is_complete && check.profit !== null && Number(check.profit) < 0 && (
+          <Notice>
+            <span className="font-medium">
+              You are selling this below what it costs to make.
+            </span>{' '}
+            One portion costs {money(check.cost_per_portion === null ? null : Number(check.cost_per_portion))}{' '}
+            and you are charging {money(check.selling_price === null ? null : Number(check.selling_price))}.
+            {check.recommended_price !== null &&
+              ` To reach your target margin you would need ${money(Number(check.recommended_price))}.`}
+          </Notice>
+        )}
 
         {check && (
           check.is_complete ? (

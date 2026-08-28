@@ -1,7 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
 import Link from 'next/link'
-import { PageHeader, Card, Field, Submit, inputClass, inputStyle, Empty } from '@/components/ui'
+import { PageHeader, Card, Field, Submit, inputClass, inputStyle, Empty, Notice } from '@/components/ui'
 import { NOT_ENTERED, money } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
@@ -17,23 +19,37 @@ type Row = {
 
 async function addIngredient(formData: FormData) {
   'use server'
-  const supabase = await createClient()
+  const here = '/ingredients'
+  const { supabase, accountId } = await currentContext()
 
   // account_id is required by the table; RLS still refuses a foreign one, so
   // this is a convenience lookup, never an authorization decision.
-  const { data: m } = await supabase.from('memberships').select('account_id').limit(1).single()
-  if (!m) return
+  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
 
-  await supabase.from('ingredients').insert({
-    account_id: m.account_id,
-    name: String(formData.get('name') ?? '').trim(),
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) redirect(withNotice(here, 'Give the item a name.'))
+
+  const { error } = await supabase.from('ingredients').insert({
+    account_id: accountId,
+    name,
     kind: String(formData.get('kind') ?? 'ingredient'),
     base_unit_id: String(formData.get('base_unit_id') ?? ''),
   })
-  revalidatePath('/ingredients')
+
+  revalidatePath(here)
+  // A duplicate name used to fail in silence: the form cleared and nothing
+  // appeared. The database's refusal is now shown to the customer.
+  redirect(withNotice(here, error
+    ? (error.code === '23505'
+        ? `You already have an item called “${name}”. Open it to record a purchase, or use a different name.`
+        : describeWriteError(error))
+    : `${name} added.`))
 }
 
-export default async function IngredientsPage() {
+export default async function IngredientsPage(props: {
+  searchParams: Promise<{ notice?: string }>
+}) {
+  const { notice } = await props.searchParams
   const supabase = await createClient()
 
   const [{ data: ingredients }, { data: units }, { data: missing }] = await Promise.all([
@@ -53,6 +69,10 @@ export default async function IngredientsPage() {
         title="Ingredients"
         sub="Your own items and prices. Menu Master never supplies a price or a conversion for you."
       />
+
+      {notice && (
+        <Notice tone={/already|could not|not allow/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>
+      )}
 
       {missing && missing.length > 0 && (
         <Card>

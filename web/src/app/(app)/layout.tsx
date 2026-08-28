@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { EntitlementBanner } from '@/components/entitlement-banner'
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -32,7 +33,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 pb-24 sm:pb-6">
+      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 pb-24 sm:pb-6">
+        <EntitlementBanner />
         {children}
       </main>
 

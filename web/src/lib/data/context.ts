@@ -26,6 +26,30 @@ export async function currentContext() {
   }
 }
 
+export type EntitlementStatus = {
+  entitled: boolean
+  status: string
+  boundary: string | null
+  reason: string
+}
+
+/**
+ * The caller's entitlement, from the database.
+ *
+ * fn_my_entitlement_status() derives from fn_account_is_entitled, so this is
+ * the same rule the 69 write policies enforce -- not a second reading of
+ * subscription dates that could drift from it. If the function is not present
+ * (0032 not yet applied) this returns null and callers fall back to saying
+ * nothing, which is honest.
+ */
+export async function entitlementStatus(): Promise<EntitlementStatus | null> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('fn_my_entitlement_status')
+  if (error || !data || (Array.isArray(data) && data.length === 0)) return null
+  const row = Array.isArray(data) ? data[0] : data
+  return row as EntitlementStatus
+}
+
 type PgError = { code?: string; message?: string; details?: string | null } | null
 
 /**

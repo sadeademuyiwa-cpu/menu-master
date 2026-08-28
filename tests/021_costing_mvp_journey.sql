@@ -346,6 +346,49 @@ begin
     n_tied||' snapshot(s) share the same computed_at');
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- REGRESSIONS FOUND DURING THE 7 SEPTEMBER LAUNCH SPRINT
+-- ---------------------------------------------------------------------------
+
+-- 21. A duplicate ingredient name is refused by the database, so the UI has
+--     something to report. Before this sprint the add form swallowed the error
+--     and appeared to do nothing.
+do $$
+declare f record; msg text := 'ACCEPTED';
+begin
+  select * into f from fx21;
+  begin
+    insert into ingredients (account_id, kind, name, base_unit_id)
+    values (f.acct, 'ingredient', 'test rice', f.u_g);   -- differs only in case
+  exception when unique_violation then msg := 'REFUSED_DUPLICATE';
+  end;
+  insert into t21 values (21, 'a duplicate ingredient name is refused, case-insensitively',
+    case when msg = 'REFUSED_DUPLICATE' then 'PASS' else 'FAIL' end, msg);
+end $$;
+
+-- 22. Selling below cost yields a NEGATIVE margin rather than a hidden or
+--     clamped one. The UI warns on exactly this signal, so it must be real.
+--     A THIRD recipe with a single snapshot, so the reading cannot be confused
+--     by the same-transaction tie described in check 20.
+do $$
+declare f record; rec3 uuid := gen_random_uuid(); m numeric; pr numeric;
+begin
+  select * into f from fx21;
+  insert into recipes (id, account_id, business_id, name,
+                       batch_yield_qty, yield_unit_id, portion_qty, status)
+  values (rec3, f.acct, f.biz, 'Test Underpriced', 1000, f.u_g, 1000, 'active');
+  insert into recipe_lines (account_id, recipe_id, ingredient_id, qty, unit_id)
+  values (f.acct, rec3, f.rice, 1000, f.u_g);          -- 1000 g at 1.125 = 1125
+  perform fn_compute_recipe_cost_snapshot(rec3);
+  insert into recipe_prices (account_id, recipe_id, price)
+  values (f.acct, rec3, 900);                          -- sold at a loss
+
+  select margin_pct, profit into m, pr from v_price_check where recipe_id = rec3;
+  insert into t21 values (22, 'selling below cost reports a negative margin, not a clamped zero',
+    case when m < 0 and pr < 0 then 'PASS' else 'FAIL' end,
+    'margin='||coalesce(round(m,2)::text,'NULL')||' profit='||coalesce(pr::text,'NULL'));
+end $$;
+
 select * from t21 order by n;
 select count(*) filter (where verdict='PASS') as pass,
        count(*) filter (where verdict<>'PASS') as fail

@@ -92,8 +92,8 @@ export default async function DashboardPage() {
                 <Row k="Ingredients" v={s.ingredients} />
                 <Row k="Prices entered" v={s.prices_entered} />
                 <Row k="Recipes" v={s.recipes} />
-                <Row k="Complete costings" v={s.complete_costings} />
-                <Row k="Blocking conversions" v={s.blocking_conversions} />
+                <Row k="Recipes fully costed" v={s.complete_costings} />
+                <Row k="Measurements still needed" v={s.blocking_conversions} />
                 <Row k="Selling prices set" v={s.selling_prices_set} />
               </dl>
             </div>
