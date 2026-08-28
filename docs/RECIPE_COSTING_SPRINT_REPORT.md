@@ -1,8 +1,16 @@
 # RECIPE COSTING EXPERIENCE — PHASE R1 SPRINT REPORT
 
-Branch `claude/menu-master-ng-migrations-3faerm` · commit `7a5e3a7`
+Branch `claude/menu-master-ng-migrations-3faerm`
 Verified against real PostgREST 12.2.3 → real PostgreSQL 17.6, RLS enabled,
 migrations 0001–0033. Production was not touched.
+
+> **Amended after pre-deployment verification.** Two things changed since the
+> first issue of this report. (1) The owner has since confirmed that **0031 and
+> 0032 are deployed to production** — this report's original verdict said they
+> were not. (2) Pre-deployment verification of 0033 found a provenance defect in
+> its purchase-evidence columns, described in **D** and **F**. The corrected
+> logic is what this report now specifies; the superseded behaviour is recorded
+> in D only as history, never as the specification.
 
 ---
 
@@ -27,8 +35,10 @@ What was built:
   `default_target_margin`, never a hard-coded benchmark. A negative margin is
   always Loss. With no target set, the verdict says so instead of inventing one.
 - **Per-line costing** — each ingredient shows what it contributes to the batch,
-  the resolved quantity, the unit cost, and the purchase it was derived from
-  ("You bought 8000 g for ₦9,000.00 on 2026-08-28 · uses 4000 g of it").
+  the resolved quantity, the unit cost, and the purchases it was derived from
+  ("You bought 8000 g for ₦9,000.00 on 2026-08-28 · uses 4000 g of it", or
+  "Averaged across 2 purchases: 2,000 g for ₦4,000.00" when the engine's
+  weighted-average window covers more than one purchase).
 - **Named blockers** — "Palm Oil has no purchase price", "tell us how much one
   paint of Garri weighs", each with an inline link to the screen that fixes it.
 - **Progressive disclosure** — `?view=pro` adds batch ingredient/packaging/labour
@@ -45,7 +55,7 @@ What was built:
 | First thing on screen | recipe name and an ingredient form | cost per portion, price, profit |
 | Cost when incomplete | a partial figure or nothing, unexplained | named blocker with a link to the fix |
 | Unknown money | risk of reading as ₦0.00 | `not entered` / `no cost yet` |
-| Per-ingredient cost | not shown at all | shown, with the purchase it came from |
+| Per-ingredient cost | not shown at all | shown, with the purchases it came from |
 | Margin | a bare percentage | percentage + plain-language verdict vs the owner's own target |
 | Batch detail | mixed in with everything else | behind "Full costing view" |
 | Below-cost selling | silent | "Loss. You are selling this for less than it costs you to make. To reach your target you would need ₦950.00 a portion." |
@@ -86,19 +96,60 @@ replica only.
   and then discards into a total. The alternative was to do that multiplication
   in TypeScript, which would have been a second implementation of the same
   arithmetic that would drift the first time either changed.
+- Exposes **purchase evidence that reconstructs the cost it sits beside.**
+  `fn_ingredient_unit_cost` (0007) computes a **weighted average** over
+  `business_settings.wavg_window_days` — default **90 days** — as
+  `sum(amount) / sum(qty_base)`, and falls back to the single latest price only
+  when that window is empty. The view's `purchase_qty_base`, `purchase_amount`,
+  `purchase_date` and `purchase_count` therefore mirror that selection exactly:
+  the same window, the same `reversed_at is null` filter, the same
+  `effective_date <= current_date` cut, and the same latest-price fallback.
+  `purchase_count` tells the page whether to say "you bought" or "averaged
+  across N purchases".
 - Preflight refuses unless the database is at the 0001–0032 baseline (116
   policies) and the engine is present; self-check asserts `security_invoker=on`
   and that policy count is unchanged.
+- The view is **not updatable, insertable or deletable** — it cannot be a write
+  path even for `service_role`. `authenticated` is granted `SELECT` only;
+  `anon` is granted nothing.
 
-**A defect in this migration was found and fixed during verification.** The
-baseline assertion originally ran *after* the `CREATE VIEW`. Under Supabase's
-SQL editor the whole file is one transaction so a refusal rolled back, but under
-plain `psql` autocommit a refused migration still left the view behind. The
-assertion now runs in the preflight, before anything is created. Verified: on a
-105-policy database the migration refuses and creates nothing.
+### Two defects in this migration were found and fixed before deployment
 
-Migrations 0001–0016 were not modified. 0031 and 0032 are unchanged from the
-versions you authorised.
+Both were found during pre-deployment verification, while 0033 was still
+undeployed. Neither ever reached production.
+
+**1. Purchase provenance did not reconcile with the engine.** The evidence
+columns originally returned the **most recent purchase**, and filtered neither
+`reversed_at` nor `effective_date <= current_date`. Because the engine charges a
+weighted average over a 90-day window, the displayed receipt was not the basis
+of the cost whenever an ingredient had been bought more than once in a quarter —
+the ordinary case for a food business. Proven on the replica: two purchases of
+1,000 g at ₦1,000 and 1,000 g at ₦3,000 give an engine cost of **₦2.00/g**,
+while the evidence shown implied **₦3.00/g**. The recipe page would have printed
+"You bought 1,000 g for ₦3,000.00" beside a line cost derived from ₦2.00/g — a
+division the owner cannot reproduce, on the very number they price their menu
+from. The sprint's own tests missed it because every fixture had exactly one
+purchase.
+
+*Why the corrected approach reconciles:* the evidence is now the aggregate the
+function itself sums, so `purchase_amount / purchase_qty_base`, after
+`purchase_yield_pct`, reproduces `unit_cost` by construction rather than by
+coincidence. `tests/023` checks 22–25 pin the two together — including the
+reversed-purchase case and an invariant asserting the reconstruction holds for
+**every** costed line in the database — so they cannot drift apart silently
+again.
+
+**2. The baseline assertion ran after the DDL.** It originally sat beside the
+`security_invoker` self-check at the end of the file. Under Supabase's SQL
+editor the whole file is one transaction, so a refusal rolled back; under plain
+`psql` autocommit it did not, and a refused migration still left the view
+behind. The assertion now runs in the preflight, before anything is created.
+Verified: on a 105-policy database the migration refuses and creates nothing,
+and inside an explicit transaction the refusal aborts the transaction whole.
+
+Migrations 0001–0016 were not modified. **0031 and 0032 are unchanged and are
+already deployed to production by the owner** — they are not part of this
+deployment and must not be re-run.
 
 ---
 
@@ -108,7 +159,8 @@ versions you authorised.
 |---|---|
 | Cost per portion, batch cost, ingredient/packaging/labour cost, cost per yield unit, overhead per portion, is_complete | `v_recipe_cost_current` → `cost_snapshots`, written by `fn_compute_recipe_cost_snapshot` / `fn__recipe_cost_core` (0007, 0008) |
 | Selling price, profit, margin %, recommended price, target margin | `v_price_check` (0008) |
-| Per-line cost, resolved base quantity, unit cost, purchase evidence, per-line problem | `v_recipe_line_costs` (0033), composing `fn_resolve_qty_to_base` and `fn_ingredient_usable_unit_cost` (0007) |
+| Per-line cost, resolved base quantity, unit cost, per-line problem | `v_recipe_line_costs` (0033), composing `fn_resolve_qty_to_base` and `fn_ingredient_usable_unit_cost` (0007) |
+| Purchase evidence (qty, amount, date, count) | `v_recipe_line_costs` (0033), selecting the same rows `fn_ingredient_unit_cost` sums over `wavg_window_days` — asserted by `tests/023` check 25 to reconstruct `unit_cost` for every costed line |
 | Blocker list | `v_costing_blockers` |
 | Target margin fallback | `business_settings.default_target_margin` |
 
@@ -132,7 +184,7 @@ margin. They are listed under I as P2.
 
 ## F. TEST RESULTS
 
-**SQL suites — 238 checks, 0 failures**, against a database carrying 0001–0033:
+**SQL suites — 242 checks, 0 failures**, against a database carrying 0001–0033:
 
 | Suite | Result |
 |---|---|
@@ -143,9 +195,10 @@ margin. They are listed under I as P2.
 | 018 entitlement | 15 / 0 |
 | 021 costing MVP journey | 22 / 0 |
 | 022 entitlement final | 26 / 0 |
-| **023 recipe costing experience (new)** | **21 / 0** |
+| **023 recipe costing experience (new)** | **25 / 0** |
 
-`tests/023` covers the ten required cases. Its worked example was reconciled by
+`tests/023` covers the ten required cases, plus four checks (22–25) pinning
+purchase evidence to the engine. Its worked example was reconciled by
 hand against PostgreSQL: 50 kg for ₦85,000 → ₦1.70/g → 4.5 kg = 4,500 g →
 ₦7,650 a batch → ₦1.70 per g → a 500 g portion costs ₦850 → sold at ₦1,500 the
 profit is ₦650 and the margin 43.33%.
@@ -176,7 +229,22 @@ errors, no failed network requests.
    (₦2,250.00 for the rice line) — that is true, derived from their own
    purchase, and hiding it would hide what they already know. The test now
    distinguishes the two rather than forbidding both.
-3. **The 0033 preflight ordering defect** described under D.
+3. **Purchase evidence that contradicted the cost beside it** — the provenance
+   defect described in full under D. Engine ₦2.00/g, evidence implying ₦3.00/g.
+   This is the most serious thing found in the sprint: it would not have
+   corrupted any data, but it would have shown a customer a derivation of their
+   own cost that does not come out, which is the fastest way to lose their trust
+   in every other number on the page.
+4. **The 0033 preflight ordering defect** described under D.
+
+The first two were found by reading the rendered page; the third was found only
+by reading `fn_ingredient_unit_cost` line by line during pre-deployment
+verification. It is worth recording why the test suite did not catch it: every
+fixture in `tests/023` and in the browser journey recorded exactly **one**
+purchase per ingredient, and with one purchase the weighted average and the
+latest price are the same number. The tests agreed with the code because both
+were built from the same unexamined assumption. `tests/023` now includes a
+two-purchase fixture for exactly this reason.
 
 ### Harness defects found and fixed
 
@@ -224,6 +292,11 @@ In `web/e2e/shots/`, all captured in the verified run:
 | `rc-desktop-missing-conversion.png` | **recipe-level** missing-conversion blocker: "tell us how much one paint of Garri weighs" |
 | `rc-desktop-below-cost.png` | −₦62.50 profit, −12.50%, Loss, and the price needed to reach target |
 | `rc-desktop-pro.png` | full costing view: batch breakdown, cost bar, yield, purchase evidence |
+
+Note: the pro-view captures predate the provenance fix, so their evidence line
+reads "You bought 8000 g for ₦9,000.00". That wording is still correct for the
+single-purchase case they show; a multi-purchase line now reads "Averaged across
+N purchases".
 | `rc-mobile-pro.png` | full costing view at 390 px |
 | `rc-ingredient-unknown-unit.png` | ingredient-page refusal of a purchase in an unconvertible unit |
 
@@ -245,13 +318,22 @@ explained cost per portion and margin.
 
 1. **`0033` is not deployed.** The recipe page depends on `v_recipe_line_costs`
    for per-line costs and purchase evidence. Until 0033 is deployed, the
-   redesigned page cannot ship. It is authored, rehearsed and verified; it is
-   not authorised.
+   redesigned page cannot ship. It is authored, rehearsed, corrected and
+   verified, and a deployment pack exists. 0031 and 0032 are already live in
+   production, so the 116-policy baseline 0033 requires is satisfied.
 2. **No primary/secondary ingredient classification exists.** The schema has no
    column for it. Rather than invent one, lines are grouped by `item_kind`
    (ingredient vs packaging) and ordered by cost contribution, so the biggest
    driver is first. No data was fabricated to create this grouping.
-3. **Same-transaction snapshot ties.** `now()` is transaction-start, so two
+3. **Purchase evidence duplicates the engine's row selection, not its
+   arithmetic.** To show a customer the purchases behind their cost, the view
+   must select the same rows `fn_ingredient_unit_cost` sums — the same 90-day
+   window, `reversed_at` filter and as-of cut. The division itself is still the
+   engine's; the view never computes a unit cost. If that window logic ever
+   changes in 0007, the view must change with it. `tests/023` check 25 is the
+   guard: it fails the moment the evidence stops reconstructing `unit_cost` for
+   any costed line.
+4. **Same-transaction snapshot ties.** `now()` is transaction-start, so two
    snapshots written in one transaction tie on `computed_at` and
    `v_recipe_cost_current`'s "latest" is ambiguous. The same shape affects
    `v_price_check`'s price selection (`effective_from` and `created_at` both
@@ -261,21 +343,21 @@ explained cost per portion and margin.
 
 ### P2
 
-4. Portions-per-batch and after-cooking-loss quantities, and the cost-bar
+5. Portions-per-batch and after-cooking-loss quantities, and the cost-bar
    percentages, are derived in the page (section E). They are quantities and
    proportions, not money, and none feeds a cost or margin.
-5. Packaging and labour show `₦0.00` with the sub-label "none recorded" when the
+6. Packaging and labour show `₦0.00` with the sub-label "none recorded" when the
    owner has recorded none. This is existing engine behaviour (0007 treats
    absent lines as zero contribution and still marks the recipe complete), not
    something introduced here. The label discloses it, but a recipe with real
    unrecorded packaging will under-state its cost.
-6. Gas, electricity and water are not tracked. `overhead_items` carries only a
+7. Gas, electricity and water are not tracked. `overhead_items` carries only a
    name and a monthly cost, and `overhead_enabled` defaults to false. The page
    says so explicitly rather than implying the cost is complete.
-7. The ingredient dropdown defaults to the first of roughly 180 starter items.
-8. No recipe image, prep notes or allergen fields exist in the schema; the
+8. The ingredient dropdown defaults to the first of roughly 180 starter items.
+9. No recipe image, prep notes or allergen fields exist in the schema; the
    header shows category, yield and portions, which is what is real.
-9. Print view was not built. It was listed as preparation only.
+10. Print view was not built. It was listed as preparation only.
 
 ---
 
@@ -302,10 +384,20 @@ I am not treating your 0031/0032 authorisation as covering 0033. It is a
 different migration, written after that authorisation, and it needs its own
 decision.
 
-Two things I want on the record before you decide:
+Three things I want on the record before you decide:
 
-- 0031 and 0032 are **still not deployed to production** — this session has no
-  Supabase production connection, which was an explicit stop condition. 0033's
-  preflight requires the 0032 baseline, so 0031 → 0032 → 0033 must go in order.
+- **0031 and 0032 are deployed to production**, confirmed by the owner's own
+  verification output: 69 gated write policies, 0 gated reads, 116 total
+  policies, 7-day payment-failure grace, boundary constraint present,
+  `fn_my_entitlement_status` present, cost tables split into 12 per-verb
+  policies. That satisfies the 116-policy baseline 0033 requires. This session
+  has no production connection and has verified none of it directly; it is
+  owner-supplied evidence, treated as authoritative.
+- **0033 has not been deployed anywhere but the local replica.** The provenance
+  defect under D was caught before deployment, so no customer ever saw a cost
+  whose evidence contradicted it.
 - Production has **zero subscription rows** (your D-3 result). Nobody currently
   loses access on any of this, and nobody currently gains it either.
+
+The verdict is unchanged by the amendment: **CONDITIONAL GO**, condition being
+the deployment of the corrected 0033.
