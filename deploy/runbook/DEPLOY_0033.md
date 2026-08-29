@@ -5,6 +5,31 @@ sha256 prefix `c908f42f571d79ad` · 8,531 bytes · 173 lines · commit `c8f609c`
 
 ---
 
+## VERIFIED PRODUCTION BASELINE — post-0033, owner-supplied
+
+Recorded from the actual production STEP 3 run. **These are the authoritative
+post-0033 invariants.** Any future check compares against these, not against a
+replica.
+
+| Field | Production value | Notes |
+|---|---|---|
+| `view_exists` | 1 | |
+| `security_invoker` | true | |
+| `column_count` | **21** | the full list is below |
+| `authenticated_grants` | SELECT | |
+| `anon_grants` | 0 | |
+| `is_updatable` | NO | |
+| `policies` | 116 | unchanged by 0033 |
+| `public_functions` | **61** | 60 `fn_*` + `handle_new_user` (Supabase signup handler, drives the `auth.users` trigger) |
+| `triggers` | **40** | 34 public/application + 6 Supabase platform: `auth.users` 1, `realtime.subscription` 1, `storage.buckets` 2, `storage.objects` 2 |
+
+The production function census was enumerated by name and reconciles exactly to
+61. A single earlier scalar reading of 62 was a counting artefact and is
+superseded: the detailed census enumerates every row individually, which is
+stronger evidence than a scalar, and two independent readings agree on 61.
+**No public function disappeared. 0033 creates none, and its apply/rollback
+function fingerprint is byte-identical.**
+
 ## CORRECTED INVARIANTS
 
 Two expectations in the first issue of this pack were wrong. Both were errors in
@@ -35,7 +60,33 @@ The figures that ARE portable, because the migration itself controls them:
 | `anon_grants` | 0 | no grant to `anon` |
 | `is_updatable` | `NO` | the view aggregates and calls functions |
 | `policies` | 116, unchanged | asserted by preflight and self-check |
-| `public_functions`, `triggers` | **unchanged from STEP 1** | 0033 creates neither |
+| `public_functions`, `triggers` | **unchanged from STEP 1** (production: 61 and 40) | 0033 creates neither |
+
+## HOW THE FALSE DISCREPANCY HAPPENED, AND WHAT PREVENTS IT NEXT TIME
+
+Two of the three mismatches in this deployment were my documentation being
+stale or non-portable, not production being wrong. Both wasted a verification
+round-trip, and a runbook that cries wolf is worse than one with no expectations
+at all, because the operator learns to click past mismatches.
+
+The three rules now enforced:
+
+1. **A stated invariant must be derivable from the migration, not remembered.**
+   `column_count` was 20 because it was written before `purchase_count` existed.
+   `tests/023` check 26 now pins the exact 21-column list in order, so the
+   runbook figure is re-derived from the migration on every test run and cannot
+   go stale silently.
+2. **Never state a replica absolute as a production expectation.** Counts of
+   functions and triggers are not comparable across environments: the replica
+   installs pgcrypto into `public` (36 functions) and carries a test shim, where
+   Supabase installs pgcrypto into `extensions` and has neither; and 34 counts
+   public-schema triggers only, where production's non-internal count includes
+   Supabase platform triggers on `auth`, `realtime` and `storage`. Production's
+   61/40 and the replica's 97/34 describe the same application schema.
+3. **Prefer an enumeration to a scalar for anything that must be reconciled.**
+   A scalar count that disagrees cannot tell you what changed; a census by name
+   can. Where a count is the invariant, pair it with the query that names the
+   rows.
 
 ## THE VIEW'S 21 COLUMNS
 
