@@ -362,6 +362,21 @@ where v.problem = 'ok'
   and round(v.purchase_amount / v.purchase_qty_base
             / (ing.purchase_yield_pct / 100.0), 6) <> round(v.unit_cost, 6);
 
+-- 26. The view's SHAPE is part of its contract. The deployment pack asserts a
+-- column count post-deployment, and that expectation was wrong once already:
+-- it said 20 after purchase_count made it 21. Pin the exact list here so the
+-- number in the runbook can always be re-derived from the migration.
+insert into t23
+select 26, 'the view exposes exactly its 21 designed columns',
+       case when string_agg(column_name, ',' order by ordinal_position) =
+                 'line_id,recipe_id,account_id,business_id,ingredient_id,sub_recipe_id,'
+              || 'item_name,item_kind,is_cost_bearing,exclusion_reason,recipe_qty,'
+              || 'recipe_unit,base_unit,base_qty,unit_cost,line_cost,'
+              || 'purchase_qty_base,purchase_amount,purchase_date,purchase_count,problem'
+            then 'PASS' else 'FAIL' end,
+       count(*)||' columns'
+from information_schema.columns where table_name = 'v_recipe_line_costs';
+
 select * from t23 order by n;
 select count(*) filter (where verdict='PASS') as pass,
        count(*) filter (where verdict<>'PASS') as fail
