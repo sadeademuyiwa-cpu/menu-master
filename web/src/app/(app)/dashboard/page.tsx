@@ -1,127 +1,286 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { money, percent, coverageLabel, NOT_AVAILABLE } from '@/lib/format'
+import { currentContext } from '@/lib/data/context'
+import {
+  PageHeader, Card, Notice, Empty, SectionHeading, Badge, HeroStat, StatRow, Stat,
+} from '@/components/ui'
+import { money, percent, productState, priceState, NOT_ENTERED } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
 
-type Waterfall = {
-  business_id: string
-  period: string
-  revenue: number | null
-  cogs: number | null
-  gross_profit: number | null
-  gross_margin_pct: number | null
-  cost_coverage_pct: number | null
-  revenue_without_cost: number | null
-  confidence: string | null
-}
-
-type OnboardingStatus = {
-  business_id: string
+type Setup = {
   name: string
-  ingredients: number | null
-  prices_entered: number | null
-  recipes: number | null
-  complete_costings: number | null
-  blocking_conversions: number | null
-  selling_prices_set: number | null
+  ingredients: number; prices_entered: number; recipes: number
+  complete_costings: number; blocking_conversions: number; selling_prices_set: number
+  recipes_with_yield: number; serving_formats: number; packaging_lines: number
+  labour_rates: number; overhead_items: number; products_ready: number
+}
+type Product = {
+  recipe_id: string; variant_id: string | null
+  product_name: string; format_name: string | null
+  is_complete: boolean | null
+  true_cost: string | null; selling_price: string | null
+  profit: string | null; margin_pct: string | null
+  recommended_price: string | null; state: string; attention_rank: number
+}
+type PriceRow = {
+  ingredient_id: string; ingredient_name: string
+  price_state: string; used_in_recipes: number; last_purchase_date: string | null
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
+  const { supabase, accountId, businessName } = await currentContext()
+  if (!accountId) redirect('/onboarding')
 
-  // RLS scopes every row to the caller's account. There is no client-side
-  // account filter anywhere in this file, deliberately.
-  const [{ data: status }, { data: waterfall }] = await Promise.all([
-    supabase.from('v_onboarding_status').select('*').returns<OnboardingStatus[]>(),
-    supabase
-      .from('v_dashboard_waterfall')
-      .select('*')
-      .order('period', { ascending: false })
-      .limit(1)
-      .returns<Waterfall[]>(),
+  const [{ data: setupRows }, { data: products }, { data: prices }] = await Promise.all([
+    supabase.from('v_onboarding_status')
+      .select('name,ingredients,prices_entered,recipes,complete_costings,blocking_conversions,' +
+              'selling_prices_set,recipes_with_yield,serving_formats,packaging_lines,' +
+              'labour_rates,overhead_items,products_ready')
+      .limit(1).returns<Setup[]>(),
+    // Every figure here is decided in PostgreSQL. The page ranks nothing and
+    // computes nothing; it reads a state and chooses words for it.
+    supabase.from('v_product_attention')
+      .select('recipe_id,variant_id,product_name,format_name,is_complete,true_cost,' +
+              'selling_price,profit,margin_pct,recommended_price,state,attention_rank')
+      .order('attention_rank').order('product_name').returns<Product[]>(),
+    // Only ingredients the business ACTUALLY USES. Every account is seeded
+    // with a starter catalogue of ~180 items, and listing the ones nobody has
+    // put in a recipe would fill this with "price needed" for food the owner
+    // has never bought. A task list that is mostly noise gets ignored.
+    supabase.from('v_ingredient_price_status')
+      .select('ingredient_id,ingredient_name,price_state,used_in_recipes,last_purchase_date')
+      .neq('price_state', 'current').gt('used_in_recipes', 0)
+      .order('used_in_recipes', { ascending: false })
+      .limit(8).returns<PriceRow[]>(),
   ])
 
-  // No business yet means onboarding has not been completed.
-  if (status && status.length === 0) redirect('/onboarding')
+  const setup = setupRows?.[0]
+  const all = products ?? []
+  const needsAttention = all.filter((p) => p.attention_rank <= 3)
+  const ready = all.filter((p) => p.state === 'healthy')
 
-  const w = waterfall?.[0]
+  // The guided journey. Each step is answered by a count the database keeps,
+  // so the list reflects what the business has actually done.
+  const steps = [
+    { done: true, label: 'Tell us about your business', href: '/account',
+      hint: businessName ?? 'Your business' },
+    { done: (setup?.ingredients ?? 0) > 0, label: 'Add what you buy', href: '/ingredients',
+      hint: 'Rice, oil, chicken, containers — anything you pay for.' },
+    { done: (setup?.prices_entered ?? 0) > 0, label: 'Record what you paid', href: '/purchases',
+      hint: 'A market run or a delivery. Menu Master works out the unit cost.' },
+    { done: (setup?.recipes ?? 0) > 0, label: 'Add what you make', href: '/recipes',
+      hint: 'Your dishes and products.' },
+    { done: (setup?.recipes_with_yield ?? 0) > 0, label: 'Say how much one batch makes',
+      href: '/recipes', hint: 'A pot of soup, a tray of puff-puff, a batch of dough.' },
+    { done: (setup?.serving_formats ?? 0) > 0 || (setup?.selling_prices_set ?? 0) > 0,
+      label: 'Say how you sell it', href: '/formats',
+      hint: 'By the plate, or in your own sizes — 1 litre, 2.5 litres, a 6-pack.' },
+    { done: (setup?.packaging_lines ?? 0) > 0, label: 'Add your packaging', href: '/formats',
+      hint: 'Bowls, lids, labels. Optional, but it is real money.' },
+    { done: (setup?.labour_rates ?? 0) > 0, label: 'Add the work you pay for', href: '/settings',
+      hint: 'Optional. What you pay an hour for cooking or prep.' },
+    { done: (setup?.overhead_items ?? 0) > 0, label: 'Add your monthly bills', href: '/settings',
+      hint: 'Optional. Rent, gas, electricity.' },
+    { done: (setup?.selling_prices_set ?? 0) > 0, label: 'Set your selling price', href: '/recipes',
+      hint: 'Then Menu Master shows your real profit.' },
+  ]
+  const nextStep = steps.find((s) => !s.done)
+  const doneCount = steps.filter((s) => s.done).length
+
+  // A first-time business sees the guide, not a wall of zeros.
+  const settingUp = (setup?.complete_costings ?? 0) === 0
 
   return (
-    <div className="space-y-8">
-      <section>
-        <h1 className="text-xl font-semibold">Dashboard</h1>
-        {w ? (
-          <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
-            Period {w.period} · {coverageLabel(w.cost_coverage_pct)}
-          </p>
-        ) : (
-          <p className="mt-1 text-sm mm-absent">
-            No sales recorded yet, so there is nothing to report.
-          </p>
-        )}
-      </section>
+    <div className="space-y-6">
+      <PageHeader
+        title={businessName ? `${businessName}` : 'Menu Master NG'}
+        sub={settingUp
+          ? 'Let us find out what your food really costs you.'
+          : 'What is happening in your business, and what needs you.'}
+      />
 
-      {w && (
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Revenue" value={money(w.revenue)} />
-          <Stat label="COGS" value={money(w.cogs)} />
-          <Stat label="Gross profit" value={money(w.gross_profit)} />
-          <Stat
-            label="Gross margin"
-            value={percent(w.gross_margin_pct)}
-            note={coverageLabel(w.cost_coverage_pct)}
-          />
+      {/* GETTING STARTED -------------------------------------------------- */}
+      {settingUp && (
+        <section className="space-y-3">
+          <SectionHeading sub={`${doneCount} of ${steps.length} done. Each step takes a minute.`}>
+            Getting started
+          </SectionHeading>
+          {nextStep && (
+            <Notice>
+              <p className="font-medium">Next: {nextStep.label}</p>
+              <p className="mt-1">{nextStep.hint}</p>
+              <p className="mt-2">
+                <Link href={nextStep.href} className="underline">Do this now →</Link>
+              </p>
+            </Notice>
+          )}
+          <ol className="space-y-2">
+            {steps.map((s, i) => (
+              <li key={i}>
+                <Card>
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                    <span className={s.done ? '' : 'font-medium'}>
+                      {s.done ? '✓ ' : `${i + 1}. `}{s.label}
+                    </span>
+                    {!s.done && (
+                      <Link href={s.href} className="text-sm underline">Open</Link>
+                    )}
+                  </div>
+                  {!s.done && (
+                    <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>{s.hint}</div>
+                  )}
+                </Card>
+              </li>
+            ))}
+          </ol>
         </section>
       )}
 
-      {w && w.revenue_without_cost !== null && Number(w.revenue_without_cost) > 0 && (
-        <p className="rounded border p-3 text-sm" style={{ borderColor: 'var(--mm-line)' }}>
-          {money(w.revenue_without_cost)} of revenue has no verified cost behind
-          it. That revenue counts; its profit does not.
-        </p>
+      {/* NEEDS YOU -------------------------------------------------------- */}
+      {!settingUp && (
+        <section className="space-y-3">
+          <SectionHeading sub="Sorted by what costs you most to ignore.">
+            Needs your attention
+          </SectionHeading>
+          {!needsAttention.length ? (
+            <Empty>
+              Nothing needs attention. Every product you have priced is at or
+              above the margin you asked for.
+            </Empty>
+          ) : (
+            <ul className="space-y-2">
+              {needsAttention.map((p) => {
+                const st = productState(p.state)
+                return (
+                  <li key={`${p.recipe_id}-${p.variant_id ?? 'base'}`}>
+                    <Link href={`/recipes/${p.recipe_id}`} className="block">
+                      <Card>
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                          <span className="flex flex-wrap items-center gap-2 font-medium">
+                            {p.product_name}
+                            {p.format_name && (
+                              <span style={{ color: 'var(--mm-muted)' }}>· {p.format_name}</span>
+                            )}
+                            <Badge tone={st.tone}>{st.label}</Badge>
+                          </span>
+                          <span className="tabular-nums text-sm" style={{ color: 'var(--mm-muted)' }}>
+                            {p.margin_pct !== null ? percent(Number(p.margin_pct)) : ''}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                          {st.detail}
+                          {p.recommended_price !== null && p.state !== 'costing_incomplete' && (
+                            <> Charging {money(Number(p.recommended_price))} would reach your target.</>
+                          )}
+                        </div>
+                      </Card>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
       )}
 
-      <section>
-        <h2 className="text-base font-medium">Setup progress</h2>
-        <div className="mt-3 space-y-3">
-          {(status ?? []).map((s) => (
-            <div key={s.business_id} className="rounded border p-3" style={{ borderColor: 'var(--mm-line)' }}>
-              <p className="font-medium">{s.name}</p>
-              <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
-                <Row k="Ingredients" v={s.ingredients} />
-                <Row k="Prices entered" v={s.prices_entered} />
-                <Row k="Recipes" v={s.recipes} />
-                <Row k="Recipes fully costed" v={s.complete_costings} />
-                <Row k="Measurements still needed" v={s.blocking_conversions} />
-                <Row k="Selling prices set" v={s.selling_prices_set} />
-              </dl>
-            </div>
+      {/* WHAT YOU MAKE ON EACH ------------------------------------------- */}
+      {ready.length > 0 && (
+        <section className="space-y-3">
+          <SectionHeading sub="Cost, price and profit for one of each.">
+            Your products
+          </SectionHeading>
+          <ul className="space-y-2">
+            {ready.slice(0, 6).map((p) => (
+              <li key={`${p.recipe_id}-${p.variant_id ?? 'base'}-ok`}>
+                <Link href={`/recipes/${p.recipe_id}`} className="block">
+                  <Card>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <span className="font-medium">
+                        {p.product_name}
+                        {p.format_name && (
+                          <span style={{ color: 'var(--mm-muted)' }}> · {p.format_name}</span>
+                        )}
+                      </span>
+                      <Badge tone="good">{productState(p.state).label}</Badge>
+                    </div>
+                    <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
+                      <div>
+                        <dt style={{ color: 'var(--mm-muted)' }}>It costs you</dt>
+                        <dd className="tabular-nums">{money(Number(p.true_cost))}</dd>
+                      </div>
+                      <div>
+                        <dt style={{ color: 'var(--mm-muted)' }}>You charge</dt>
+                        <dd className="tabular-nums">{money(Number(p.selling_price))}</dd>
+                      </div>
+                      <div>
+                        <dt style={{ color: 'var(--mm-muted)' }}>You keep</dt>
+                        <dd className="tabular-nums">{money(Number(p.profit))}</dd>
+                      </div>
+                      <div>
+                        <dt style={{ color: 'var(--mm-muted)' }}>Margin</dt>
+                        <dd className="tabular-nums">{percent(Number(p.margin_pct))}</dd>
+                      </div>
+                    </dl>
+                  </Card>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* PRICES THAT MAY BE OLD ------------------------------------------ */}
+      {(prices ?? []).length > 0 && (
+        <section className="space-y-3">
+          <SectionHeading sub="Your costs are only as good as these. Recording a purchase updates them.">
+            Ingredient prices to check
+          </SectionHeading>
+          <ul className="space-y-2">
+            {(prices ?? []).map((r) => (
+              <li key={r.ingredient_id}>
+                <Link href={`/ingredients/${r.ingredient_id}`} className="block">
+                  <Card>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <span className="flex flex-wrap items-center gap-2 font-medium">
+                        {r.ingredient_name}
+                        <Badge tone={priceState(r.price_state).tone}>
+                          {priceState(r.price_state).label}
+                        </Badge>
+                      </span>
+                      <span className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+                        {r.last_purchase_date
+                          ? `last bought ${r.last_purchase_date}`
+                          : 'never bought'}
+                        {r.used_in_recipes > 0 && ` · used in ${r.used_in_recipes}`}
+                      </span>
+                    </div>
+                  </Card>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* QUICK ACTIONS ---------------------------------------------------- */}
+      <section className="space-y-3">
+        <SectionHeading sub="The things you do most.">Quick actions</SectionHeading>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {[
+            { href: '/purchases', label: 'Record a purchase' },
+            { href: '/ingredients', label: 'Add an ingredient' },
+            { href: '/recipes', label: 'Add something you make' },
+            { href: '/formats', label: 'Add a size you sell' },
+            { href: '/settings', label: 'Your costs and target' },
+            { href: '/reports', label: 'See your reports' },
+          ].map((a) => (
+            <Link key={a.href} href={a.href} className="block">
+              <Card><span className="font-medium">{a.label}</span></Card>
+            </Link>
           ))}
         </div>
       </section>
     </div>
-  )
-}
-
-function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <div className="rounded border p-3" style={{ borderColor: 'var(--mm-line)' }}>
-      <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>{label}</p>
-      <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
-      {note && <p className="mt-1 text-[11px]" style={{ color: 'var(--mm-muted)' }}>{note}</p>}
-    </div>
-  )
-}
-
-/** Counts are counts: a real 0 is meaningful here. A NULL is not. */
-function Row({ k, v }: { k: string; v: number | null }) {
-  return (
-    <>
-      <dt style={{ color: 'var(--mm-muted)' }}>{k}</dt>
-      <dd className={v === null ? 'mm-absent' : 'tabular-nums'}>
-        {v === null ? NOT_AVAILABLE : v}
-      </dd>
-    </>
   )
 }

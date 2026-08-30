@@ -694,7 +694,7 @@ export default async function RecipeDetail(props: {
             Work
           </SectionHeading>
           {!(labourLines ?? []).length ? (
-            <Empty>No work recorded for this recipe.</Empty>
+            <Empty>No paid work recorded for this batch. If someone is paid to cook it, add the hours and it will be counted.</Empty>
           ) : (
             <ul className="space-y-2">
               {(labourLines ?? []).map((l) => (
@@ -761,7 +761,7 @@ export default async function RecipeDetail(props: {
         </SectionHeading>
 
         {cookLines.length === 0 && packLines.length === 0 ? (
-          <Empty>No ingredients yet. Add the first one below.</Empty>
+          <Empty>Nothing in this recipe yet. Add what goes into one batch and the cost appears as you go.</Empty>
         ) : (
           <>
             <LineGroup title={null} lines={[...cookLines].sort(byCost)} recipeId={recipe.id} pro={pro} />

@@ -93,7 +93,7 @@ export default async function ReportsPage() {
         </p>
         <div className="mt-3">
           {(voided ?? []).length === 0 ? (
-            <Empty>Nothing has been voided.</Empty>
+            <Empty>Nothing has been cancelled. Cancelled sales appear here so nothing disappears without a trace.</Empty>
           ) : (
             <ul className="space-y-2 text-sm">
               {(voided ?? []).map((v) => (

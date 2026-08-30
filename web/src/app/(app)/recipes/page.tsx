@@ -76,6 +76,9 @@ export default async function RecipesPage(props: {
         title="Recipes"
         sub="What a dish really costs to make, from the prices you entered yourself."
       />
+      <p className="text-sm">
+        <Link href="/formats" className="underline">The sizes you sell in →</Link>
+      </p>
 
       {notice && <Notice>{notice}</Notice>}
 
@@ -110,7 +113,7 @@ export default async function RecipesPage(props: {
         <SectionHeading>Your recipes {recipes ? `(${recipes.length})` : ''}</SectionHeading>
 
         {!recipes || recipes.length === 0 ? (
-          <Empty>No recipes yet. Create one above to find out what it costs.</Empty>
+          <Empty>You have not added anything you make yet. Add your first product to discover what it really costs you.</Empty>
         ) : (
           <ul className="space-y-3">
             {recipes.map((r) => {

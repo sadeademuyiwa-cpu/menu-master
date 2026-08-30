@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
@@ -153,6 +154,9 @@ export default async function SettingsPage({
     <div className="space-y-6">
       <PageHeader title="Your business settings"
         sub="How Menu Master costs and prices for you." />
+      <p className="text-sm">
+        <Link href="/account" className="underline">Your account and plan →</Link>
+      </p>
       {notice && <Notice tone={/could not|cannot|must be|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
       {/* LABOUR ------------------------------------------------------- */}
@@ -177,7 +181,7 @@ export default async function SettingsPage({
           </p>
         </Card>
         {!rates?.length ? (
-          <Empty>No kinds of work yet.</Empty>
+          <Empty>No paid work added yet. If you pay someone to cook or prep, add it here and it will be counted in your costs.</Empty>
         ) : (
           <ul className="space-y-2">
             {rates.map((r) => (
@@ -269,7 +273,7 @@ export default async function SettingsPage({
           </form>
         </Card>
         {!overheads?.length ? (
-          <Empty>No running costs yet.</Empty>
+          <Empty>No monthly bills added yet. Rent, gas and electricity are real costs — add them to see what a plate truly costs you.</Empty>
         ) : (
           <ul className="space-y-2">
             {overheads.map((o) => (

@@ -54,7 +54,7 @@ export default async function PricingPage() {
       )}
 
       {rows.length === 0 ? (
-        <Empty>No recipes priced yet.</Empty>
+        <Empty>Nothing is priced yet. Once a product is costed, set what you charge and Menu Master shows your profit and margin.</Empty>
       ) : (
         <ul className="space-y-3">
           {rows.map((r) => (

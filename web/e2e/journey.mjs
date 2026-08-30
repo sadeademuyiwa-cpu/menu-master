@@ -134,7 +134,16 @@ await signUp(page, A)
 mark('signup completes and lands inside the app', (await text(page)).includes('Set up your business'), page.url())
 
 await onboard(page, 'Ada Foods', 'Ada Kitchen')
-await must(page, 'onboarding reaches the dashboard', 'Menu Master NG')
+await must(page, 'onboarding reaches the dashboard', 'Ada Kitchen')
+
+// PHASE 5: a first-time owner is told what to do, not shown a wall of zeros.
+await must(page, 'a brand new business gets a guided next step, not an empty dashboard',
+  'Getting started', 'Next:', 'Do this now')
+await mustNot(page, 'and is not greeted by zero naira everywhere', '₦0.00')
+await mustNot(page, 'no database words reach the owner',
+  'allocation basis', 'basis dimension', 'snapshot', 'provenance',
+  'recipe basis', 'reconciliation', 'variant resolver', 'NULL')
+await page.screenshot({ path: 'e2e/shots/p5-dashboard-new.png', fullPage: true })
 const tFirstStep = Date.now() - t0
 
 // --- ingredient -------------------------------------------------------------
@@ -562,6 +571,40 @@ await go(pageB, '/recipes')
 await mustNot(pageB, 'account B\'s recipe list contains none of account A\'s work', 'Ofada Special')
 await ctxB.close()
 
+// PHASE 5: with real data the dashboard answers the five questions.
+// First give it a genuine task: an ingredient that a recipe uses but nobody
+// has priced. Only ingredients actually IN a recipe should appear -- the
+// starter catalogue must not fill the list with food never bought.
+await go(page, '/ingredients')
+await page.fill('input[name=name]', `Unpriced Pepper ${stamp}`)
+await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await submit(page, 'form button[type=submit]')
+await go(page, fmtRecipeUrl)
+await page.locator('summary:has-text("Add an ingredient")').first().click()
+const upLine = page.locator('form:has(select[name=ingredient_id])')
+await pick(upLine, 'select[name=ingredient_id]', `Unpriced Pepper ${stamp}`)
+await upLine.locator('input[name=qty]').fill('50')
+await pick(upLine, 'select[name=unit_id]', 'g — Gram')
+steps++
+await upLine.locator('button[type=submit]').click()
+await page.waitForTimeout(1200)
+
+await go(page, '/dashboard')
+await must(page, 'the dashboard reports products that need attention',
+  'Needs your attention')
+await must(page, 'and states them in plain business language',
+  'You may be undercharging')
+await mustNot(page, 'the dashboard still uses no database words',
+  'allocation basis', 'snapshot', 'provenance', 'variant', 'NULL', 'is_complete')
+await must(page, 'an ingredient a recipe uses but nobody priced is surfaced',
+  'Ingredient prices to check', `Unpriced Pepper ${stamp}`, 'Price needed')
+// The starter catalogue is ~180 items. None of them belongs in a task list
+// until the business actually uses it.
+await mustNot(page, 'and the starter catalogue does not fill the list with noise',
+  'Semovita', 'Poundo yam flour', 'Rice (imported)')
+await must(page, 'and quick actions are offered', 'Quick actions', 'Record a purchase')
+await page.screenshot({ path: 'e2e/shots/p5-dashboard-live.png', fullPage: true })
+
 // ===========================================================================
 // MOBILE — the value moment on a phone
 // ===========================================================================
@@ -595,12 +638,32 @@ for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'ta
   })
   mark(`the fixed nav covers no control at ${tag}px`, occluded.length === 0,
     occluded.length ? `covered: ${JSON.stringify(occluded.slice(0, 3))}` : 'scrolled to bottom')
+
+  // Every navigation item must be REACHABLE without a horizontal gesture the
+  // owner has no reason to expect. Ten items did not fit a 360px phone; the
+  // bar scrolled and the last entries sat off-screen.
+  const navCut = await pageM.evaluate(() => {
+    const nav = document.querySelector('nav')
+    if (!nav) return ['no nav']
+    const bar = nav.getBoundingClientRect()
+    return [...nav.querySelectorAll('a')]
+      .filter((a) => {
+        const r = a.getBoundingClientRect()
+        return r.right > bar.right + 1 || r.left < bar.left - 1
+      })
+      .map((a) => a.textContent?.trim() ?? '?')
+  })
+  mark(`every navigation item fits on screen at ${tag}px`, navCut.length === 0,
+    navCut.length ? `off-screen: ${JSON.stringify(navCut)}` : 'all reachable')
   if (tag === '390') {
     await pageM.screenshot({ path: 'e2e/shots/rc-mobile-costed.png', fullPage: true })
     await go(pageM, recipeUrl + '?view=pro')
     await pageM.screenshot({ path: 'e2e/shots/rc-mobile-pro.png', fullPage: true })
     await go(pageM, '/ingredients')
     await must(pageM, 'mobile ingredient list renders', `Ofada Rice ${stamp}`)
+    await go(pageM, '/dashboard')
+    await must(pageM, 'the dashboard is usable on a phone', 'Needs your attention')
+    await pageM.screenshot({ path: 'e2e/shots/p5-dashboard-mobile.png', fullPage: true })
   }
   await ctxM.close()
 }

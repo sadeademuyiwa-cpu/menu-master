@@ -62,6 +62,9 @@ export default async function PurchasesPage({
         title="Purchases"
         sub="What you actually paid. Every ingredient cost in Menu Master comes from here."
       />
+      <p className="text-sm">
+        <Link href="/suppliers" className="underline">Your suppliers and markets →</Link>
+      </p>
       {notice && <Notice tone={/could not|cannot/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
       <Card>

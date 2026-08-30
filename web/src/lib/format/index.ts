@@ -142,3 +142,52 @@ export function lineStatus(problem: string | null | undefined): {
     default:                   return { label: 'Unknown',       tone: 'warn' }
   }
 }
+
+/**
+ * A product's state, in words a food-business owner uses. The state itself is
+ * decided in PostgreSQL (v_product_attention) so the page cannot invent a
+ * different one; this only chooses the wording and the colour.
+ *
+ * Nothing not-yet-finished is shown in a warning colour. A business still
+ * setting up has done nothing wrong, and colouring its half-built products
+ * like losses would teach it to ignore the colour that matters.
+ */
+export function productState(state: string | null | undefined): {
+  label: string
+  detail: string
+  tone: 'good' | 'warn' | 'bad' | 'muted'
+} {
+  switch (state) {
+    case 'healthy':
+      return { label: 'Healthy margin', tone: 'good',
+               detail: 'This is at or above the margin you asked for.' }
+    case 'below_target':
+      return { label: 'Below your target', tone: 'warn',
+               detail: 'You are making money, but less than you planned.' }
+    case 'losing_money':
+      return { label: 'You may be undercharging', tone: 'bad',
+               detail: 'This sells for less than it costs you to make.' }
+    case 'no_price_yet':
+      return { label: 'Ready to sell', tone: 'muted',
+               detail: 'The cost is worked out. Set a price to see your profit.' }
+    case 'costing_incomplete':
+      return { label: 'Costing incomplete', tone: 'muted',
+               detail: 'A few figures are still missing before this can be costed.' }
+    default:
+      return { label: 'Not costed yet', tone: 'muted', detail: '' }
+  }
+}
+
+/** The state of an ingredient's price, in the same register. */
+export function priceState(state: string | null | undefined): {
+  label: string
+  tone: 'good' | 'warn' | 'muted'
+} {
+  switch (state) {
+    case 'current':      return { label: 'Up to date',        tone: 'good' }
+    case 'out_of_date':  return { label: 'Price may be old',  tone: 'warn' }
+    case 'estimate_only':return { label: 'Estimate only',     tone: 'warn' }
+    case 'never_priced': return { label: 'Price needed',      tone: 'muted' }
+    default:             return { label: 'Unknown',           tone: 'muted' }
+  }
+}

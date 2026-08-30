@@ -125,7 +125,7 @@ export default async function IngredientsPage(props: {
         </p>
         <div className="mt-3">
           {!ingredients || ingredients.length === 0 ? (
-            <Empty>No ingredients yet.</Empty>
+            <Empty>You have not added anything you buy yet. Add your first ingredient — rice, oil, a pack of containers — and Menu Master starts working out what your food costs.</Empty>
           ) : (
             <ul className="space-y-3">
               {ingredients.map((r) => (

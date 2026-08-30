@@ -202,7 +202,7 @@ export default async function PurchaseDetail({
       <section className="space-y-3">
         <SectionHeading sub="What you bought, and what you paid for it.">Items</SectionHeading>
         {!rows.length ? (
-          <Empty>No items yet. Add the first one below.</Empty>
+          <Empty>Nothing on this purchase yet. Add what you bought and what you paid for it.</Empty>
         ) : (
           <ul className="space-y-2">
             {rows.map((l) => (

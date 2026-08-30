@@ -297,7 +297,7 @@ export default async function IngredientDetail(props: {
             ))}
           </ul>
         ) : (
-          <Empty>No local measurements yet.</Empty>
+          <Empty>No local measurements yet. If you buy this in paints, dericas, bags or baskets, tell us how much one holds — it is different for every ingredient.</Empty>
         )}
       </section>
     </div>

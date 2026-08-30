@@ -83,7 +83,7 @@ export default async function AccountPage() {
       <section className="space-y-3">
         <SectionHeading>Plan</SectionHeading>
         {!sub ? (
-          <Empty>No subscription found for this account.</Empty>
+          <Empty>No subscription found for this account yet.</Empty>
         ) : (
           <Card>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
