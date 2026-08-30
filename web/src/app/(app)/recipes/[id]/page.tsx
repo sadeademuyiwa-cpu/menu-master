@@ -34,6 +34,8 @@ type PriceCheck = {
   selling_price: string | null; profit: string | null
   margin_pct: string | null; recommended_price: string | null; target_margin: string | null
   markup_pct: string | null
+  variant_id: string | null; format_name: string | null; resolved_qty: string | null
+  cost_per_portion: string | null
 }
 type Blocker = { problem: string; ingredient_name: string | null; unit_code: string | null; item: string | null }
 
@@ -56,7 +58,17 @@ async function recompute(
   recipeId: string,
 ): Promise<string | null> {
   const { error } = await supabase.rpc('fn_compute_recipe_cost_snapshot', { p_recipe_id: recipeId })
-  return error ? describeWriteError(error) : null
+  if (error) return describeWriteError(error)
+
+  // A format's economics live in its own snapshot. Recomputing the recipe
+  // without them would leave every size showing the previous batch's figures.
+  const { data: active } = await supabase.from('recipe_variants')
+    .select('id').eq('recipe_id', recipeId).eq('is_active', true)
+    .returns<{ id: string }[]>()
+  for (const v of active ?? []) {
+    await supabase.rpc('fn_compute_variant_cost_snapshot', { p_variant_id: v.id })
+  }
+  return null
 }
 
 async function addLine(formData: FormData) {
@@ -126,6 +138,61 @@ async function removeLine(formData: FormData) {
  * applies everywhere. If the rate has no figure, the engine reports the recipe
  * incomplete -- it never treats the work as free.
  */
+/**
+ * Attach a business-defined format to this recipe. Doing so switches the
+ * recipe to the FORMAT-BASED model: the format becomes the commercial unit
+ * and a portion size is no longer required (0039). The batch economics are
+ * projected onto each format by fn_variant_cost -- never duplicated.
+ */
+/** A selling price for ONE size. Each format is priced independently. */
+async function setFormatPrice(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const { supabase, accountId } = await currentContext()
+  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+
+  const price = Number(formData.get('price'))
+  if (!Number.isFinite(price) || price <= 0) {
+    redirect(withNotice(here, 'Enter what you charge for this size. It must be more than zero.'))
+  }
+  const { error } = await supabase.from('recipe_prices').insert({
+    account_id: accountId, recipe_id: recipeId,
+    variant_id: String(formData.get('variant_id') ?? ''),
+    price, effective_from: new Date().toISOString().slice(0, 10),
+  })
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Price saved for that size.'))
+}
+
+async function addVariant(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const { supabase, accountId, businessId } = await currentContext()
+  if (!accountId || !businessId) redirect(withNotice(here, 'No business found for your login.'))
+
+  const { error } = await supabase.from('recipe_variants').insert({
+    account_id: accountId, business_id: businessId, recipe_id: recipeId,
+    format_id: String(formData.get('format_id') ?? ''), costing_basis: 'capacity',
+  })
+  if (!error) await recompute(supabase, recipeId)
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Format added to this recipe.'))
+}
+
+async function removeVariant(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const { supabase } = await currentContext()
+  const { error } = await supabase.from('recipe_variants')
+    .delete().eq('id', String(formData.get('id') ?? ''))
+  if (!error) await recompute(supabase, recipeId)
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Format removed.'))
+}
+
 async function addLabour(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
@@ -205,6 +272,7 @@ export default async function RecipeDetail(props: {
 
   const [{ data: lines }, { data: units }, { data: ingredients },
          { data: checks }, { data: blockers }, { data: snap },
+         { data: basisRows }, { data: allFormats }, { data: variants },
          { data: labourLines }, { data: labourRates }, { data: settings }] =
     await Promise.all([
       supabase.from('v_recipe_line_costs').select('*').eq('recipe_id', id).returns<LineCost[]>(),
@@ -212,13 +280,23 @@ export default async function RecipeDetail(props: {
       supabase.from('ingredients').select('id,name').is('deleted_at', null).eq('is_active', true)
         .order('name').returns<{ id: string; name: string }[]>(),
       supabase.from('v_price_check')
-        .select('recipe_id,is_complete,selling_price,profit,margin_pct,recommended_price,target_margin,markup_pct')
+        .select('recipe_id,is_complete,selling_price,profit,margin_pct,recommended_price,target_margin,markup_pct,variant_id,format_name,resolved_qty,cost_per_portion')
         .eq('recipe_id', id).returns<PriceCheck[]>(),
       supabase.from('v_costing_blockers')
         .select('problem,ingredient_name,unit_code,item').eq('recipe_id', id).returns<Blocker[]>(),
       supabase.from('v_recipe_cost_current')
         .select('is_complete,required_inputs,priced_inputs,excluded_inputs,ingredient_cost,packaging_cost,labour_cost,overhead_cost,batch_cost,cost_per_yield_unit,cost_per_portion')
         .eq('recipe_id', id).returns<Snapshot[]>(),
+      supabase.from('v_recipe_basis').select('costing_basis,active_formats,portion_qty')
+        .eq('recipe_id', id)
+        .returns<{ costing_basis: string; active_formats: number; portion_qty: string | null }[]>(),
+      supabase.from('serving_formats').select('id,name,capacity_qty,capacity_unit:units(code)')
+        .eq('is_active', true).order('name')
+        .returns<{ id: string; name: string; capacity_qty: string | null; capacity_unit: { code: string } | null }[]>(),
+      supabase.from('recipe_variants')
+        .select('id,is_active,format:serving_formats!fk_recipe_variants_format(id,name,capacity_qty,capacity_unit:units(code))')
+        .eq('recipe_id', id)
+        .returns<{ id: string; is_active: boolean; format: { id: string; name: string; capacity_qty: string | null; capacity_unit: { code: string } | null } | null }[]>(),
       supabase.from('recipe_labour')
         .select('id,hours,rate:labour_rates!recipe_labour_labour_rate_id_fkey(id,name,rate_per_hour)')
         .eq('recipe_id', id)
@@ -234,7 +312,12 @@ export default async function RecipeDetail(props: {
   const unitById = new Map((units ?? []).map((u) => [u.id, u]))
   const yieldCode = unitById.get(recipe.yield_unit_id)?.code ?? NOT_ENTERED
   const s = snap?.[0]
-  const check = checks?.find((c) => c.selling_price !== null) ?? checks?.[0]
+  // v_price_check emits one row per sellable thing: the recipe itself
+  // (variant_id null) and one per active format. Keep them apart -- a format's
+  // margin is not the recipe's.
+  const recipeRows = (checks ?? []).filter((c) => c.variant_id === null)
+  const formatRows = (checks ?? []).filter((c) => c.variant_id !== null)
+  const check = recipeRows.find((c) => c.selling_price !== null) ?? recipeRows[0]
   const bs = settings?.[0]
   const costed = s?.is_complete === true
 
@@ -246,6 +329,7 @@ export default async function RecipeDetail(props: {
     ? Math.floor(effectiveYield / portionQty)
     : null
 
+  const basis = basisRows?.[0] ?? null
   const marginPct = n(check?.margin_pct ?? null)
   const target = n(check?.target_margin ?? bs?.default_target_margin ?? null)
   const verdict = marginVerdict(marginPct, target)
@@ -289,7 +373,10 @@ export default async function RecipeDetail(props: {
         sub={[
           recipe.category,
           batchYield !== null ? `One batch makes ${batchYield} ${yieldCode}` : null,
-          portionQty !== null ? `one portion is ${portionQty} ${yieldCode}` : 'no portion size set',
+          portionQty !== null ? `one portion is ${portionQty} ${yieldCode}`
+            : basis?.costing_basis === 'format'
+              ? `sold in ${basis.active_formats} size${basis.active_formats === 1 ? '' : 's'}`
+              : 'no portion size set',
           portions !== null ? `about ${portions} portions` : null,
         ].filter(Boolean).join(' · ')}
       />
@@ -462,6 +549,141 @@ export default async function RecipeDetail(props: {
               <dd className="tabular-nums">{portions ?? NOT_ENTERED}</dd>
             </dl>
           </Card>
+        </section>
+      )}
+
+      {/* 3b. HOW THIS RECIPE IS SOLD: portion, or business-defined formats */}
+      <section className="space-y-3">
+        <SectionHeading sub={basis?.costing_basis === 'format'
+          ? 'You sell this in your own sizes. Each one is costed from the same batch.'
+          : 'You sell this by the portion. Add a format below to sell it in sizes instead.'}>
+          How you sell this
+        </SectionHeading>
+
+        {(variants ?? []).filter((v) => v.is_active).length > 0 ? (
+          <ul className="space-y-2">
+            {(variants ?? []).filter((v) => v.is_active).map((v) => (
+              <li key={v.id}>
+                <Card>
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                    <span className="font-medium">{v.format?.name ?? 'Unknown format'}</span>
+                    <span className="tabular-nums text-sm" style={{ color: 'var(--mm-muted)' }}>
+                      {v.format?.capacity_qty !== null && v.format?.capacity_unit
+                        ? quantity(Number(v.format.capacity_qty), v.format.capacity_unit.code)
+                        : 'sold by the piece'}
+                    </span>
+                  </div>
+                  <form action={removeVariant} className="mt-2">
+                    <input type="hidden" name="recipe_id" value={recipe.id} />
+                    <input type="hidden" name="id" value={v.id} />
+                    <InlineSubmit>Remove</InlineSubmit>
+                  </form>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Empty>
+            Sold by the portion. If you sell this in sizes — a 1 litre tub, a
+            500 g pack, a 6-piece tray — add the format and Menu Master will
+            cost each one from this same batch.
+          </Empty>
+        )}
+
+        {(allFormats ?? []).length > 0 ? (
+          <Disclosure summary="Sell this in a size">
+            <form action={addVariant} className="grid gap-3 sm:grid-cols-3">
+              <input type="hidden" name="recipe_id" value={recipe.id} />
+              <div className="sm:col-span-2">
+                <Field label="Which format?">
+                  <select name="format_id" required className={inputClass} style={inputStyle}>
+                    {(allFormats ?? []).map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                        {f.capacity_qty !== null && f.capacity_unit
+                          ? ` — ${quantity(Number(f.capacity_qty), f.capacity_unit.code)}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <div className="flex items-end"><Submit>Add format</Submit></div>
+            </form>
+          </Disclosure>
+        ) : (
+          <Card>
+            <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+              To sell this in sizes, first create them under{' '}
+              <Link href="/formats" className="underline">how you sell it</Link>.
+            </p>
+          </Card>
+        )}
+      </section>
+
+      {/* 3c. WHAT EACH SIZE COSTS AND EARNS. Every figure from v_price_check,
+             which projects this one batch onto each format. */}
+      {formatRows.length > 0 && (
+        <section className="space-y-3">
+          <SectionHeading sub="Each size is costed from the same batch. Packaging is counted once per item sold.">
+            What each size costs you
+          </SectionHeading>
+          <ul className="space-y-2">
+            {formatRows.map((f) => {
+              const fCost = n(f.cost_per_portion)
+              const fMargin = n(f.margin_pct)
+              const fVerdict = marginVerdict(fMargin, n(f.target_margin ?? bs?.default_target_margin ?? null))
+              return (
+                <li key={f.variant_id}>
+                  <Card>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <span className="flex flex-wrap items-center gap-2 font-medium">
+                        {f.format_name ?? 'Size'}
+                        {fVerdict && (
+                          <Badge tone={fVerdict.tone === 'bad' ? 'bad'
+                                     : fVerdict.tone === 'good' ? 'good'
+                                     : fVerdict.tone === 'warn' ? 'warn' : 'muted'}>
+                            {fVerdict.label}
+                          </Badge>
+                        )}
+                        {!f.is_complete && <Badge tone="warn">Cost incomplete</Badge>}
+                      </span>
+                      <span className="tabular-nums font-medium">
+                        {fCost !== null ? money(fCost) : <span className="mm-absent">no cost yet</span>}
+                      </span>
+                    </div>
+                    <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                      <dt style={{ color: 'var(--mm-muted)' }}>You sell it for</dt>
+                      <dd className="tabular-nums">{money(n(f.selling_price))}</dd>
+                      <dt style={{ color: 'var(--mm-muted)' }}>You keep</dt>
+                      <dd className="tabular-nums">{money(n(f.profit))}</dd>
+                      <dt style={{ color: 'var(--mm-muted)' }}>Margin</dt>
+                      <dd className="tabular-nums">{percent(fMargin)}</dd>
+                      {bs?.show_markup_alongside && (
+                        <>
+                          <dt style={{ color: 'var(--mm-muted)' }}>Markup</dt>
+                          <dd className="tabular-nums">{percent(n(f.markup_pct))}</dd>
+                        </>
+                      )}
+                      <dt style={{ color: 'var(--mm-muted)' }}>Price to hit your target</dt>
+                      <dd className="tabular-nums">{money(n(f.recommended_price))}</dd>
+                    </dl>
+                    <form action={setFormatPrice} className="mt-3 flex flex-wrap items-end gap-3">
+                      <input type="hidden" name="recipe_id" value={recipe.id} />
+                      <input type="hidden" name="variant_id" value={f.variant_id ?? ''} />
+                      <div className="min-w-40">
+                        <Field label={`Price for ${f.format_name ?? 'this size'} (₦)`}>
+                          <input name="price" type="number" step="0.01" min="0" required
+                            defaultValue={f.selling_price ? Number(f.selling_price) : undefined}
+                            className={inputClass} style={inputStyle} />
+                        </Field>
+                      </div>
+                      <Submit>Save price</Submit>
+                    </form>
+                  </Card>
+                </li>
+              )
+            })}
+          </ul>
         </section>
       )}
 

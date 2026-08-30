@@ -338,6 +338,61 @@ await page.screenshot({ path: 'e2e/shots/p4-settings.png', fullPage: true })
 await go(page, recipeUrl + '?view=pro')
 await must(page, 'the recipe worksheet offers labour from the business rates', 'Work', 'Add work')
 
+// MODEL 1 vs MODEL 2, on SEPARATE recipes so each is exercised in its own
+// right. Attaching a format to the main recipe would switch it to the
+// format-based model and its per-portion assertions would stop applying --
+// correctly, but it would no longer test the portion model.
+await go(page, recipeUrl)
+await must(page, 'a recipe with no format is sold by the portion',
+  'How you sell this', 'Sold by the portion')
+
+await go(page, '/recipes')
+await page.fill('input[name=name]', `Format Soup ${stamp}`)
+await page.fill('input[name=batch_yield_qty]', '10000')
+await pick(page, 'select[name=yield_unit_id]', 'ml — Millilitre')
+await submit(page, 'form button[type=submit]')
+const fmtRecipeUrl = page.url().split('?')[0]
+
+await page.locator('summary:has-text("Add an ingredient")').first().click()
+const fLine = page.locator('form:has(select[name=ingredient_id])')
+await pick(fLine, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
+await fLine.locator('input[name=qty]').fill('10000')
+await pick(fLine, 'select[name=unit_id]', 'g — Gram')
+steps++
+await fLine.locator('button[type=submit]').click()
+await page.waitForTimeout(1200)
+
+// With no format yet this recipe is still MODEL 1, so the engine correctly
+// asks for a portion size. That is the point of the two models: the demand
+// appears only while the portion is the commercial unit.
+await must(page, 'MODEL 1 still applies until a format exists', 'Cost incomplete')
+
+await page.locator('summary:has-text("Sell this in a size")').first().click()
+const vForm = page.locator('form:has(select[name=format_id])')
+await pick(vForm, 'select[name=format_id]', `Family Bowl ${stamp}`)
+steps++
+await vForm.locator('button[type=submit]').click()
+await page.waitForTimeout(1500)
+await must(page, 'attaching a format switches the recipe to selling by size',
+  `Family Bowl ${stamp}`, 'You sell this in your own sizes')
+await must(page, 'each size shows what it costs, from the same batch',
+  'What each size costs you', 'Price to hit your target')
+// MODEL 2 now applies: the format is the commercial unit and no portion size
+// was ever supplied, yet nothing is blocked and nothing was invented.
+await mustNot(page, 'MODEL 2: no synthetic portion size is demanded',
+  'Cost incomplete', 'set how much one portion is')
+await page.screenshot({ path: 'e2e/shots/p4-recipe-formats.png', fullPage: true })
+
+// price the size and read back profit, margin and markup for THAT size
+const fpForm = page.locator('form:has(input[name=variant_id])').first()
+await fpForm.locator('input[name=price]').fill('7500')
+steps++
+await fpForm.locator('button[type=submit]').click()
+await page.waitForTimeout(1500)
+await must(page, 'a size can be priced and reports its own profit and margin',
+  '₦7,500.00', 'You keep')
+await go(page, fmtRecipeUrl)
+
 // --- PHASE 2: the purchase ledger, end to end -------------------------------
 // The single-line form on the ingredient page now goes through fn_post_purchase,
 // so a real purchase must appear in the ledger and be reversible.
