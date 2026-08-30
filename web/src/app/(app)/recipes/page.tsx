@@ -77,7 +77,7 @@ export default async function RecipesPage(props: {
         sub="What a dish really costs to make, from the prices you entered yourself."
       />
       <p className="text-sm">
-        <Link href="/formats" className="underline">The sizes you sell in →</Link>
+        <Link href="/formats" className="mm-tap underline">The sizes you sell in →</Link>
       </p>
 
       {notice && <Notice>{notice}</Notice>}

@@ -147,15 +147,15 @@ export default async function SettingsPage({
       .returns<{ id: string; code: string; name: string; kind: string }[]>(),
   ])
 
-  const inputClass = 'mt-1 w-full rounded border px-3 py-2 text-base'
-  const inputStyle = { borderColor: 'var(--mm-line)', background: 'transparent' }
+  const inputClass = 'mm-input mt-1'
+  const inputStyle = undefined
 
   return (
     <div className="space-y-6">
       <PageHeader title="Your business settings"
         sub="How Menu Master costs and prices for you." />
       <p className="text-sm">
-        <Link href="/account" className="underline">Your account and plan →</Link>
+        <Link href="/account" className="mm-tap underline">Your account and plan →</Link>
       </p>
       {notice && <Notice tone={/could not|cannot|must be|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
@@ -217,8 +217,8 @@ export default async function SettingsPage({
         </SectionHeading>
         <Card>
           <form action={saveOverheadSettings} className="grid gap-3 sm:grid-cols-3">
-            <label className="flex items-center gap-2 text-sm sm:col-span-3">
-              <input type="checkbox" name="overhead_enabled"
+            <label className="mm-tap flex items-center gap-2 text-sm sm:col-span-3">
+              <input type="checkbox" name="overhead_enabled" className="h-6 w-6"
                 defaultChecked={settings?.overhead_enabled ?? false} />
               Include running costs in my recipe costs
             </label>

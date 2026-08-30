@@ -17,8 +17,7 @@ const NAV = [
   { href: '/ingredients', label: 'Ingredients' },
   { href: '/purchases', label: 'Purchases' },
   { href: '/recipes', label: 'Recipes' },
-  { href: '/reports', label: 'Reports' },
-  { href: '/settings', label: 'Settings' },
+  { href: '/more', label: 'More' },
 ]
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -58,9 +57,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <li key={item.href} className="min-w-0 flex-1">
               <Link
                 href={item.href}
-                /* Tight on a phone so all six labels fit a 360px screen
-                   without a horizontal gesture; roomier from sm upward. */
-                className="block whitespace-nowrap px-1 py-3 text-center text-[11px] sm:px-3 sm:text-sm"
+                /* Five destinations at a legible size. Six at 11px ran into
+                   each other on a 360px screen: "IngredientsPurchases". */
+                className="mm-tap block w-full justify-center whitespace-nowrap px-1 text-center text-xs sm:px-3 sm:text-sm"
               >
                 {item.label}
               </Link>

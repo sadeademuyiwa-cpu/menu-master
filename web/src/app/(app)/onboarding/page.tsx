@@ -59,24 +59,21 @@ export default function OnboardingPage() {
           <span className="text-sm">Account name</span>
           <input
             required value={accountName} onChange={(e) => setAccountName(e.target.value)}
-            className="mt-1 w-full rounded border px-3 py-2 text-base"
-            style={{ borderColor: 'var(--mm-line)', background: 'transparent' }}
+            className="mm-input mt-1"
           />
         </label>
         <label className="block">
           <span className="text-sm">Business name</span>
           <input
             required value={businessName} onChange={(e) => setBusinessName(e.target.value)}
-            className="mt-1 w-full rounded border px-3 py-2 text-base"
-            style={{ borderColor: 'var(--mm-line)', background: 'transparent' }}
+            className="mm-input mt-1"
           />
         </label>
         <label className="block">
           <span className="text-sm">Business type</span>
           <select
             value={businessType} onChange={(e) => setBusinessType(e.target.value)}
-            className="mt-1 w-full rounded border px-3 py-2 text-base"
-            style={{ borderColor: 'var(--mm-line)', background: 'transparent' }}
+            className="mm-input mt-1"
           >
             {BUSINESS_TYPES.map((t) => (
               <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>

@@ -48,8 +48,8 @@ export default async function SuppliersPage({
     .select('id,name,phone,location,notes,is_active')
     .order('is_active', { ascending: false }).order('name').returns<Supplier[]>()
 
-  const inputClass = 'mt-1 w-full rounded border px-3 py-2 text-base'
-  const inputStyle = { borderColor: 'var(--mm-line)', background: 'transparent' }
+  const inputClass = 'mm-input mt-1'
+  const inputStyle = undefined
 
   return (
     <div className="space-y-6">

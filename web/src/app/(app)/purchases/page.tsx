@@ -63,7 +63,7 @@ export default async function PurchasesPage({
         sub="What you actually paid. Every ingredient cost in Menu Master comes from here."
       />
       <p className="text-sm">
-        <Link href="/suppliers" className="underline">Your suppliers and markets →</Link>
+        <Link href="/suppliers" className="mm-tap underline">Your suppliers and markets →</Link>
       </p>
       {notice && <Notice tone={/could not|cannot/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
@@ -74,20 +74,17 @@ export default async function PurchasesPage({
         <form action={startPurchase} className="mt-3 grid gap-3 sm:grid-cols-4">
           <Field label="Date">
             <input name="purchase_date" type="date" defaultValue={today}
-              className="mt-1 w-full rounded border px-3 py-2 text-base"
-              style={{ borderColor: 'var(--mm-line)', background: 'transparent' }} />
+              className="mm-input mt-1" />
           </Field>
           <Field label="Supplier or market (optional)">
-            <select name="supplier_id" className="mt-1 w-full rounded border px-3 py-2 text-base"
-              style={{ borderColor: 'var(--mm-line)', background: 'transparent' }}>
+            <select name="supplier_id" className="mm-input mt-1">
               <option value="">Not recorded</option>
               {(suppliers ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </Field>
           <Field label="Reference (optional)">
             <input name="reference" placeholder="receipt no."
-              className="mt-1 w-full rounded border px-3 py-2 text-base"
-              style={{ borderColor: 'var(--mm-line)', background: 'transparent' }} />
+              className="mm-input mt-1" />
           </Field>
           <div className="flex items-end"><Submit>Start purchase</Submit></div>
         </form>

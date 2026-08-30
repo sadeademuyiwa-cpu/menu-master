@@ -47,7 +47,27 @@ export function quantity(
 ): string {
   if (value === null || value === undefined || !unit) return absent
   const n = typeof value === 'string' ? Number(value) : value
-  return Number.isFinite(n) ? `${n} ${unit}` : absent
+  if (!Number.isFinite(n)) return absent
+
+  /*
+    PRESENTATION ONLY -- no cost is derived from this.
+
+    Quantities are stored in the ingredient's base unit, so a 50 kg bag is
+    held as 50000 g and was being shown that way: "You bought 50000 g for
+    N85,000". That is true and unreadable, and it is not what the owner
+    bought. Scale grams and millilitres up when the number is large enough to
+    say plainly. The pairs below are exact factors within one measurement
+    kind, so nothing is rounded into existence and no conversion is invented.
+  */
+  const SCALE: Record<string, { to: string; per: number }> = {
+    g: { to: 'kg', per: 1000 },
+    ml: { to: 'l', per: 1000 },
+  }
+  const s = SCALE[unit]
+  if (s && Math.abs(n) >= s.per && n % s.per === 0) {
+    return `${(n / s.per).toLocaleString('en-NG')} ${s.to}`
+  }
+  return `${n.toLocaleString('en-NG')} ${unit}`
 }
 
 /**

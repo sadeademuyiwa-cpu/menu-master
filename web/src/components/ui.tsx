@@ -30,8 +30,14 @@ export function Field({ label, children }: { label: string; children: React.Reac
   )
 }
 
-export const inputClass = 'mt-1 w-full rounded border px-3 py-2 text-base'
-export const inputStyle = { borderColor: 'var(--mm-line)', background: 'transparent' }
+/*
+  One control definition for the whole app. These were a hand-rolled Tailwind
+  string and an inline style object, copied into every page; selects rendered
+  at 39px, just under a comfortable tap target. The token class in globals.css
+  owns height, padding, radius and focus ring now.
+*/
+export const inputClass = 'mm-input mt-1'
+export const inputStyle = undefined
 
 export function Submit({ children }: { children: React.ReactNode }) {
   return (
@@ -80,7 +86,7 @@ export function DataList<T>({
 }
 
 export function BackLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return <Link href={href} className="text-sm underline">{children}</Link>
+  return <Link href={href} className="mm-tap text-sm underline">{children}</Link>
 }
 
 /**
@@ -128,7 +134,7 @@ export function StatRow({ children }: { children: React.ReactNode }) {
 /** Destructive-ish inline action inside a list row. */
 export function InlineSubmit({ children }: { children: React.ReactNode }) {
   return (
-    <button type="submit" className="text-sm underline" style={{ color: 'var(--mm-muted)' }}>
+    <button type="submit" className="mm-tap text-sm underline" style={{ color: 'var(--mm-muted)' }}>
       {children}
     </button>
   )
@@ -158,19 +164,39 @@ export function HeroStat({ label, value, sub, tone = 'plain' }: {
     tone === 'bad' ? 'var(--mm-warn)' :
     tone === 'warn' ? 'var(--mm-warn)' : 'inherit'
   return (
-    <div className="rounded border p-4" style={{ borderColor: 'var(--mm-line)' }}>
-      <div className="text-xs uppercase tracking-wide" style={{ color: 'var(--mm-muted)' }}>
+    /*
+      On a phone these three figures sat in three full-width cards and used the
+      whole first screen, so the owner scrolled past the answer to reach
+      anything else. They are now one block: smaller type, tighter rows, still
+      the first thing on the page. From sm upward they return to full cards.
+    */
+    <div
+      className="flex items-baseline justify-between gap-3 border-b px-1 py-2
+                 sm:block sm:rounded sm:border sm:border-b sm:p-4"
+      style={{ borderColor: 'var(--mm-line)', borderRadius: 'var(--mm-radius)' }}
+    >
+      <div className="text-xs uppercase tracking-wide sm:text-xs"
+           style={{ color: 'var(--mm-muted)' }}>
         {label}
       </div>
-      <div className="mt-1 text-3xl font-semibold tabular-nums" style={{ color: colour }}>
+      <div className="mm-num text-right text-xl font-semibold sm:mt-1 sm:text-left sm:text-3xl"
+           style={{ color: colour }}>
         {value}
+        {sub && (
+          <div className="text-xs font-normal sm:hidden" style={{ color: 'var(--mm-muted)' }}>
+            {sub}
+          </div>
+        )}
       </div>
-      {sub && <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>{sub}</div>}
+      {sub && (
+        <div className="mt-1 hidden text-sm sm:block" style={{ color: 'var(--mm-muted)' }}>
+          {sub}
+        </div>
+      )}
     </div>
   )
 }
 
-/** A proportional bar. Rendered only for costs that are actually tracked. */
 export function CostBar({ parts }: {
   parts: { label: string; amount: number; pct: number }[]
 }) {
@@ -205,7 +231,15 @@ export function Disclosure({ summary, children, open = false }: {
 }) {
   return (
     <details open={open} className="rounded border" style={{ borderColor: 'var(--mm-line)' }}>
-      <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{summary}</summary>
+      {/* The tap-target class sets inline-flex, which removes the native
+          disclosure marker, so the control stopped looking expandable. The
+          chevron is drawn explicitly and rotates when open. */}
+      <summary className="mm-tap cursor-pointer list-none px-3 text-sm font-medium
+                          [&::-webkit-details-marker]:hidden">
+        <span aria-hidden className="mr-2 inline-block transition-transform
+                                     [details[open]_&]:rotate-90">▶</span>
+        {summary}
+      </summary>
       <div className="border-t px-3 py-3" style={{ borderColor: 'var(--mm-line)' }}>
         {children}
       </div>

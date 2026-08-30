@@ -35,8 +35,7 @@ export default function LoginPage() {
         <input
           type="email" required autoComplete="email" value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="mt-1 w-full rounded border px-3 py-2 text-base"
-          style={{ borderColor: 'var(--mm-line)', background: 'transparent' }}
+          className="mm-input mt-1"
         />
       </label>
       <label className="block">
@@ -44,8 +43,7 @@ export default function LoginPage() {
         <input
           type="password" required autoComplete="current-password" value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="mt-1 w-full rounded border px-3 py-2 text-base"
-          style={{ borderColor: 'var(--mm-line)', background: 'transparent' }}
+          className="mm-input mt-1"
         />
       </label>
       {error && <p className="text-sm" style={{ color: 'var(--mm-warn)' }}>{error}</p>}

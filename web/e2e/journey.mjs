@@ -191,7 +191,9 @@ await buyForm2.locator('input[name=amount]').fill('9000')
 steps++
 await buyForm2.locator('button[type=submit]').click()
 await page.waitForTimeout(1000)
-await must(page, 'the purchase records and Postgres derives the unit cost', '₦1.13', '8000 g')
+// Quantities are stored in the base unit but shown the way a person bought
+// them: 8,000 g is 8 kg. The derived unit cost is unchanged.
+await must(page, 'the purchase records and Postgres derives the unit cost', '₦1.13', '8 kg')
 const tFirstPricedIngredient = Date.now() - t0
 const stepsFirstPriced = steps
 
@@ -295,8 +297,8 @@ await must(page, 'the full costing view shows the batch breakdown',
   'Full costing', 'Batch cost', 'Where the batch cost goes', 'Portions per batch')
 // Owner rule: a customer must be able to reproduce a purchase-derived cost
 // from their own records, and an estimate must never look like a purchase.
-await must(page, 'the page states where the unit cost came from',
-  'You bought 8000 g for ₦9,000.00')
+await must(page, 'the page states where the unit cost came from, in the units bought',
+  'You bought 8 kg for ₦9,000.00')
 // Phase 3: the worksheet's profitability panel, every figure from PostgreSQL.
 // Margin and markup are different numbers for the same dish and must both
 // appear, correctly labelled, so neither can be mistaken for the other.

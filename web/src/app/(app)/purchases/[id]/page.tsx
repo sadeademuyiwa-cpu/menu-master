@@ -160,8 +160,8 @@ export default async function PurchaseDetail({
     ? Number(summary.total_amount) : null
   const draft = purchase.status === 'draft'
   const posted = purchase.status === 'posted'
-  const inputClass = 'mt-1 w-full rounded border px-3 py-2 text-base'
-  const inputStyle = { borderColor: 'var(--mm-line)', background: 'transparent' }
+  const inputClass = 'mm-input mt-1'
+  const inputStyle = undefined
 
   return (
     <div className="space-y-6">

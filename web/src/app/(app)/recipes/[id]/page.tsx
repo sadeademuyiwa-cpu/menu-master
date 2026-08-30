@@ -362,7 +362,7 @@ export default async function RecipeDetail(props: {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <BackLink href="/recipes">← All recipes</BackLink>
-        <Link href={otherView} className="text-sm underline" style={{ color: 'var(--mm-muted)' }}>
+        <Link href={otherView} className="mm-tap text-sm underline" style={{ color: 'var(--mm-muted)' }}>
           {pro ? 'Simple view' : 'Full costing view'}
         </Link>
       </div>
@@ -937,9 +937,9 @@ function LineGroup({ title, lines, recipeId, pro }: {
                         costing window. Record what you pay now to keep this accurate.
                         {' '}· uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
                     ) : (
-                      <>You bought {pQty} {l.base_unit} for {money(pAmt)}
+                      <>You bought {quantity(pQty, l.base_unit)} for {money(pAmt)}
                         {l.purchase_date ? ` on ${l.purchase_date}` : ''}
-                        {' '}· uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
+                        {' '}· uses {quantity(n(l.base_qty), l.base_unit)} of it</>
                     )}
                   </p>
                 )}
