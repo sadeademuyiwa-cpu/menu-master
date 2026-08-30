@@ -284,6 +284,12 @@ await mustNot(page, 'the stale margin is gone', '43.75%')
 await go(page, recipeUrl + '?view=pro')
 await must(page, 'the full costing view shows the batch breakdown',
   'Full costing', 'Batch cost', 'Where the batch cost goes', 'Portions per batch')
+// Owner rule: a customer must be able to reproduce a purchase-derived cost
+// from their own records, and an estimate must never look like a purchase.
+await must(page, 'the page states where the unit cost came from',
+  'You bought 8000 g for ₦9,000.00')
+await mustNot(page, 'a real purchase is never labelled an estimate',
+  'Estimated price')
 await page.screenshot({ path: 'e2e/shots/rc-desktop-pro.png', fullPage: true })
 
 // --- 3. the RECIPE-level missing-conversion blocker --------------------------

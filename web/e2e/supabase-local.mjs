@@ -15,14 +15,18 @@
  */
 import { createServer } from 'node:http'
 import { createHmac, randomUUID } from 'node:crypto'
-import { Client } from 'pg'
+import { Pool } from 'pg'
 
 const SECRET = 'super-secret-jwt-token-with-at-least-32-characters-long'
 const PGRST = 'http://127.0.0.1:3000'
 const PORT = 54321
 
-const db = new Client({ connectionString: 'postgres://postgres@127.0.0.1:55432/mmlaunch' })
-await db.connect()
+// A POOL, not a single Client. Once the journey opens a second browser
+// context, two sessions issue auth calls at the same time and a single pg
+// Client cannot serve overlapping queries -- it warns and then fails the
+// request, which surfaced as a signup that never settled.
+const db = new Pool({ connectionString: 'postgres://postgres@127.0.0.1:55432/mmlaunch', max: 10 })
+await db.query('select 1')
 
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
 function sign(payload) {

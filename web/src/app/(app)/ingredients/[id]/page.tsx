@@ -68,7 +68,16 @@ async function addPrice(formData: FormData) {
     ingredient_id: id,
     qty_base: qtyBase,
     amount,
-    source: 'manual',
+    // This form asks what the owner ACTUALLY BOUGHT -- a quantity and the money
+    // they paid. That is a purchase, and it must be recorded as one. Writing
+    // 'manual' here would demote every real receipt to an estimate, and under
+    // the source-aware rule (0034) the purchase-derived costing path would
+    // never engage for anyone using this screen.
+    //
+    // KNOWN LIMITATION, Phase 2: the ledger path is fn_post_purchase, which
+    // also sets purchase_line_id and is what fn_reverse_purchase can reverse.
+    // Rows written here are correct for costing but not reversible that way.
+    source: 'purchase',
     effective_date: effective || new Date().toISOString().slice(0, 10),
   })
 

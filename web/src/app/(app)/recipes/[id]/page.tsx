@@ -19,7 +19,7 @@ type LineCost = {
   recipe_qty: string; recipe_unit: string | null; base_unit: string | null
   base_qty: string | null; unit_cost: string | null; line_cost: string | null
   purchase_qty_base: string | null; purchase_amount: string | null; purchase_date: string | null
-  purchase_count: number | null
+  purchase_count: number | null; cost_basis: string | null
   problem: 'ok' | 'missing_price' | 'missing_conversion' | 'excluded' | 'sub_recipe'
 }
 type Snapshot = {
@@ -526,19 +526,26 @@ function LineGroup({ title, lines, recipeId, pro }: {
                 )}
 
                 {/*
-                  The unit cost is a weighted average over the business's
-                  wavg_window_days, not the newest receipt, so this must say
-                  how many purchases it averages. Saying "you bought X for Y"
-                  beside an averaged cost invites a division that does not come
-                  out, and the owner would rightly stop trusting the number.
+                  Provenance, in the owner's language. cost_basis comes from
+                  fn_ingredient_cost_basis -- the same function that produced
+                  the cost -- so what is claimed here and what was charged
+                  cannot disagree. An estimate is never dressed up as a
+                  purchase, and a averaged cost never implies one receipt.
                 */}
-                {pro && pAmt !== null && pQty !== null && l.base_unit && (
+                {pAmt !== null && pQty !== null && l.base_unit && (
                   <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                    {(l.purchase_count ?? 1) > 1
-                      ? <>Averaged across {l.purchase_count} purchases: {pQty} {l.base_unit} for {money(pAmt)}</>
-                      : <>You bought {pQty} {l.base_unit} for {money(pAmt)}
-                          {l.purchase_date ? ` on ${l.purchase_date}` : ''}</>}
-                    {' '}· uses {n(l.base_qty) ?? '?'} {l.base_unit} of it
+                    {l.cost_basis === 'manual' ? (
+                      <><span style={{ color: 'var(--mm-warn)' }}>Estimated price</span>
+                        {' '}— not from a purchase. Record what you paid to cost this properly.</>
+                    ) : (l.purchase_count ?? 0) > 1 ? (
+                      <>Based on {l.purchase_count} purchases in your costing window:{' '}
+                        {pQty} {l.base_unit} for {money(pAmt)} · uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
+                    ) : (
+                      <>You bought {pQty} {l.base_unit} for {money(pAmt)}
+                        {l.purchase_date ? ` on ${l.purchase_date}` : ''}
+                        {l.cost_basis === 'purchase_latest' && <> — your most recent purchase</>}
+                        {' '}· uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
+                    )}
                   </p>
                 )}
 

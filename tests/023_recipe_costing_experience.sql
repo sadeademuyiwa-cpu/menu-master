@@ -54,7 +54,7 @@ begin
   -- 50 kg for N85,000. kg has a universal factor, so no per-item conversion
   -- is needed and the resolver handles it.
   insert into ingredient_prices(account_id,ingredient_id,qty_base,amount,source)
-  values (a, rice, fn_resolve_qty_to_base(rice, 50, kg), 85000, 'manual');
+  values (a, rice, fn_resolve_qty_to_base(rice, 50, kg), 85000, 'purchase');
 
   insert into recipes(id,account_id,business_id,name,batch_yield_qty,yield_unit_id,portion_qty,status)
   values (rec,a,b,'Worked Jollof',4500,g,500,'active');
@@ -313,8 +313,8 @@ begin
   -- Two purchases inside the window: 1,000 g at N1,000 then 1,000 g at N3,000.
   -- The engine charges the weighted average, N2.00/g -- not the newest N3.00/g.
   insert into ingredient_prices(account_id,ingredient_id,qty_base,amount,source,effective_date)
-  values (a,rice,1000,1000,'manual',current_date - 10),
-         (a,rice,1000,3000,'manual',current_date - 1);
+  values (a,rice,1000,1000,'purchase',current_date - 10),
+         (a,rice,1000,3000,'purchase',current_date - 1);
 
   insert into recipes(id,account_id,business_id,name,batch_yield_qty,yield_unit_id,portion_qty,status)
   values (rec,a,b,'Evidence Recipe',1000,g,500,'active');
@@ -366,16 +366,48 @@ where v.problem = 'ok'
 -- column count post-deployment, and that expectation was wrong once already:
 -- it said 20 after purchase_count made it 21. Pin the exact list here so the
 -- number in the runbook can always be re-derived from the migration.
+-- 0034 added cost_basis: the page must be able to say whether a cost came
+-- from purchases or is a labelled estimate, so provenance is part of the
+-- view's contract and is pinned here alongside the rest of the shape.
 insert into t23
-select 26, 'the view exposes exactly its 21 designed columns',
+select 26, 'the view exposes exactly its 22 designed columns',
        case when string_agg(column_name, ',' order by ordinal_position) =
                  'line_id,recipe_id,account_id,business_id,ingredient_id,sub_recipe_id,'
               || 'item_name,item_kind,is_cost_bearing,exclusion_reason,recipe_qty,'
               || 'recipe_unit,base_unit,base_qty,unit_cost,line_cost,'
-              || 'purchase_qty_base,purchase_amount,purchase_date,purchase_count,problem'
+              || 'purchase_qty_base,purchase_amount,purchase_date,purchase_count,'
+              || 'cost_basis,problem'
             then 'PASS' else 'FAIL' end,
        count(*)||' columns'
 from information_schema.columns where table_name = 'v_recipe_line_costs';
+
+-- 27. An estimate must never be reported as a purchase on the page.
+do $$
+declare
+  a uuid; u uuid := gen_random_uuid(); b uuid; ing uuid := gen_random_uuid();
+  rec uuid := gen_random_uuid(); g uuid; res jsonb; v record;
+begin
+  select id into g from units where account_id is null and code='g';
+  insert into auth.users(id,email) values (u,'estimate23@t.test');
+  res := fn_create_account_and_business('Est Co','Est K','caterer',u,
+           p_idempotency_key=>gen_random_uuid()::text);
+  a := (res->>'account_id')::uuid; b := (res->>'business_id')::uuid;
+  insert into ingredients(id,account_id,kind,name,base_unit_id)
+  values (ing,a,'ingredient','Estimated Salt',g);
+  insert into ingredient_prices(account_id,ingredient_id,qty_base,amount,source,effective_date)
+  values (a,ing,1,5,'manual',current_date);
+  insert into recipes(id,account_id,business_id,name,batch_yield_qty,yield_unit_id,portion_qty,status)
+  values (rec,a,b,'Estimate Recipe',100,g,50,'active');
+  insert into recipe_lines(account_id,recipe_id,ingredient_id,qty,unit_id,is_cost_bearing)
+  values (a,rec,ing,100,g,true);
+
+  select * into v from v_recipe_line_costs where recipe_id = rec;
+  insert into t23 values (27,
+    'a manual estimate is labelled an estimate and claims no purchases',
+    case when v.cost_basis = 'manual' and v.purchase_count = 0
+         then 'PASS' else 'FAIL' end,
+    v.cost_basis||', '||v.purchase_count||' purchase(s)');
+end $$;
 
 select * from t23 order by n;
 select count(*) filter (where verdict='PASS') as pass,
