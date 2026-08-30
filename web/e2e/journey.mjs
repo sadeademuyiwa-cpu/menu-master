@@ -298,6 +298,46 @@ await mustNot(page, 'a real purchase is never labelled an estimate',
   'Estimated price')
 await page.screenshot({ path: 'e2e/shots/rc-desktop-pro.png', fullPage: true })
 
+// --- PHASE 4: business-defined formats, packaging, labour, overhead ---------
+// Nothing here is a Menu Master constant: the business names its own format
+// and states its own size, and the engine blocks rather than guesses.
+await go(page, '/settings')
+await page.fill('input[name=name]', 'Cooking')
+await page.locator('form:has(input[name=rate_per_hour]) input[name=rate_per_hour]').fill('500')
+await page.locator('form:has(input[name=rate_per_hour]) button[type=submit]').click()
+await page.waitForTimeout(900)
+await must(page, 'a business can define what it pays per hour', 'Cooking', '₦500.00 an hour')
+
+await go(page, '/formats')
+await page.fill('input[name=name]', `Family Bowl ${stamp}`)
+await page.fill('input[name=capacity_qty]', '2.5')
+await pick(page, 'select[name=capacity_unit_id]', 'l — Litre')
+await submit(page, 'form button[type=submit]')
+await must(page, 'a business can define its own container size', `Family Bowl ${stamp}`, '2.5 l')
+
+await mustNot(page, 'Menu Master ships no catalogue of container sizes',
+  '500 ml, 1 L, 1.5 L')
+
+// Next does a client-side navigation here, so domcontentloaded never fires
+// again. Wait for the URL to actually become the detail route instead of
+// assuming the click landed -- otherwise the assertion reads the list page.
+await page.locator(`a:has-text("Family Bowl ${stamp}")`).first().click()
+await page.waitForURL(/\/formats\/[0-9a-f-]{36}/, { timeout: 15000 })
+await page.waitForLoadState('networkidle').catch(() => {})
+await must(page, 'the format explains that packaging is counted once per serving',
+  'Packaging', 'once per serving')
+await page.screenshot({ path: 'e2e/shots/p4-format-detail.png', fullPage: true })
+
+await go(page, '/settings')
+await must(page, 'overhead is spread over what the business produces, not a fixed assumption',
+  'How much do you produce in a month?')
+await mustNot(page, 'the superseded servings-per-month field is gone',
+  'Servings you sell in a typical month')
+await page.screenshot({ path: 'e2e/shots/p4-settings.png', fullPage: true })
+
+await go(page, recipeUrl + '?view=pro')
+await must(page, 'the recipe worksheet offers labour from the business rates', 'Work', 'Add work')
+
 // --- PHASE 2: the purchase ledger, end to end -------------------------------
 // The single-line form on the ingredient page now goes through fn_post_purchase,
 // so a real purchase must appear in the ledger and be reversible.

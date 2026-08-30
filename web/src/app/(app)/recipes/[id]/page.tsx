@@ -121,6 +121,45 @@ async function removeLine(formData: FormData) {
 }
 
 /**
+ * Labour on THIS recipe: how many hours of a named kind of work one batch
+ * takes. The rate lives on the business (labour_rates) so changing it once
+ * applies everywhere. If the rate has no figure, the engine reports the recipe
+ * incomplete -- it never treats the work as free.
+ */
+async function addLabour(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const { supabase, accountId } = await currentContext()
+  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+
+  const hours = Number(formData.get('hours'))
+  if (!Number.isFinite(hours) || hours <= 0) {
+    redirect(withNotice(here, 'How many hours does one batch take? It must be more than zero.'))
+  }
+  const { error } = await supabase.from('recipe_labour').insert({
+    account_id: accountId, recipe_id: recipeId,
+    labour_rate_id: String(formData.get('labour_rate_id') ?? ''), hours,
+  })
+  if (!error) await recompute(supabase, recipeId)
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Work added.'))
+}
+
+async function removeLabour(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const { supabase } = await currentContext()
+  const { error } = await supabase.from('recipe_labour')
+    .delete().eq('id', String(formData.get('id') ?? ''))
+  if (!error) await recompute(supabase, recipeId)
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Work removed.'))
+}
+
+
+/**
  * Selling price. Appended, never overwritten, so last month's margin stays
  * true. Margin and recommended price are NOT computed here -- v_price_check
  * owns that arithmetic and withholds it entirely while the costing is
@@ -165,7 +204,8 @@ export default async function RecipeDetail(props: {
   if (!recipe) notFound()
 
   const [{ data: lines }, { data: units }, { data: ingredients },
-         { data: checks }, { data: blockers }, { data: snap }, { data: settings }] =
+         { data: checks }, { data: blockers }, { data: snap },
+         { data: labourLines }, { data: labourRates }, { data: settings }] =
     await Promise.all([
       supabase.from('v_recipe_line_costs').select('*').eq('recipe_id', id).returns<LineCost[]>(),
       supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<Unit[]>(),
@@ -179,6 +219,12 @@ export default async function RecipeDetail(props: {
       supabase.from('v_recipe_cost_current')
         .select('is_complete,required_inputs,priced_inputs,excluded_inputs,ingredient_cost,packaging_cost,labour_cost,overhead_cost,batch_cost,cost_per_yield_unit,cost_per_portion')
         .eq('recipe_id', id).returns<Snapshot[]>(),
+      supabase.from('recipe_labour')
+        .select('id,hours,rate:labour_rates!recipe_labour_labour_rate_id_fkey(id,name,rate_per_hour)')
+        .eq('recipe_id', id)
+        .returns<{ id: string; hours: string; rate: { id: string; name: string; rate_per_hour: string | null } | null }[]>(),
+      supabase.from('labour_rates').select('id,name,rate_per_hour').eq('is_active', true)
+        .order('name').returns<{ id: string; name: string; rate_per_hour: string | null }[]>(),
       supabase.from('business_settings')
         .select('default_target_margin,overhead_enabled,price_rounding_to,show_markup_alongside')
         .eq('business_id', recipe.business_id)
@@ -416,6 +462,73 @@ export default async function RecipeDetail(props: {
               <dd className="tabular-nums">{portions ?? NOT_ENTERED}</dd>
             </dl>
           </Card>
+        </section>
+      )}
+
+      {/* 4. OTHER PRODUCTION COSTS: labour on this recipe ---------------- */}
+      {pro && (
+        <section className="space-y-3">
+          <SectionHeading sub="Time that goes into one batch. The hourly rate lives in your settings so it applies everywhere.">
+            Work
+          </SectionHeading>
+          {!(labourLines ?? []).length ? (
+            <Empty>No work recorded for this recipe.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {(labourLines ?? []).map((l) => (
+                <li key={l.id}>
+                  <Card>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <span className="flex items-center gap-2 font-medium">
+                        {l.rate?.name ?? 'Unknown work'}
+                        {l.rate?.rate_per_hour === null && (
+                          <Badge tone="warn">No rate set</Badge>
+                        )}
+                      </span>
+                      <span className="tabular-nums text-sm" style={{ color: 'var(--mm-muted)' }}>
+                        {Number(l.hours)} hour{Number(l.hours) === 1 ? '' : 's'} a batch
+                        {l.rate?.rate_per_hour !== null && l.rate?.rate_per_hour !== undefined && (
+                          <> at {money(Number(l.rate.rate_per_hour))} an hour</>
+                        )}
+                      </span>
+                    </div>
+                    <form action={removeLabour} className="mt-2">
+                      <input type="hidden" name="recipe_id" value={recipe.id} />
+                      <input type="hidden" name="id" value={l.id} />
+                      <InlineSubmit>Remove</InlineSubmit>
+                    </form>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {(labourRates ?? []).length > 0 ? (
+            <Disclosure summary="Add work">
+              <form action={addLabour} className="grid gap-3 sm:grid-cols-3">
+                <input type="hidden" name="recipe_id" value={recipe.id} />
+                <Field label="Kind of work">
+                  <select name="labour_rate_id" required className={inputClass} style={inputStyle}>
+                    {(labourRates ?? []).map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Hours per batch">
+                  <input name="hours" type="number" step="any" min="0" required
+                    className={inputClass} style={inputStyle} />
+                </Field>
+                <div className="flex items-end"><Submit>Add work</Submit></div>
+              </form>
+            </Disclosure>
+          ) : (
+            <Card>
+              <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+                To include labour, first add the kinds of work you pay for under{' '}
+                <Link href="/settings" className="underline">your settings</Link>.
+              </p>
+            </Card>
+          )}
         </section>
       )}
 

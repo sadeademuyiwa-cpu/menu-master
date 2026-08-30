@@ -167,6 +167,72 @@ begin
     ' markup='||coalesce(v.markup_pct::text,'NULL'));
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- 20-25. THE TARGET PRICE AND ITS ROUNDING.
+--
+-- The owner asked why a N850 cost at a 40% target returns N1,450 rather than
+-- the exact 850 / (1 - 0.40) = N1,416.6667. It is business-configurable
+-- rounding, applied with a deliberate CEILING:
+--     ceil(exact / price_rounding_to) * price_rounding_to
+-- business_settings.price_rounding_to is numeric(10,2) not null default 50.00
+-- (0001_init.sql:246), so it is per business, not a product constant.
+--
+-- The ceiling is the substance of the rule, not a cosmetic choice. Rounding
+-- N1,416.6667 DOWN to N1,400 yields a 39.29% margin -- below the 40% target
+-- the number claims to reach. A recommended price must never undershoot the
+-- target it is named after.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  a uuid; u uuid := gen_random_uuid(); b uuid; g uuid; kg uuid;
+  rice uuid := gen_random_uuid(); rec uuid := gen_random_uuid();
+  res jsonb; v record; exact numeric;
+begin
+  select id into g  from units where account_id is null and code='g';
+  select id into kg from units where account_id is null and code='kg';
+  insert into auth.users(id,email) values (u,'rounding@t.test');
+  res := fn_create_account_and_business('Rnd Co','Rnd K','caterer',u,
+           p_idempotency_key=>gen_random_uuid()::text);
+  a := (res->>'account_id')::uuid; b := (res->>'business_id')::uuid;
+  insert into ingredients(id,account_id,kind,name,base_unit_id)
+  values (rice,a,'ingredient','Rnd Rice',g);
+  insert into ingredient_prices(account_id,ingredient_id,qty_base,amount,source)
+  values (a,rice,fn_resolve_qty_to_base(rice,50,kg),85000,'purchase');
+  insert into recipes(id,account_id,business_id,name,batch_yield_qty,yield_unit_id,portion_qty,status)
+  values (rec,a,b,'Rnd Jollof',4500,g,500,'active');
+  insert into recipe_lines(account_id,recipe_id,ingredient_id,qty,unit_id,is_cost_bearing)
+  values (a,rec,rice,4500,g,true);
+  perform fn_compute_recipe_cost_snapshot(rec);
+
+  select * into v from v_price_check where recipe_id = rec;
+  exact := v.cost_per_portion / (1 - v.target_margin/100.0);
+
+  insert into t26 values (20,'the exact unrounded target price is N1,416.6667',
+    case when round(exact,4) = 1416.6667 then 'PASS' else 'FAIL' end, round(exact,4)::text);
+  insert into t26 values (21,'the default rounding increment is N50, from business_settings',
+    case when v.price_rounding_to = 50.00 then 'PASS' else 'FAIL' end, 'N'||v.price_rounding_to);
+  insert into t26 values (22,'the recommended price is the exact price rounded UP to that increment',
+    case when v.recommended_price = ceil(exact / v.price_rounding_to) * v.price_rounding_to
+         then 'PASS' else 'FAIL' end, 'N'||v.recommended_price);
+  insert into t26 values (23,'rounding never goes DOWN below the exact price',
+    case when v.recommended_price >= exact then 'PASS' else 'FAIL' end,
+    'N'||v.recommended_price||' >= N'||round(exact,2));
+  insert into t26 values (24,'so the achieved margin at that price meets the target',
+    case when round(100.0*(v.recommended_price - v.cost_per_portion)/v.recommended_price, 2)
+              >= v.target_margin
+         then 'PASS' else 'FAIL' end,
+    round(100.0*(v.recommended_price - v.cost_per_portion)/v.recommended_price,2)
+      ||'% vs target '||v.target_margin||'%');
+
+  -- Configurable, not a product constant: change the business's increment and
+  -- the recommended price must follow it.
+  update business_settings set price_rounding_to = 1.00 where business_id = b;
+  select * into v from v_price_check where recipe_id = rec;
+  insert into t26 values (25,'a business that rounds to N1 gets N1,417, proving it is per business',
+    case when v.recommended_price = 1417.00 then 'PASS' else 'FAIL' end,
+    'N'||v.recommended_price);
+end $$;
+
 select * from t26 order by n;
 select count(*) filter (where verdict='PASS') as pass,
        count(*) filter (where verdict<>'PASS') as fail from t26;
