@@ -187,6 +187,53 @@ begin
     case when ok then 'PASS' else 'FAIL' end, case when ok then 'refused' else 'ALLOWED' end);
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- 18-23. THE THREE SOURCE STATES, named explicitly.
+-- Owner-authoritative precedence: current purchase -> stale purchase (marked,
+-- with its date) -> estimate. Never blended, never zero, never inflated.
+-- ---------------------------------------------------------------------------
+do $$
+declare f record; ing uuid; bas ingredient_cost_basis;
+begin
+  select * into f from fx24;
+
+  -- STATE 1: a current purchase inside the window.
+  ing := pg_temp.mk('State Current', '[{"q":100,"a":300,"s":"purchase","d":5}]'::jsonb);
+  bas := fn_ingredient_cost_basis(ing, f.biz);
+  insert into t24 values (18,'STATE 1 current purchase: purchase_window, N3.00/base',
+    case when bas.basis='purchase_window' and round(bas.unit_cost,4)=3.0000 then 'PASS' else 'FAIL' end,
+    bas.basis||' N'||round(bas.unit_cost,2));
+
+  -- STATE 2: only a purchase OUTSIDE the 90-day window.
+  ing := pg_temp.mk('State Stale', '[{"q":100,"a":300,"s":"purchase","d":200}]'::jsonb);
+  bas := fn_ingredient_cost_basis(ing, f.biz);
+  insert into t24 values (19,'STATE 2 stale purchase: marked purchase_latest, not purchase_window',
+    case when bas.basis='purchase_latest' then 'PASS' else 'FAIL' end, bas.basis);
+  insert into t24 values (20,'STATE 2 exposes the purchase date so staleness is visible',
+    case when bas.to_date = current_date - 200 then 'PASS' else 'FAIL' end,
+    coalesce(bas.to_date::text,'NULL'));
+  insert into t24 values (21,'STATE 2 uses the price actually paid, with no inflation guess',
+    case when round(bas.unit_cost,4)=3.0000 then 'PASS' else 'FAIL' end,
+    'N'||round(bas.unit_cost,4));
+
+  -- STATE 3: no purchase evidence at all.
+  ing := pg_temp.mk('State Estimate', '[{"q":1,"a":12,"s":"manual","d":3}]'::jsonb);
+  bas := fn_ingredient_cost_basis(ing, f.biz);
+  insert into t24 values (22,'STATE 3 estimate only: labelled manual, zero purchases',
+    case when bas.basis='manual' and bas.purchase_count=0 then 'PASS' else 'FAIL' end,
+    bas.basis||', '||bas.purchase_count);
+
+  -- The three states must be mutually exclusive and exhaustive.
+  insert into t24
+  select 23, 'every ingredient resolves to exactly one of the four basis states',
+         case when count(*)=0 then 'PASS' else 'FAIL' end,
+         count(*)||' row(s) outside the allowed set'
+  from ingredients i
+  cross join lateral fn_ingredient_cost_basis(i.id, f.biz) b
+  where i.account_id = f.acct
+    and b.basis not in ('purchase_window','purchase_latest','manual','none');
+end $$;
+
 select * from t24 order by n;
 select count(*) filter (where verdict='PASS') as pass,
        count(*) filter (where verdict<>'PASS') as fail from t24;

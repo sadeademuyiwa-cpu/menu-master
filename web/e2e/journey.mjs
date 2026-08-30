@@ -292,6 +292,52 @@ await mustNot(page, 'a real purchase is never labelled an estimate',
   'Estimated price')
 await page.screenshot({ path: 'e2e/shots/rc-desktop-pro.png', fullPage: true })
 
+// --- PHASE 2: the purchase ledger, end to end -------------------------------
+// The single-line form on the ingredient page now goes through fn_post_purchase,
+// so a real purchase must appear in the ledger and be reversible.
+await go(page, '/purchases')
+await must(page, 'the purchase the ingredient page recorded appears in the ledger',
+  'Purchase history', 'Recorded')
+
+// A full multi-line purchase, entered the way a market run actually happens.
+await go(page, '/suppliers')
+await page.fill('input[name=name]', `Mile 12 ${stamp}`)
+await submit(page, 'form button[type=submit]')
+await must(page, 'a market can be added as a supplier', `Mile 12 ${stamp}`)
+
+await go(page, '/purchases')
+await pick(page, 'select[name=supplier_id]', `Mile 12 ${stamp}`)
+await submit(page, 'form button[type=submit]')
+await must(page, 'starting a purchase opens it for items', 'Add an item', 'Not recorded')
+const purchaseUrl = page.url().split('?')[0]
+
+const lineForm = page.locator('form:has(select[name=ingredient_id])')
+await pick(lineForm, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
+await lineForm.locator('input[name=qty]').fill('25')
+await pick(lineForm, 'select[name=unit_id]', 'kg — Kilogram')
+await lineForm.locator('input[name=amount]').fill('42000')
+steps++
+await lineForm.locator('button[type=submit]').click()
+await page.waitForTimeout(1000)
+await must(page, 'the item is added with what was actually paid', '₦42,000.00', '25 kg')
+
+await page.locator('form:has-text("Record this purchase") button[type=submit]').first().click()
+await page.waitForTimeout(1200)
+await must(page, 'recording the purchase reports the prices it updated',
+  'Recorded', 'ingredient price')
+await mustNot(page, 'a recorded purchase is never left as a draft', 'Not recorded yet')
+
+// Reversal: the cost is undone, the record is kept.
+const revForm = page.locator('form:has(input[name=reason])')
+await revForm.locator('input[name=reason]').fill('wrong amount')
+steps++
+await revForm.locator('button[type=submit]').click()
+await page.waitForTimeout(1200)
+await must(page, 'a purchase can be cancelled with a reason, and says so',
+  'Cancelled', 'wrong amount')
+await go(page, purchaseUrl)
+await must(page, 'the cancelled purchase is kept as evidence, not deleted', '₦42,000.00')
+
 // --- 3. the RECIPE-level missing-conversion blocker --------------------------
 // Distinct from the ingredient page refusing an unknown purchase unit: here the
 // ingredient IS priced, but the recipe asks for it in a unit that has no

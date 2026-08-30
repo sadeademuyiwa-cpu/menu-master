@@ -540,10 +540,22 @@ function LineGroup({ title, lines, recipeId, pro }: {
                     ) : (l.purchase_count ?? 0) > 1 ? (
                       <>Based on {l.purchase_count} purchases in your costing window:{' '}
                         {pQty} {l.base_unit} for {money(pAmt)} · uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
+                    ) : l.cost_basis === 'purchase_latest' ? (
+                      /*
+                        STALE. No purchase falls inside the costing window, so
+                        the engine is using an older real receipt. Owner rule 7:
+                        make that obvious and show the date, rather than let a
+                        months-old price look current. No inflation guess is
+                        applied -- the number stays exactly what was paid.
+                      */
+                      <><span style={{ color: 'var(--mm-warn)' }}>Old price</span> — your last
+                        purchase was {pQty} {l.base_unit} for {money(pAmt)}
+                        {l.purchase_date ? ` on ${l.purchase_date}` : ''}, which is outside your
+                        costing window. Record what you pay now to keep this accurate.
+                        {' '}· uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
                     ) : (
                       <>You bought {pQty} {l.base_unit} for {money(pAmt)}
                         {l.purchase_date ? ` on ${l.purchase_date}` : ''}
-                        {l.cost_basis === 'purchase_latest' && <> — your most recent purchase</>}
                         {' '}· uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
                     )}
                   </p>

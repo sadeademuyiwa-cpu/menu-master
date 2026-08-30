@@ -37,8 +37,9 @@ async function addPrice(formData: FormData) {
   'use server'
   const id = String(formData.get('ingredient_id') ?? '')
   const here = `/ingredients/${id}`
-  const { supabase, accountId } = await currentContext()
+  const { supabase, accountId, businessId } = await currentContext()
   if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  if (!businessId) redirect(withNotice(here, 'No business found for your login.'))
 
   const qty = Number(formData.get('qty'))
   const unitId = String(formData.get('unit_id') ?? '')
@@ -63,26 +64,45 @@ async function addPrice(formData: FormData) {
       'purchase again.'))
   }
 
-  const { error } = await supabase.from('ingredient_prices').insert({
-    account_id: accountId,
-    ingredient_id: id,
-    qty_base: qtyBase,
-    amount,
-    // This form asks what the owner ACTUALLY BOUGHT -- a quantity and the money
-    // they paid. That is a purchase, and it must be recorded as one. Writing
-    // 'manual' here would demote every real receipt to an estimate, and under
-    // the source-aware rule (0034) the purchase-derived costing path would
-    // never engage for anyone using this screen.
-    //
-    // KNOWN LIMITATION, Phase 2: the ledger path is fn_post_purchase, which
-    // also sets purchase_line_id and is what fn_reverse_purchase can reverse.
-    // Rows written here are correct for costing but not reversible that way.
-    source: 'purchase',
-    effective_date: effective || new Date().toISOString().slice(0, 10),
+  // THROUGH THE LEDGER, NOT AROUND IT.
+  //
+  // Writing ingredient_prices directly produced a row with no purchase_line_id,
+  // which fn_reverse_purchase cannot reverse -- a price the owner could never
+  // undo. fn_post_purchase is the only path that sets source='purchase' and
+  // links the line, and it carries the checks this screen must not duplicate:
+  // role enforcement, draft-only posting (so a double submit cannot post
+  // twice), zero-value refusal, and conversion blockers.
+  const date = effective || new Date().toISOString().slice(0, 10)
+
+  const { data: purchase, error: pErr } = await supabase.from('purchases')
+    .insert({ account_id: accountId, business_id: businessId, purchase_date: date })
+    .select('id').single()
+  if (pErr || !purchase) {
+    redirect(withNotice(here, describeWriteError(pErr) ?? 'Could not start the purchase.'))
+  }
+
+  const { error: lErr } = await supabase.from('purchase_lines').insert({
+    account_id: accountId, purchase_id: purchase.id,
+    ingredient_id: id, qty, unit_id: unitId, amount,
   })
+  if (lErr) {
+    redirect(withNotice(here, describeWriteError(lErr) ?? 'Could not record the purchase.'))
+  }
+
+  const { data: posted, error: postErr } = await supabase
+    .rpc('fn_post_purchase', { p_purchase_id: purchase.id })
+  if (postErr) {
+    redirect(withNotice(here, describeWriteError(postErr) ?? 'Could not post the purchase.'))
+  }
+  // The function reports refusals as data, not errors, so they must be read.
+  if (posted && posted.posted === false) {
+    redirect(withNotice(here, posted.reason === 'unresolved_conversions'
+      ? 'We still need to know how much of the base unit one of those is. Add the measurement below, then record this purchase again.'
+      : 'That purchase could not be posted: ' + String(posted.reason).replace(/_/g, ' ') + '.'))
+  }
 
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Purchase recorded.'))
+  redirect(withNotice(here, 'Purchase recorded.'))
 }
 
 /** "1 paint of THIS rice is 4,000 g." Private measurement data, per ingredient. */
