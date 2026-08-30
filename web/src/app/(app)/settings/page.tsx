@@ -9,7 +9,11 @@ import { money, NOT_ENTERED } from '@/lib/format'
 export const dynamic = 'force-dynamic'
 
 type Rate = { id: string; name: string; rate_per_hour: string | null; is_active: boolean }
-type Overhead = { id: string; name: string; monthly_cost: string | null; is_active: boolean }
+type Overhead = {
+  id: string; name: string; monthly_cost: string | null; is_active: boolean
+  basis_qty: string | null
+  basis_unit: { code: string; name: string } | null
+}
 type Settings = {
   overhead_enabled: boolean
   overhead_basis_qty: string | null
@@ -52,8 +56,24 @@ async function addOverhead(formData: FormData) {
   if (cost !== null && (!Number.isFinite(cost) || cost < 0)) {
     redirect(withNotice('/settings', 'A monthly cost cannot be negative.'))
   }
+
+  // Each running cost says how much output it is spread across. A soup
+  // kitchen that also bakes splits its bills between litres and kilograms;
+  // each naira belongs to one line and is spread one way, so nothing is ever
+  // counted twice. Left blank, the line falls back to the business default.
+  const qRaw = String(formData.get('basis_qty') ?? '').trim()
+  const uRaw = String(formData.get('basis_unit_id') ?? '')
+  const bQty = qRaw === '' ? null : Number(qRaw)
+  if (bQty !== null && (!Number.isFinite(bQty) || bQty <= 0)) {
+    redirect(withNotice('/settings', 'How much this is spread across must be more than zero.'))
+  }
+  if ((bQty === null) !== (uRaw === '')) {
+    redirect(withNotice('/settings', 'Give both an amount and its unit, or leave both blank.'))
+  }
+
   const { error } = await supabase.from('overhead_items').insert({
     account_id: accountId, business_id: businessId, name, monthly_cost: cost,
+    basis_qty: bQty, basis_unit_id: uRaw || null,
   })
   revalidatePath('/settings')
   redirect(withNotice('/settings', describeWriteError(error) ?? 'Running cost added.'))
@@ -116,7 +136,8 @@ export default async function SettingsPage({
   const [{ data: rates }, { data: overheads }, { data: settings }, { data: units }] = await Promise.all([
     supabase.from('labour_rates').select('id,name,rate_per_hour,is_active')
       .order('is_active', { ascending: false }).order('name').returns<Rate[]>(),
-    supabase.from('overhead_items').select('id,name,monthly_cost,is_active')
+    supabase.from('overhead_items')
+      .select('id,name,monthly_cost,is_active,basis_qty,basis_unit:units(code,name)')
       .order('is_active', { ascending: false }).order('name').returns<Overhead[]>(),
     supabase.from('business_settings')
       .select('overhead_enabled,overhead_basis_qty,overhead_basis_unit_id,default_target_margin,price_rounding_to,show_markup_alongside')
@@ -220,7 +241,7 @@ export default async function SettingsPage({
           </form>
         </Card>
         <Card>
-          <form action={addOverhead} className="grid gap-3 sm:grid-cols-3">
+          <form action={addOverhead} className="grid gap-3 sm:grid-cols-4">
             <Field label="What is it?">
               <input name="name" required placeholder="Gas" className={inputClass} style={inputStyle} />
             </Field>
@@ -228,7 +249,23 @@ export default async function SettingsPage({
               <input name="monthly_cost" type="number" step="0.01" min="0"
                 className={inputClass} style={inputStyle} />
             </Field>
-            <div className="flex items-end"><Submit>Add</Submit></div>
+            <Field label="Spread across how much?">
+              <input name="basis_qty" type="number" step="any" min="0" placeholder="600"
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Of what?">
+              <select name="basis_unit_id" className={inputClass} style={inputStyle}>
+                <option value="">— use my usual amount —</option>
+                {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+              </select>
+            </Field>
+            <div className="sm:col-span-4"><Submit>Add running cost</Submit></div>
+            <p className="sm:col-span-4 text-xs" style={{ color: 'var(--mm-muted)' }}>
+              If you make more than one kind of thing, say what each bill is
+              spread across — for example rent for the soup pots over 600
+              litres, and the bakery bill over 400 kg. Split the money between
+              the lines; do not enter the same bill twice.
+            </p>
           </form>
         </Card>
         {!overheads?.length ? (
@@ -247,6 +284,11 @@ export default async function SettingsPage({
                         ? <>{money(Number(o.monthly_cost))} a month</>
                         : <span className="mm-absent">{NOT_ENTERED}</span>}
                     </span>
+                  </div>
+                  <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                    {o.basis_qty !== null && o.basis_unit
+                      ? <>spread across {Number(o.basis_qty)} {o.basis_unit.code} you make</>
+                      : <>spread across your usual monthly amount</>}
                   </div>
                   {o.is_active && (
                     <form action={deactivateOverhead} className="mt-2">

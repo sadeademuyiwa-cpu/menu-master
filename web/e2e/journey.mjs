@@ -331,6 +331,36 @@ await page.screenshot({ path: 'e2e/shots/p4-format-detail.png', fullPage: true }
 await go(page, '/settings')
 await must(page, 'overhead is spread over what the business produces, not a fixed assumption',
   'How much do you produce in a month?')
+
+// A non-accountant must be able to split bills across two kinds of output
+// without meeting the words "dimension", "basis" or "allocation".
+await must(page, 'running costs are explained in plain business language',
+  'Spread across how much?', 'rent for the soup pots over 600')
+await mustNot(page, 'no dimensional-analysis jargon reaches the owner',
+  'dimension', 'allocation basis', 'basis unit')
+
+const ohForm = page.locator('form:has(input[name=basis_qty])')
+await ohForm.locator('input[name=name]').fill('Soup pot rent')
+await ohForm.locator('input[name=monthly_cost]').fill('300000')
+await ohForm.locator('input[name=basis_qty]').fill('600')
+await pick(ohForm, 'select[name=basis_unit_id]', 'l — Litre')
+steps++
+await ohForm.locator('button[type=submit]').click()
+await page.waitForTimeout(1000)
+await must(page, 'a running cost states what it is spread across, in the owner\'s words',
+  'Soup pot rent', 'spread across 600 l you make')
+
+const ohForm2 = page.locator('form:has(input[name=basis_qty])')
+await ohForm2.locator('input[name=name]').fill('Bakery rent')
+await ohForm2.locator('input[name=monthly_cost]').fill('200000')
+await ohForm2.locator('input[name=basis_qty]').fill('400')
+await pick(ohForm2, 'select[name=basis_unit_id]', 'kg — Kilogram')
+steps++
+await ohForm2.locator('button[type=submit]').click()
+await page.waitForTimeout(1000)
+await must(page, 'a second cost can be spread across a different kind of output',
+  'Bakery rent', 'spread across 400 kg you make')
+await page.screenshot({ path: 'e2e/shots/p4-overhead-split.png', fullPage: true })
 await mustNot(page, 'the superseded servings-per-month field is gone',
   'Servings you sell in a typical month')
 await page.screenshot({ path: 'e2e/shots/p4-settings.png', fullPage: true })
