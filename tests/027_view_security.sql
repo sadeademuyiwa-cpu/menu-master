@@ -70,8 +70,13 @@ join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public' and c.relkind = 'v'
   and not coalesce('security_invoker=on' = any(c.reloptions), false);
 
--- 3. The views Phase 3 replaced, checked by name. These are the ones that
---    regressed, so they are pinned individually rather than only by the rule.
+-- 3. Views pinned individually rather than only by the rule: the ones Phase 3
+--    replaced, because those are the ones that actually regressed, and the
+--    Phase 6 sales views, because 0047 DROPs and recreates four existing views
+--    and a drop is exactly where the option and the grants get lost.
+--
+--    A left join is deliberate: a view that has been deleted altogether shows
+--    up here as a FAIL with 'NO OPTIONS', not as a silently absent row.
 insert into t27
 select 3 + row_number() over (order by v),
        'view ' || v || ' is security_invoker',
@@ -80,8 +85,29 @@ select 3 + row_number() over (order by v),
        coalesce(array_to_string(c.reloptions, ','), 'NO OPTIONS')
 from (values ('v_price_check'),('v_recipe_cost_current'),
              ('v_costing_blockers'),('v_gate2_cutover'),
-             ('v_recipe_line_costs'),('v_purchase_summary')) as t(v)
+             ('v_recipe_line_costs'),('v_purchase_summary'),
+             ('v_sale_lines'),('v_sales_summary'),('v_product_performance'),
+             ('v_orders_attention'),('v_sale_cost_breakdown'),
+             ('v_sales_unified'),('v_profit_by_period'),('v_profit_by_product'),
+             ('v_dashboard_waterfall')) as t(v)
 left join pg_class c on c.relname = t.v;
+
+-- 4. A DROP VIEW discards its grants. Twice now a rollback restored a view and
+--    left the application unable to read it, so the grant is asserted, not
+--    assumed.
+insert into t27
+select 100 + row_number() over (order by v),
+       'authenticated can read ' || v,
+       case when exists (select 1 from information_schema.role_table_grants g
+                          where g.table_schema = 'public' and g.table_name = v
+                            and g.grantee = 'authenticated'
+                            and g.privilege_type = 'SELECT')
+            then 'PASS' else 'FAIL' end,
+       ''
+from (values ('v_sale_lines'),('v_sales_summary'),('v_product_performance'),
+             ('v_orders_attention'),('v_sale_cost_breakdown'),
+             ('v_sales_unified'),('v_profit_by_period'),('v_profit_by_product'),
+             ('v_dashboard_waterfall')) as t(v);
 
 select * from t27 order by n;
 select count(*) filter (where verdict='PASS') as pass,
