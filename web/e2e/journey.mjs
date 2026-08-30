@@ -617,7 +617,11 @@ for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'ta
   const ctxM = await browser.newContext({ viewport: { width: w, height: h } })
   const pageM = await ctxM.newPage()
   await logIn(pageM, A)
-  await go(pageM, recipeUrl)
+  // logIn already polls /dashboard, but the recipe page is a different route
+  // and a second browser context racing the first has been seen to reach it
+  // before its own cookie is live. Poll the page we are about to assert on,
+  // rather than asserting on whatever rendered first.
+  await settled(pageM, recipeUrl, 'Ofada Special')
   await must(pageM, `${tag}px shows the portion cost and the margin above the fold`,
     'Cost per portion', '₦562.50', '-12.50%')
   const overflow = await pageM.evaluate(

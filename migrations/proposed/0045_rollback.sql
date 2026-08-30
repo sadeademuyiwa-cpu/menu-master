@@ -7,6 +7,13 @@
 --
 -- Note: this restores the *mechanism*. It cannot un-freeze lines that were
 -- frozen at confirmation, and must not try to -- those are confirmed sales.
+--
+-- It also leaves the finalised_at values 0045 recorded on legacy orders. That
+-- is deliberate. Blanking them would mean guessing which rows were reconciled
+-- and which were genuinely finalised, and guessing wrong would unlock a real
+-- sale. Leaving them is harmless: the pre-0045 reporting keys on status, not
+-- finalised_at, so no figure changes -- those orders simply read as finalised,
+-- which under the old rules is what a confirmed order was always meant to be.
 begin;
 
 alter table orders alter column status set default 'confirmed';

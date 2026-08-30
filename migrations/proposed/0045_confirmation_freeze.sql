@@ -63,6 +63,54 @@ end
 $$;
 
 -- ---------------------------------------------------------------------------
+-- 0. The orders the old default left behind
+--
+-- Until this migration, orders.status defaulted to 'confirmed' while
+-- finalised_at was set only by fn_finalise_order. So an order inserted and
+-- never explicitly finalised sat in a third state: counted as revenue by the
+-- reporting views, which keyed on status, but not locked by the guards, which
+-- key on finalised_at. Its lines were frozen at insert regardless.
+--
+-- Phase 6 merges those two tiers into one boundary. These rows have to land
+-- somewhere, and there are only two honest choices:
+--
+--   drop them from revenue -- which silently changes the owner's historical
+--     figures, the exact thing this phase exists to prevent; or
+--   record when they were recognised -- which is what the old system meant by
+--     'confirmed' from the moment of creation.
+--
+-- The second. finalised_at takes the order's own created_at and finalised_by
+-- its created_by: not invented, read off the row. NO LINE IS TOUCHED, so no
+-- historical sale is re-costed and every frozen figure stays exactly as it was.
+--
+-- Reported, never silent. Voided orders and drafts are left alone; both are
+-- excluded from reporting before and after, so neither needs a decision.
+-- ---------------------------------------------------------------------------
+
+do $$
+declare v_n int;
+begin
+  select count(*) into v_n from orders
+   where status not in ('draft', 'cancelled')
+     and finalised_at is null and voided_at is null;
+  if v_n > 0 then
+    raise notice '0045: % order(s) were recognised as sales under the old default '
+                 'and carry no confirmation time. Recording their creation time as '
+                 'their confirmation time so their revenue does not change.', v_n;
+  else
+    raise notice '0045: no legacy orders need reconciling.';
+  end if;
+end
+$$;
+
+update orders
+   set finalised_at = created_at,
+       finalised_by = created_by
+ where status not in ('draft', 'cancelled')
+   and finalised_at is null
+   and voided_at is null;
+
+-- ---------------------------------------------------------------------------
 -- 1. One answer to "what does this product cost right now"
 --
 -- fn_freeze_sale_cost held this rule for quick sales. Confirmation needs the
@@ -457,8 +505,14 @@ begin
                   where c.relname = 'orders' and t.tgname = 'trg_orders_lifecycle') then
     raise exception '0045 self-check FAILED: the lifecycle guard is missing.';
   end if;
-  if exists (select 1 from orders where status = 'confirmed' and finalised_at is null) then
-    raise exception '0045 self-check FAILED: an order is confirmed with nothing frozen.';
+  -- Every order that reads as a sale must carry a confirmation time. Anything
+  -- left here would be counted by the old reporting and ignored by the new.
+  if exists (select 1 from orders
+              where status not in ('draft', 'cancelled')
+                and finalised_at is null and voided_at is null) then
+    raise exception '0045 self-check FAILED: % order(s) read as sales with no confirmation time.',
+      (select count(*) from orders where status not in ('draft', 'cancelled')
+        and finalised_at is null and voided_at is null);
   end if;
   -- A definer function that takes an account id and does not check it is a
   -- cost-reading service for anyone who can guess one.
