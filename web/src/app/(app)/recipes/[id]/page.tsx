@@ -5,9 +5,9 @@ import { createClient } from '@/lib/supabase/server'
 import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, inputClass, inputStyle,
-  Notice, SectionHeading, BackLink, Empty, Stat, StatRow, HeroStat, CostBar, Disclosure,
+  Notice, SectionHeading, BackLink, Empty, Stat, StatRow, HeroStat, CostBar, Disclosure, Badge,
 } from '@/components/ui'
-import { money, percent, quantity, marginVerdict, NOT_ENTERED } from '@/lib/format'
+import { money, percent, quantity, marginVerdict, lineStatus, NOT_ENTERED } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,6 +33,7 @@ type PriceCheck = {
   recipe_id: string; is_complete: boolean
   selling_price: string | null; profit: string | null
   margin_pct: string | null; recommended_price: string | null; target_margin: string | null
+  markup_pct: string | null
 }
 type Blocker = { problem: string; ingredient_name: string | null; unit_code: string | null; item: string | null }
 
@@ -171,7 +172,7 @@ export default async function RecipeDetail(props: {
       supabase.from('ingredients').select('id,name').is('deleted_at', null).eq('is_active', true)
         .order('name').returns<{ id: string; name: string }[]>(),
       supabase.from('v_price_check')
-        .select('recipe_id,is_complete,selling_price,profit,margin_pct,recommended_price,target_margin')
+        .select('recipe_id,is_complete,selling_price,profit,margin_pct,recommended_price,target_margin,markup_pct')
         .eq('recipe_id', id).returns<PriceCheck[]>(),
       supabase.from('v_costing_blockers')
         .select('problem,ingredient_name,unit_code,item').eq('recipe_id', id).returns<Blocker[]>(),
@@ -179,9 +180,9 @@ export default async function RecipeDetail(props: {
         .select('is_complete,required_inputs,priced_inputs,excluded_inputs,ingredient_cost,packaging_cost,labour_cost,overhead_cost,batch_cost,cost_per_yield_unit,cost_per_portion')
         .eq('recipe_id', id).returns<Snapshot[]>(),
       supabase.from('business_settings')
-        .select('default_target_margin,overhead_enabled,price_rounding_to')
+        .select('default_target_margin,overhead_enabled,price_rounding_to,show_markup_alongside')
         .eq('business_id', recipe.business_id)
-        .returns<{ default_target_margin: string | null; overhead_enabled: boolean; price_rounding_to: string | null }[]>(),
+        .returns<{ default_target_margin: string | null; overhead_enabled: boolean; price_rounding_to: string | null; show_markup_alongside: boolean }[]>(),
     ])
 
   const unitById = new Map((units ?? []).map((u) => [u.id, u]))
@@ -362,6 +363,47 @@ export default async function RecipeDetail(props: {
             </Card>
           )}
 
+          {/* 7. PROFITABILITY. Every figure here is read from v_price_check or
+              v_recipe_cost_current -- none is divided out in the browser. */}
+          <Card>
+            <p className="text-sm font-medium">Profitability, per portion</p>
+            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <dt style={{ color: 'var(--mm-muted)' }}>It costs you</dt>
+              <dd className="tabular-nums">{money(n(s.cost_per_portion))}</dd>
+              <dt style={{ color: 'var(--mm-muted)' }}>You sell it for</dt>
+              <dd className="tabular-nums">{money(n(check?.selling_price ?? null))}</dd>
+              <dt style={{ color: 'var(--mm-muted)' }}>You keep</dt>
+              <dd className="tabular-nums">{money(n(check?.profit ?? null))}</dd>
+              <dt style={{ color: 'var(--mm-muted)' }}>Margin (share of the price)</dt>
+              <dd className="tabular-nums">{percent(marginPct)}</dd>
+              {bs?.show_markup_alongside && (
+                <>
+                  <dt style={{ color: 'var(--mm-muted)' }}>Markup (added to your cost)</dt>
+                  <dd className="tabular-nums">{percent(n(check?.markup_pct ?? null))}</dd>
+                </>
+              )}
+              <dt style={{ color: 'var(--mm-muted)' }}>Your target margin</dt>
+              <dd className="tabular-nums">{percent(target)}</dd>
+              <dt style={{ color: 'var(--mm-muted)' }}>Price to hit that target</dt>
+              <dd className="tabular-nums">{money(n(check?.recommended_price ?? null))}</dd>
+              <dt style={{ color: 'var(--mm-muted)' }}>Status</dt>
+              <dd>
+                <Badge tone={verdict?.tone === 'bad' ? 'bad'
+                           : verdict?.tone === 'good' ? 'good'
+                           : verdict?.tone === 'warn' ? 'warn' : 'muted'}>
+                  {verdict?.label ?? 'No price set'}
+                </Badge>
+              </dd>
+            </dl>
+            {bs?.show_markup_alongside && (
+              <p className="mt-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                Margin is your profit as a share of what you charge. Markup is
+                the same profit as a share of what it cost you. They are always
+                different numbers for the same dish.
+              </p>
+            )}
+          </Card>
+
           <Card>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
               <dt style={{ color: 'var(--mm-muted)' }}>Batch makes</dt>
@@ -494,7 +536,13 @@ function LineGroup({ title, lines, recipeId, pro }: {
             <li key={l.line_id}>
               <Card>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                  <span className="font-medium">{l.item_name ?? 'Unknown item'}</span>
+                  <span className="flex flex-wrap items-center gap-2 font-medium">
+                    {l.item_name ?? 'Unknown item'}
+                    {/* Status comes from v_recipe_line_costs.problem, which the
+                        engine derives, so a line cannot show "Costed" beside a
+                        cost PostgreSQL refused to produce. */}
+                    <Badge tone={lineStatus(l.problem).tone}>{lineStatus(l.problem).label}</Badge>
+                  </span>
                   <span className="tabular-nums font-medium">
                     {lineCost !== null ? money(lineCost)
                       : <span className="mm-absent">no cost yet</span>}

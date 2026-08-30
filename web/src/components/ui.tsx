@@ -212,3 +212,26 @@ export function Disclosure({ summary, children, open = false }: {
     </details>
   )
 }
+
+/**
+ * A short state word with a colour. Used for per-ingredient status on the
+ * costing worksheet and for the recipe's pricing verdict, so the same state
+ * always looks the same wherever it appears.
+ */
+export function Badge({ tone = 'plain', children }: {
+  tone?: 'plain' | 'good' | 'warn' | 'bad' | 'muted'
+  children: React.ReactNode
+}) {
+  const colour =
+    tone === 'good' ? 'var(--mm-accent)' :
+    tone === 'bad' || tone === 'warn' ? 'var(--mm-warn)' :
+    tone === 'muted' ? 'var(--mm-muted)' : 'inherit'
+  return (
+    <span
+      className="inline-block whitespace-nowrap rounded border px-2 py-0.5 text-xs font-medium"
+      style={{ borderColor: colour, color: colour }}
+    >
+      {children}
+    </span>
+  )
+}

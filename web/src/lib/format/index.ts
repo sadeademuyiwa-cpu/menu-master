@@ -122,3 +122,23 @@ export function marginVerdict(
     sentence: `Well under your ${target}% target.`,
   }
 }
+
+/**
+ * The state of one ingredient line on the costing worksheet, in the owner's
+ * words. `problem` comes from v_recipe_line_costs, which derives it from the
+ * same functions that produce the cost -- so a line can never show a healthy
+ * status beside a cost the engine refused to compute.
+ */
+export function lineStatus(problem: string | null | undefined): {
+  label: string
+  tone: 'good' | 'warn' | 'muted'
+} {
+  switch (problem) {
+    case 'ok':                 return { label: 'Costed',        tone: 'good' }
+    case 'missing_price':      return { label: 'No price yet',  tone: 'warn' }
+    case 'missing_conversion': return { label: 'Needs measure', tone: 'warn' }
+    case 'excluded':           return { label: 'Not counted',   tone: 'muted' }
+    case 'sub_recipe':         return { label: 'Sub-recipe',    tone: 'muted' }
+    default:                   return { label: 'Unknown',       tone: 'warn' }
+  }
+}

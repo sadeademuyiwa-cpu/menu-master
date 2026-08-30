@@ -288,6 +288,12 @@ await must(page, 'the full costing view shows the batch breakdown',
 // from their own records, and an estimate must never look like a purchase.
 await must(page, 'the page states where the unit cost came from',
   'You bought 8000 g for ₦9,000.00')
+// Phase 3: the worksheet's profitability panel, every figure from PostgreSQL.
+// Margin and markup are different numbers for the same dish and must both
+// appear, correctly labelled, so neither can be mistaken for the other.
+await must(page, 'the worksheet shows margin AND markup, distinctly labelled',
+  'Profitability, per portion', 'Margin (share of the price)',
+  'Markup (added to your cost)', 'Price to hit that target')
 await mustNot(page, 'a real purchase is never labelled an estimate',
   'Estimated price')
 await page.screenshot({ path: 'e2e/shots/rc-desktop-pro.png', fullPage: true })
