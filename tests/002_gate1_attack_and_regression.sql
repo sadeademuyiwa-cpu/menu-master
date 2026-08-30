@@ -472,10 +472,26 @@ begin
      select %L, id, %L, 2, 2500 from orders where order_no=''B-ORD-1''', f.accb, f.recb));
   perform g('REGRESS','R4 cashier records a sale line', r='ALLOWED', r);
 
+  -- 0045 moved the freeze from line insert to order confirmation, so the
+  -- cashier now confirms. The property under test is unchanged and is the one
+  -- that matters: the freeze happens correctly on their behalf while they
+  -- still cannot read a single cost figure.
+  r := attack_val(f.cashb,
+    'select (fn_confirm_order((select id from orders where order_no=''B-ORD-1'')))->>''lines_frozen''');
+  perform g('REGRESS','R4b cashier confirms the order', r = 'ALLOWED: 1', r);
+
   perform g('REGRESS','R5 sale froze the cost without the cashier seeing it',
     (select unit_cost_at_sale from order_lines ol join orders o on o.id=ol.order_id
       where o.order_no='B-ORD-1') = 800,
-    'freeze runs inside a trigger, not through the guarded RPC');
+    'the freeze runs inside the confirmation, which the cashier may call but '
+    'whose result they cannot read');
+
+  -- What a cashier is denied is the costing engine, not the figure already
+  -- frozen onto the line they raised. cost_snapshots stays invisible to them,
+  -- which is the boundary Gate 1 established and 0045 must not have moved.
+  perform g('REGRESS','R5b confirming did not open cost_snapshots to the cashier',
+    attack_val(f.cashb, 'select count(*)::text from cost_snapshots') = 'ALLOWED: 0',
+    attack_val(f.cashb, 'select count(*)::text from cost_snapshots'));
 
   -- B maintains its own catalogue
   r := attack(f.ub, format(

@@ -287,6 +287,16 @@ begin
   insert into order_lines (account_id, order_id, recipe_id, qty, unit_price)
   values (f.accA, ord, f2.rid_bad, 1, 3500) returning id into ol_bad;
 
+  -- 0045: a draft carries no frozen cost. It recosts itself until the sale is
+  -- committed, so that a line typed on Monday and one typed on Wednesday both
+  -- freeze at the economics of the moment the order is actually confirmed.
+  perform t_assert('T09b a draft line carries no frozen cost yet',
+    (select cost_snapshot_id is null and unit_cost_at_sale is null
+       from order_lines where id = ol_ok),
+    'the freeze belongs to confirmation, not to typing');
+
+  perform fn_confirm_order(ord);
+
   select unit_cost_at_sale into frozen from order_lines where id = ol_ok;
 
   -- Price moves again AFTER the sale
