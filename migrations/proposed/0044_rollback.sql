@@ -65,6 +65,8 @@ begin
   end if;
 
   if old.finalised_at is not null then
+    -- Settlement may still move after the sale: collecting payment later is not
+    -- a revenue rewrite. Everything that determines revenue is frozen.
     if (old.account_id, old.business_id, old.location_id, old.customer_id,
         old.channel_id, old.order_no, old.order_date, old.status,
         old.finalised_at, old.replaces)

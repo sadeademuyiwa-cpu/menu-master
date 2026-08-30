@@ -11,6 +11,8 @@ begin;
 
 alter table orders alter column status set default 'confirmed';
 
+drop trigger if exists trg_orders_lifecycle on orders;
+drop function if exists fn_guard_order_lifecycle();
 drop function if exists fn_confirm_order(uuid);
 
 create or replace function fn_finalise_order(p_order_id uuid)
@@ -83,12 +85,14 @@ begin
   end if;
 
   if new.variant_id is not null then
+    -- what was actually sold is the variant, so that is what is frozen
     select * into s
     from cost_snapshots
     where variant_id = new.variant_id
     order by computed_at desc, seq desc
     limit 1;
   else
+    -- unchanged legacy path: recipe-level snapshots only
     select * into s
     from cost_snapshots
     where recipe_id = new.recipe_id and variant_id is null
@@ -96,6 +100,7 @@ begin
     limit 1;
   end if;
 
+  -- The gate applies here too. An incomplete cost is not a cost.
   if not found or not s.is_complete or s.cost_per_portion is null then
     new.cost_snapshot_id  := null;
     new.unit_cost_at_sale := null;
@@ -119,7 +124,9 @@ drop type if exists frozen_sale_cost;
 do $$
 begin
   if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-              where n.nspname = 'public' and p.proname in ('fn_confirm_order','fn_frozen_sale_cost')) then
+              where n.nspname = 'public'
+                and p.proname in ('fn_confirm_order','fn_frozen_sale_cost',
+                                  'fn_guard_order_lifecycle')) then
     raise exception '0045 rollback FAILED: a 0045 function survived.';
   end if;
   if not exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid

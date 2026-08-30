@@ -83,8 +83,15 @@ begin
 end
 $$;
 
--- SECURITY DEFINER, so it must scope itself. The account is passed in and
--- filtered on explicitly; it is never inferred from the snapshot it finds.
+-- SECURITY DEFINER, so it must scope itself twice over: it refuses a caller
+-- who is not a member of the account it is asked about, and it filters on that
+-- account explicitly rather than inferring it from whatever snapshot it finds.
+-- Without the first check a definer function taking an account id is simply a
+-- cost-reading service for anybody who can guess one.
+--
+-- Membership, not cost access: a sales user may confirm an order, and the
+-- freeze runs on their behalf, while they still cannot read a cost figure
+-- anywhere in the product. That boundary is Gate 1's and does not move here.
 create or replace function fn_frozen_sale_cost(
   p_account_id uuid,
   p_recipe_id  uuid,
@@ -98,6 +105,8 @@ set search_path to 'public'
 as $fn$
 declare s cost_snapshots%rowtype; r frozen_sale_cost;
 begin
+  perform fn_require_member(p_account_id);
+
   r := row(null, null)::frozen_sale_cost;
 
   if p_recipe_id is null then
@@ -324,6 +333,14 @@ comment on function fn_confirm_order(uuid) is
 
 grant execute on function fn_confirm_order(uuid) to authenticated;
 
+-- 0018 removed PUBLIC and anon from every fn_*. It was a sweep, not a standing
+-- rule, so every function added since has quietly arrived executable by
+-- everyone. Restated here for the two this migration adds; 0048 restores the
+-- rule for the whole schema and tests/034 keeps it restored.
+revoke all on function fn_confirm_order(uuid) from public, anon;
+revoke all on function fn_frozen_sale_cost(uuid, uuid, uuid) from public, anon;
+grant execute on function fn_frozen_sale_cost(uuid, uuid, uuid) to authenticated;
+
 -- fn_finalise_order keeps working, and keeps its old return shape: callers
 -- reading ->>'finalised' must not start getting NULL. It is the same operation
 -- under an older name, so it delegates rather than holding a second copy of
@@ -349,7 +366,66 @@ comment on function fn_finalise_order(uuid) is
   'do not break.';
 
 -- ---------------------------------------------------------------------------
--- 6. Self-check
+-- 6. An order cannot be talked into being confirmed
+--
+-- Every guard in the schema keys on finalised_at, and status was decorative.
+-- With status now meaning something, an ordinary UPDATE could set it to
+-- 'confirmed' while finalised_at stayed null -- an order that looks like a sale
+-- to a reader and like a draft to every guard, with no frozen cost. An INSERT
+-- could do the same in one step.
+--
+-- So status and finalised_at move together, and only fn_confirm_order moves
+-- them. Cancelling is exempt: it is its own path and is not a confirmation.
+--
+-- Service context is exempt, deliberately. An operator repairing data through
+-- the service role is not the 'normal application', and taking that away would
+-- remove the only recovery route. It is recorded here rather than hidden.
+-- ---------------------------------------------------------------------------
+
+create or replace function fn_guard_order_lifecycle()
+returns trigger
+language plpgsql
+as $fn$
+begin
+  if fn_is_service_context() then
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' then
+    if new.status <> 'draft' or new.finalised_at is not null then
+      raise exception
+        'An order starts as a draft. Confirm it when the sale is agreed.'
+        using errcode = 'check_violation';
+    end if;
+    return new;
+  end if;
+
+  if new.status is distinct from old.status
+     and new.status <> 'cancelled'
+     and old.finalised_at is null
+     and new.finalised_at is null then
+    raise exception
+      'This order is still a draft. Confirm it to record the sale.'
+      using errcode = 'check_violation';
+  end if;
+
+  if new.finalised_at is not null and new.status = 'draft' then
+    raise exception 'A confirmed sale cannot also be a draft.'
+      using errcode = 'check_violation';
+  end if;
+
+  return new;
+end
+$fn$;
+
+revoke all on function fn_guard_order_lifecycle() from public, anon;
+
+create trigger trg_orders_lifecycle
+  before insert or update on orders
+  for each row execute function fn_guard_order_lifecycle();
+
+-- ---------------------------------------------------------------------------
+-- 7. Self-check
 -- ---------------------------------------------------------------------------
 
 do $$
@@ -376,6 +452,21 @@ begin
                   where c.relname = 'order_lines' and t.tgname = 'trg_order_lines_frozen'
                     and (t.tgtype & 4) = 4 and (t.tgtype & 16) = 16) then
     raise exception '0045 self-check FAILED: the frozen-cost guard does not cover insert and update.';
+  end if;
+  if not exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+                  where c.relname = 'orders' and t.tgname = 'trg_orders_lifecycle') then
+    raise exception '0045 self-check FAILED: the lifecycle guard is missing.';
+  end if;
+  if exists (select 1 from orders where status = 'confirmed' and finalised_at is null) then
+    raise exception '0045 self-check FAILED: an order is confirmed with nothing frozen.';
+  end if;
+  -- A definer function that takes an account id and does not check it is a
+  -- cost-reading service for anyone who can guess one.
+  if pg_get_functiondef((select oid from pg_proc
+                          where proname = 'fn_frozen_sale_cost'
+                            and pronamespace = 'public'::regnamespace))
+     !~ 'fn_require_member' then
+    raise exception '0045 self-check FAILED: fn_frozen_sale_cost does not check membership.';
   end if;
   -- Nothing already confirmed may have been disturbed by any of this.
   if exists (select 1 from order_lines ol join orders o on o.id = ol.order_id

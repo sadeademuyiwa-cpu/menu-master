@@ -625,6 +625,60 @@ begin
     'frozen at '||coalesce(c::text,'NULL')||' (the 2.5 litre cost)');
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- 12. AN ORDER CANNOT BE TALKED INTO BEING A SALE
+--
+-- Every guard keys on finalised_at. With status now meaning something, an
+-- ordinary write that set status to 'confirmed' and left finalised_at null
+-- would produce an order that reads as a sale and is treated as a draft by
+-- every guard, with no frozen cost behind it.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  f record; ord uuid; ok_insert boolean := false; ok_update boolean := false;
+  st text; fin text; froze boolean;
+begin
+  select * into f from fx32;
+
+  -- Run as an ordinary authenticated user. The harness itself is service
+  -- context and deliberately exempt -- an operator repairing data is not the
+  -- normal application -- so testing as the harness would prove nothing.
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', f.usr::text, true);
+
+  begin
+    insert into orders(account_id, business_id, order_no, order_date, status)
+    values (f.acct, f.biz, 'S32-BORNSOLD', current_date, 'confirmed');
+  exception when others then ok_insert := true; end;
+
+  insert into orders(account_id, business_id, order_no, order_date)
+  values (f.acct, f.biz, 'S32-TALKED', current_date) returning id into ord;
+  insert into order_lines(account_id, order_id, recipe_id, qty, unit_price)
+  values (f.acct, ord, f.jollof, 1, 1500);
+
+  begin update orders set status = 'confirmed' where id = ord;
+  exception when others then ok_update := true; end;
+
+  select o.status::text, coalesce(o.finalised_at::text, 'not finalised')
+    into st, fin from orders o where o.id = ord;
+
+  perform fn_confirm_order(ord);
+  select o.status::text = 'confirmed' and o.finalised_at is not null
+         and ol.unit_cost_at_sale is not null
+    into froze
+    from orders o join order_lines ol on ol.order_id = o.id where o.id = ord;
+
+  reset role;
+  perform set_config('request.jwt.claim.sub', '', true);
+
+  insert into t32 values (41, 'an order cannot be inserted already confirmed',
+    case when ok_insert then 'PASS' else 'FAIL' end, '');
+  insert into t32 values (42, 'and a draft cannot be relabelled as one either',
+    case when ok_update and st = 'draft' then 'PASS' else 'FAIL' end, st||' / '||fin);
+  insert into t32 values (43, 'only confirming it does both, together',
+    case when froze then 'PASS' else 'FAIL' end, '');
+end $$;
+
 select * from t32 order by n;
 select count(*) filter (where verdict = 'PASS') as pass,
        count(*) filter (where verdict <> 'PASS') as fail from t32;
