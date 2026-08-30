@@ -86,8 +86,11 @@ async function signUp(page, who) {
   // a fixed delay passed locally and raced under load.
   await settled(page, '/onboarding', 'Set up your business')
 }
-/** Navigate until the page proves the session is live, or fail loudly. */
-async function settled(page, path, needle, tries = 15) {
+/** Navigate until the page proves the session is live, or fail loudly.
+ *  25 tries, not 15: the first run against a cold database took longer than
+ *  six seconds to write the auth cookie and the harness, not the product,
+ *  failed. */
+async function settled(page, path, needle, tries = 25) {
   for (let i = 0; i < tries; i++) {
     await go(page, path)
     const body = await text(page)

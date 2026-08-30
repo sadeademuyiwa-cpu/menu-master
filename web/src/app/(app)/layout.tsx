@@ -4,17 +4,22 @@ import { redirect } from 'next/navigation'
 import { EntitlementBanner } from '@/components/entitlement-banner'
 
 /**
- * Six primary destinations, not ten.
+ * Five primary destinations, not ten.
  *
  * Ten equally weighted items did not fit a 360px phone: the bar scrolled, and
  * the last entries sat off-screen behind a gesture most owners never make.
- * These six are the daily journey -- see, buy, record, make, review, configure
- * -- and each of the remaining pages is reached from the one it belongs to:
- * Suppliers from Purchases, Formats from Recipes, Account from Settings.
+ * These five are the daily journey -- see, sell, buy, make, everything else --
+ * and each remaining page is reached from the one it belongs to: Ingredients
+ * from Purchases and Recipes, Customers from Sales, Suppliers from Purchases,
+ * Formats from Recipes, Account from Settings.
+ *
+ * Sales took the fifth slot from Ingredients. Recording what you sold is a
+ * daily act; opening the ingredient list is not, now that purchases are what
+ * set prices.
  */
 const NAV = [
   { href: '/dashboard', label: 'Home' },
-  { href: '/ingredients', label: 'Ingredients' },
+  { href: '/sales', label: 'Sales' },
   { href: '/purchases', label: 'Purchases' },
   { href: '/recipes', label: 'Recipes' },
   { href: '/more', label: 'More' },

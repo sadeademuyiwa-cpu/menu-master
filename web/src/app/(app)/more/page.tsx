@@ -16,6 +16,7 @@ const GROUPS = [
     title: 'Selling',
     sub: 'How your food reaches a customer.',
     links: [
+      { href: '/customers', label: 'Customers', hint: 'Who you cook for, and what they are worth to you.' },
       { href: '/formats', label: 'The sizes you sell in', hint: 'Bowls, tubs, packs, trays.' },
       { href: '/pricing', label: 'Your prices', hint: 'What you charge, and what it earns you.' },
     ],
@@ -24,6 +25,7 @@ const GROUPS = [
     title: 'Buying',
     sub: 'Where your costs come from.',
     links: [
+      { href: '/ingredients', label: 'Ingredients', hint: 'What you cook with, and what it costs.' },
       { href: '/suppliers', label: 'Suppliers and markets', hint: 'Who you buy from.' },
     ],
   },

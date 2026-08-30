@@ -55,6 +55,12 @@ export default async function DashboardPage() {
       .limit(8).returns<PriceRow[]>(),
   ])
 
+  // Has anything actually been sold? v_sales_summary has a row only for a day
+  // with a recognised sale, so its emptiness is the answer -- and a draft, which
+  // is not a sale, never puts a row in it.
+  const { count: tradingDays } = await supabase
+    .from('v_sales_summary').select('sale_date', { count: 'exact', head: true })
+
   const setup = setupRows?.[0]
   const all = products ?? []
   const needsAttention = all.filter((p) => p.attention_rank <= 3)
@@ -84,6 +90,8 @@ export default async function DashboardPage() {
       hint: 'Optional. Rent, gas, electricity.' },
     { done: (setup?.selling_prices_set ?? 0) > 0, label: 'Set your selling price', href: '/recipes',
       hint: 'Then Menu Master shows your real profit.' },
+    { done: (tradingDays ?? 0) > 0, label: 'Record your first sale', href: '/sales',
+      hint: 'What you sold, and what it really earned you.' },
   ]
   const nextStep = steps.find((s) => !s.done)
   const doneCount = steps.filter((s) => s.done).length
@@ -268,6 +276,7 @@ export default async function DashboardPage() {
         <SectionHeading sub="The things you do most.">Quick actions</SectionHeading>
         <div className="grid gap-2 sm:grid-cols-3">
           {[
+            { href: '/sales', label: 'Record a sale' },
             { href: '/purchases', label: 'Record a purchase' },
             { href: '/ingredients', label: 'Add an ingredient' },
             { href: '/recipes', label: 'Add something you make' },

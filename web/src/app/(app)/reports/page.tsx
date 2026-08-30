@@ -1,12 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import { PageHeader, Card, Empty, DataList } from '@/components/ui'
-import { money, percent, coverageLabel } from '@/lib/format'
+import { money, percent, coverageLabel, NOT_ENTERED } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
 
 type ByPeriod = {
   period: string
   revenue: number | null
+  costed_revenue: number | null
   cogs: number | null
   gross_profit: number | null
   gross_margin_pct: number | null
@@ -18,6 +19,7 @@ type ByProduct = {
   name: string
   units_sold: number | null
   revenue: number | null
+  costed_revenue: number | null
   cogs: number | null
   gross_profit: number | null
   gross_margin_pct: number | null
@@ -46,7 +48,7 @@ export default async function ReportsPage() {
     <div className="space-y-10">
       <PageHeader
         title="Reports"
-        sub="Revenue always counts. Profit counts only where a verified cost existed at the time of sale."
+        sub="Revenue always counts. Profit is worked out only over the sales whose cost was actually known at the time — counting the rest as pure profit would flatter the figure exactly where you know least."
       />
 
       <section>
@@ -59,6 +61,7 @@ export default async function ReportsPage() {
             render={(r) => [
               { label: 'Period', value: r.period },
               { label: 'Revenue', value: money(r.revenue) },
+              { label: 'Of that, costed', value: money(r.costed_revenue) },
               { label: 'Gross profit', value: money(r.gross_profit) },
               { label: 'Margin', value: percent(r.gross_margin_pct) },
               { label: 'Coverage', value: coverageLabel(r.cost_coverage_pct) },
@@ -77,8 +80,10 @@ export default async function ReportsPage() {
             empty="No product sales yet."
             render={(r) => [
               { label: 'Product', value: r.name },
-              { label: 'Units sold', value: r.units_sold ?? 0 },
+              // No `?? 0` here. An absent figure says so; it is never a zero.
+              { label: 'Units sold', value: r.units_sold ?? NOT_ENTERED },
               { label: 'Revenue', value: money(r.revenue) },
+              { label: 'Gross profit', value: money(r.gross_profit) },
               { label: 'Margin', value: percent(r.gross_margin_pct) },
               { label: 'Coverage', value: coverageLabel(r.cost_coverage_pct) },
             ]}
