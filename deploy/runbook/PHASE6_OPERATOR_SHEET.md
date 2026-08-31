@@ -4,7 +4,7 @@ Written for the business owner, not a database engineer. Every step says where
 you are, exactly what to paste, what a good result looks like, what to keep, and
 the one condition that stops you.
 
-**Deploying commit `4521566375d55a4262f0e92acd435adc0f899137`.**
+**Deploying commit `9554fb6c6d065e0117636b1ab2d0a35ab1798d2b`.**
 
 Two rules that never change:
 
@@ -461,7 +461,7 @@ for the **Production** environment:
 
 **Vercel → Deployments → Create Deployment**, from branch
 `claude/menu-master-ng-migrations-3faerm`, commit
-`4521566375d55a4262f0e92acd435adc0f899137`.
+`9554fb6c6d065e0117636b1ab2d0a35ab1798d2b`.
 
 Wait for it to finish and show **Ready**.
 
