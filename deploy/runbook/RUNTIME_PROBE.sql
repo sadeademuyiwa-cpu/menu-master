@@ -11,7 +11,22 @@
 -- fail only when a customer tries to record a sale. That is exactly what would
 -- have happened had the first deployment attempt not failed on a GRANT.
 --
--- SAFETY
+-- ############################################################################
+-- ##  DO NOT RUN THIS IN THE SUPABASE SQL EDITOR.                           ##
+-- ##                                                                        ##
+-- ##  On 2026-08-31 the SQL Editor did not honour the begin;/commit; in     ##
+-- ##  MIGRATE_0034_TO_0048.sql: every statement committed on its own and    ##
+-- ##  execution simply halted at the first error. This file's safety rests  ##
+-- ##  ENTIRELY on its closing rollback;. Under that executor the rollback   ##
+-- ##  would not undo anything and this probe would COMMIT a __probe__       ##
+-- ##  account, business, ingredient, price, recipe, order and order lines   ##
+-- ##  into production -- destroying an empty-baseline database.             ##
+-- ##                                                                        ##
+-- ##  Run it only through psql on a single connection, where begin; really  ##
+-- ##  opens a transaction.                                                  ##
+-- ############################################################################
+--
+-- SAFETY (given a client that honours transactions)
 --   * It runs inside BEGIN ... ROLLBACK. Nothing it creates survives.
 --   * It NEVER touches auth.users. accounts, businesses, ingredients, recipes,
 --     customers and order_lines have no foreign key to auth.users, and
