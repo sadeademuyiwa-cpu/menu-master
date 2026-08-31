@@ -73,15 +73,27 @@ checks(n, check_name, ok, detail) as (
                    where n.nspname='public' and c.relkind='v'
                      and c.relname <> 'v_billing_reconciliation'
                      and not coalesce('security_invoker=on' = any(c.reloptions), false)),'none')
+  -- Read through aclexplode rather than matching ACL text. An entry reads
+  -- '=X/postgres' only when the owner happens to be postgres; comparing the
+  -- literal silently stops detecting anything the moment the owner differs,
+  -- and this is the check that certifies the deployment. grantee = 0 is PUBLIC.
   union all select 10,'tenancy: no function is executable by public or anon',
          (select count(*) from pg_proc p
            where p.pronamespace='public'::regnamespace and p.proname like 'fn\_%'
-             and (p.proacl is null or '=X/postgres' = any(p.proacl::text[])
-                  or 'anon=X/postgres' = any(p.proacl::text[]))) = 0,
-         coalesce((select string_agg(p.proname,', ') from pg_proc p
+             and (p.proacl is null
+                  or exists (select 1 from aclexplode(p.proacl) a
+                              where a.grantee = 0 and a.privilege_type = 'EXECUTE')
+                  or exists (select 1 from aclexplode(p.proacl) a
+                               join pg_roles r on r.oid = a.grantee
+                              where r.rolname = 'anon' and a.privilege_type = 'EXECUTE'))) = 0,
+         coalesce((select string_agg(p.proname,', ' order by p.proname) from pg_proc p
                     where p.pronamespace='public'::regnamespace and p.proname like 'fn\_%'
-                      and (p.proacl is null or '=X/postgres' = any(p.proacl::text[])
-                           or 'anon=X/postgres' = any(p.proacl::text[]))),'none')
+                      and (p.proacl is null
+                           or exists (select 1 from aclexplode(p.proacl) a
+                                       where a.grantee = 0 and a.privilege_type = 'EXECUTE')
+                           or exists (select 1 from aclexplode(p.proacl) a
+                                        join pg_roles r on r.oid = a.grantee
+                                       where r.rolname = 'anon' and a.privilege_type = 'EXECUTE'))),'none')
   union all select 11,'tenancy: the cost freezer checks membership',
          (select pg_get_functiondef(oid) ~ 'fn_require_member' from pg_proc
            where proname='fn_frozen_sale_cost' and pronamespace='public'::regnamespace), ''
