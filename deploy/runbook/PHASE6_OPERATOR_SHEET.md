@@ -4,7 +4,9 @@ Written for the business owner, not a database engineer. Every step says where
 you are, exactly what to paste, what a good result looks like, what to keep, and
 the one condition that stops you.
 
-**Deploying commit `9554fb6c6d065e0117636b1ab2d0a35ab1798d2b`.**
+**Deploy the current tip of branch `claude/menu-master-ng-migrations-3faerm`.**
+Vercel will show you the commit it picked up — send me that hash and I will
+confirm it is the right one.
 
 Two rules that never change:
 
@@ -460,8 +462,7 @@ for the **Production** environment:
 ### 4.2 Deploy the frontend
 
 **Vercel → Deployments → Create Deployment**, from branch
-`claude/menu-master-ng-migrations-3faerm`, commit
-`9554fb6c6d065e0117636b1ab2d0a35ab1798d2b`.
+`claude/menu-master-ng-migrations-3faerm`, using its **current tip**.
 
 Wait for it to finish and show **Ready**.
 
