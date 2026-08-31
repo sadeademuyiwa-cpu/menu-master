@@ -426,7 +426,22 @@ select (select count(*) from cost_snapshots)                                as c
 > `rls_policies` is not `116`. **STOP if** `login_accounts` changed. Go to
 > ROLLBACK.
 
-**Send me:** all six result tables. **Do not go to STEP 4 until I confirm, or
+### Query 3.7 — the runtime probe
+
+Catalogue checks cannot see this class of fault: a function body may reference a
+column that does not exist and still be created successfully. Run
+`deploy/runbook/PHASE6_RUNTIME_PROBE.sql`. It confirms a sale and **rolls itself
+back**, leaving nothing.
+
+**Looks like:** `RUNTIME PROBE PASS: a sale can be confirmed.`
+
+If it says `SKIPPED`, there is no business or recipe yet to test with — expected
+on a database with no data. In that case the runtime path is proven by STEP 5
+instead, and STEP 5 becomes mandatory rather than a formality.
+
+> **STOP if it reports an ERROR.** Go to ROLLBACK.
+
+**Send me:** all seven result tables. **Do not go to STEP 4 until I confirm, or
 until you have satisfied yourself that every comparison matches and every check
 reads PASS.**
 
