@@ -11,7 +11,7 @@
 -- This one pins the function catalogue itself.
 --
 -- Paste the whole file into the Supabase SQL Editor and Run once.
--- EXPECTED: 24 rows, every one PASS.
+-- EXPECTED: 28 rows, every one PASS.
 -- ============================================================================
 with
 -- The fingerprint is built from BARE type names and ordered COLLATE "C" so it
@@ -106,6 +106,33 @@ checks(n, check_name, ok, detail) as (
          coalesce((select round(sum(revenue),2)::text from v_sales_unified),'0')
   union all select 24,'baseline: rows 0045 will reconcile (expect 0 on an empty database)', true,
          (select count(*)::text from orders where status not in ('draft','cancelled') and finalised_at is null and voided_at is null)
+  -- 5. ENVIRONMENT. The second attempt aborted because 0048 asserted a function
+  --    that exists only in the local test harness. Every environment object the
+  --    bundle actually depends on is now proven present BEFORE anything runs.
+  union all select 25,'environment: auth.uid() exists (0038-0046 default their created_by to it)',
+         to_regprocedure('auth.uid()') is not null,
+         coalesce(to_regprocedure('auth.uid()')::text,'MISSING -- 0039/0041/0046 cannot compile')
+  union all select 26,'environment: the four platform roles exist (0048 grants and revokes on them)',
+         (select count(*) from pg_roles where rolname in ('anon','authenticated','service_role','authenticator')) = 4,
+         coalesce((select string_agg(rolname,', ' order by rolname) from pg_roles
+                    where rolname in ('anon','authenticated','service_role','authenticator')),'none')
+  union all select 27,'environment: this is the hosted platform, NOT the local test harness',
+         to_regprocedure('public.local_pre_request()') is null,
+         case when to_regprocedure('public.local_pre_request()') is null
+              then 'no local_pre_request -- correct for Supabase'
+              else 'local_pre_request() present: this is a harness database, not production' end
+  union all select 28,'environment: the configured pre-request hook resolves and authenticator can call it',
+         coalesce((select h.oid is null
+                     or not exists (select 1 from pg_roles where rolname='authenticator')
+                     or has_function_privilege('authenticator', h.oid, 'execute')
+                     from (select to_regprocedure(replace(replace(split_part(cfg,'=',2),'"',''),'''','')||'()') as oid
+                             from pg_db_role_setting r cross join lateral unnest(r.setconfig) as cfg
+                            where cfg like 'pgrst.db\_pre\_request=%' limit 1) h), true),
+         coalesce((select coalesce(h.oid::text,'configured hook does not resolve')
+                     from (select to_regprocedure(replace(replace(split_part(cfg,'=',2),'"',''),'''','')||'()') as oid
+                             from pg_db_role_setting r cross join lateral unnest(r.setconfig) as cfg
+                            where cfg like 'pgrst.db\_pre\_request=%' limit 1) h),
+                  'no pre-request hook configured in-database -- nothing for 0048 to break')
 )
 select n, case when ok then 'PASS' else '*** FAIL -- STOP ***' end as verdict, check_name, detail
   from checks order by ok, n;

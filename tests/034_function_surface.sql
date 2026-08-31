@@ -148,11 +148,25 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 4. THE HOOK POSTGREST NEEDS ON EVERY REQUEST
 -- ---------------------------------------------------------------------------
+-- The hook is read from the PostgREST role setting, never named here: it is
+-- local_pre_request in this harness and something else on the hosted platform.
+-- to_regprocedure returns NULL for an absent function; has_function_privilege
+-- on a text signature raises 42883, which is what broke the second production
+-- attempt.
 insert into t34
-select 6, 'the pre-request hook is still callable, so the API still answers',
-       case when not exists (select 1 from pg_roles where rolname = 'authenticator')
-             or has_function_privilege('authenticator', 'local_pre_request()', 'execute')
-            then 'PASS' else 'FAIL' end, '';
+select 6, 'the configured pre-request hook is still callable, so the API still answers',
+       case when v_oid is null
+             or not exists (select 1 from pg_roles where rolname = 'authenticator')
+             or has_function_privilege('authenticator', v_oid, 'execute')
+            then 'PASS' else 'FAIL' end,
+       coalesce(v_oid::text, 'no pre-request hook configured in this database')
+  from (select to_regprocedure(
+                 replace(replace(split_part(cfg, '=', 2), '"', ''), '''', '') || '()') as v_oid
+          from pg_db_role_setting r
+          cross join lateral unnest(r.setconfig) as cfg
+         where cfg like 'pgrst.db\_pre\_request=%'
+         union all select null::regprocedure
+         limit 1) h;
 
 select * from t34 order by n;
 select count(*) filter (where verdict = 'PASS') as pass,

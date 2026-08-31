@@ -1,0 +1,76 @@
+REHEARSAL R3 -- production-faithful environment, complete battery
+generated 2026-08-31T22:45:28Z
+
+THE ENVIRONMENT DIFFERENCE
+  Every earlier replica was built by applying tests/0000_local_supabase_shim.sql
+  first. That shim creates public.local_pre_request(), and documents it as
+  "LOCAL ONLY ... Never run against Supabase: the platform provides this itself."
+  Migration 0048 asserted that function by name. It was therefore always present
+  in rehearsal and never present in production.
+
+  /tmp/setup_prod.sh builds a replica that drops local_pre_request() immediately
+  after the shim and before migration 0001. Everything else the shim provides --
+  the anon/authenticated/service_role/authenticator roles, the auth schema,
+  auth.users, auth.uid(), auth.role(), the public default privileges -- the
+  hosted platform does provide, so those are kept.
+
+REPRODUCTION OF THE PRODUCTION FAILURE
+  Against that replica, the pre-fix bundle produced, byte for byte:
+    ERROR:  function "local_pre_request()" does not exist
+    CONTEXT: SQL expression "not has_function_privilege('authenticator',
+             'local_pre_request()', 'execute')
+             and exists (select 1 from pg_roles where rolname = 'authenticator')"
+    PL/pgSQL function inline_code_block line 24 at IF
+  PRE_DEPLOY_AUDIT passed 23/23 applicable checks on that same replica first --
+  which is exactly what happened in production. The gate was blind to it: the
+  fingerprint and every count are computed over fn_* only, and the shim names
+  the hook local_pre_request precisely so it is not counted.
+
+  Nothing was left behind by the abort: 60 fn_*, 14 views, no 0034-0048 object.
+
+AFTER THE FIX, against a clean production-faithful replica
+  1. scripts/audit_env_assumptions.sh        ENV AUDIT: CLEAN
+                                             (fails on the pre-fix 0048 with
+                                             findings on checks 1, 2 and 3)
+  2. PRE_DEPLOY_AUDIT.sql  28 checks         27 PASS. Only failure is check 16
+                                             (auth.users = 0 here vs 7 in
+                                             production). Checks 25-28 are new.
+  3. Audit discriminates                     against a HARNESS database, check 27
+                                             FAILS: "local_pre_request() present:
+                                             this is a harness database, not
+                                             production".
+  4. MIGRATE_0034_TO_0048.sql                COMMITTED, every self-check green.
+  5. POST_VERIFY.sql       20 checks         19 PASS (check 12 = the same auth
+                                             count). Fingerprint
+                                             e24f3871788893cafd1fc17c70fe41d5.
+  6. RUNTIME_PROBE.sql                       PASS, and cleanup PASS.
+  7. ATOMIC-FAILURE TEST                     1/0 injected immediately before
+                                             COMMIT: 60 fn_*, 14 views, nothing
+                                             partial.
+  8. COLLATERAL-DAMAGE NEGATIVE TEST         a revoke injected against a non-fn_
+                                             function is caught by name:
+                                             "0048 self-check FAILED: privileges
+                                             changed on functions that are not
+                                             ours: pretend_hook()".
+                                             This is the property the hardcoded
+                                             local_pre_request check was reaching
+                                             for, asserted without naming it.
+  9. ROLLBACK.sql                            COMMITTED, 0048 -> 0033. Full-schema
+                                             fingerprint (2111 lines, md5
+                                             7b3accaec24ed53a171496902bd76038)
+                                             IDENTICAL to a freshly built
+                                             production-faithful 0033.
+ 10. FULL SQL SUITE (harness)                19 suites, 517/517 pass.
+ 11. KEY SUITES on a production-faithful     027 view security  26/0
+     0048 database, no shim function         032 sales+frozen   43/0
+                                             033 discounts      20/0
+                                             034 fn surface      6/0
+
+STATIC AUDIT OF THE WHOLE 15-MIGRATION BUNDLE
+  literal signature in a privilege lookup    none
+  reference to a shim-only name              none
+  ACL text literal embedding an owner        none
+  current_setting without missing_ok         none
+  non-public schema dependency               auth.uid()  -- asserted by check 25
+  role dependency                            anon, authenticated, authenticator
+                                             -- asserted by check 26

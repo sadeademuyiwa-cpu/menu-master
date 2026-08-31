@@ -4,6 +4,14 @@
 set -eu
 R="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$R/deploy/runbook/PHASE6_MIGRATE.sql"
+# A bundle is never generated without the environment audit passing. The second
+# production attempt aborted on a self-check that named a function which exists
+# only in the local test shim; this makes that class of defect un-shippable.
+"$R/scripts/audit_env_assumptions.sh" || {
+  echo "REFUSING TO BUILD: environment audit found assumptions that will not hold in production." >&2
+  exit 1
+}
+
 FILES=()
 for n in 0034 0035 0036 0037 0038 0039 0040 0041 0042 0043 0044 0045 0046 0047 0048; do
   FILES+=("$(ls "$R"/migrations/proposed/${n}_*.sql | grep -v _rollback | head -1)")
