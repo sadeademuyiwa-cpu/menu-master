@@ -1,0 +1,69 @@
+REHEARSAL R4 -- full-fidelity replica, complete battery
+generated 2026-08-31T22:59:00Z
+
+THE REPLICA
+  scripts/build_production_faithful_replica.sh, plus seven seeded auth.users
+  rows. This is the first rehearsal environment that matches production on
+  EVERY axis PRE_DEPLOY_AUDIT measures. The audit returns 28/28 PASS here with
+  the same detail string in every row that production reported, including:
+      row 16  7 login accounts
+      row 27  no local_pre_request -- correct for Supabase
+      row 28  no pre-request hook configured in-database
+  No row is waived, skipped or explained away. Earlier rehearsals always had at
+  least one known divergence; this one has none.
+
+ARTIFACT UNDER TEST
+  deploy/runbook/MIGRATE_0034_TO_0048.sql
+  4518 lines, 195529 bytes
+  sha256 594ca0d8d46a66424402ed3d790117bea07b571e184e80cad41ca0e2e4d187b7
+  one top-level begin; (line 34) and one commit; (line 4518), confirmed after
+  stripping dollar-quoted function bodies, comments and string literals.
+
+BATTERY
+  0. scripts/audit_env_assumptions.sh        ENV AUDIT: CLEAN
+  1. PRE_DEPLOY_AUDIT.sql                    28 / 28 PASS
+  2. MIGRATE_0034_TO_0048.sql                COMMITTED. Every embedded self-check
+                                             raised its OK notice, including
+                                             "0048 OK: no function is executable
+                                             by public or anon, 116 policies
+                                             unchanged."
+  3. POST_VERIFY.sql                         20 / 20 PASS. Fingerprint
+                                             e24f3871788893cafd1fc17c70fe41d5.
+                                             Row 12: 7 login accounts, untouched.
+  4. RUNTIME_PROBE.sql                       PASS -- lines_frozen=1, cost frozen
+                                             at 850.0000, net revenue 4000.00,
+                                             auth.users 7 -> 7.
+                                             Cleanup PASS: 0 probe rows survived.
+                                             auth.users still 7 afterwards.
+  5. ATOMIC-FAILURE TEST                     a division by zero injected
+                                             immediately before COMMIT, past all
+                                             fifteen migrations and every
+                                             self-check, aborted the bundle.
+                                             PRE_DEPLOY_AUDIT then returned
+                                             28 / 28 PASS -- the database is back
+                                             at exactly the state the gate
+                                             demands, not merely "close".
+  6. ROLLBACK.sql                            COMMITTED, 0048 -> 0033.
+                                             PRE_DEPLOY_AUDIT then returned
+                                             28 / 28 PASS. auth.users still 7.
+                                             Full-schema fingerprint -- columns,
+                                             function bodies, view definitions and
+                                             reloptions, grants, policies,
+                                             triggers, constraints, composite
+                                             types; 2111 lines, md5
+                                             7b3accaec24ed53a171496902bd76038 --
+                                             IDENTICAL to a freshly built
+                                             full-fidelity 0033.
+  7. FULL SQL SUITE                          19 suites, 517 / 517 pass.
+  8. KEY SUITES on a production-faithful     027 view security  26 / 0
+     0048 database                           032 sales + COGS   43 / 0
+                                             033 discounts      20 / 0
+                                             034 fn surface      6 / 0
+
+NOTE ON ROW 28
+  Production reports no in-database pgrst.db_pre_request setting, so 0048's
+  configured-hook assertion is a no-op there. What actually protects the hook in
+  production is the ACL snapshot: 0048 records the privileges of every function
+  in public before the revoke loop and raises if any non-fn_* function's ACL
+  moved. That check is environment-independent and is exercised by a negative
+  test (an injected revoke on a non-fn_ function is caught by name).
