@@ -1,0 +1,94 @@
+PARTIAL-STATE INVESTIGATION -- why production is at 0048 after an "atomic" run
+generated 2026-08-31T23:22:32Z
+
+REPORTED LIVE STATE
+  fingerprint e24f3871788893cafd1fc17c70fe41d5, fn_* 70, views 23, triggers 36,
+  tables 41, policies 116, trg_order_lines_freeze absent,
+  orders.status default 'draft'::order_status, auth.users 7, business data empty.
+
+1. THE COUNTS CANNOT TELL 0047 FROM 0048
+   Measured on local replicas:
+     0046  e24f3871788893cafd1fc17c70fe41d5  70  18  36  41  116
+     0047  e24f3871788893cafd1fc17c70fe41d5  70  23  36  41  116
+     0048  e24f3871788893cafd1fc17c70fe41d5  70  23  36  41  116
+   0048 creates no objects; it only moves EXECUTE privileges. The fingerprint
+   and every count are identical at 0047 and 0048. 23 views rules out 0046.
+   The GRANT SURFACE is the only discriminator:
+     0047   9 fn_* executable by PUBLIC, 1 by anon
+     0048   0 and 0
+   DIAGNOSE_LIVE_STATE.sql reads exactly that, read-only.
+
+2. MECHANISM -- ATOMICITY WAS NEVER IN EFFECT
+   The artifact carries one top-level begin; (line 34) and one commit;. That is
+   true of the file and was verified. It is NOT true of the execution: the
+   observed state is precisely "every statement up to the failure persisted".
+
+   PROOF BY REPRODUCTION. The OLD artifact
+   dedac4c31d1e152fbf0bb560ddd15cf0be17abac92e77d905db1c2bf7f9ef15b -- the one
+   that raised the local_pre_request() error -- was replayed against a
+   production-faithful 0033 replica with its begin;/commit; commented out, so
+   each statement auto-commits and execution halts at the first error. Result:
+
+     fingerprint            e24f3871788893cafd1fc17c70fe41d5   MATCH
+     fn_*                   70                                 MATCH
+     views                  23                                 MATCH
+     triggers               36                                 MATCH
+     tables                 41                                 MATCH
+     policies               116                                MATCH
+     trg_order_lines_freeze absent                             MATCH
+     orders.status default  'draft'::order_status              MATCH
+     auth.users             7                                  MATCH
+
+   Every reported value, reproduced. The live state is the second attempt's
+   bundle, executed without a transaction, stopping inside 0048's self-check.
+
+   No hidden COMMIT exists in the file: stripping dollar-quoted bodies, comments
+   and string literals leaves exactly ['begin','commit']. COMMIT inside a
+   PL/pgSQL block would itself raise inside an explicit transaction block. The
+   transaction boundary was dropped by the EXECUTOR, not by the SQL.
+
+   MY ERROR. Every atomicity rehearsal used psql on one connection, where
+   begin; genuinely opens a transaction. I proved the file atomic under psql and
+   reported it as atomic under the Supabase SQL Editor, which is not the same
+   claim. This is the third environment-fidelity gap in this deployment, and the
+   first in the execution harness rather than the schema.
+
+3. HOW FAR 0048 GOT
+   0048 runs in four parts: a preflight assertion, the revoke loop, seven GRANT
+   statements, then the self-check. The reported error came from the self-check,
+   which is the LAST part and changes nothing. So the revokes and grants landed.
+
+   A replica built as "0047, then 0048 truncated immediately before its
+   self-check" is BYTE-IDENTICAL to a complete 0048 across the full schema
+   fingerprint -- columns, function bodies, view definitions and reloptions,
+   grants, policies, triggers, constraints and composite types (2444 lines).
+   There is no difference between "0048 whose self-check aborted" and "0048".
+
+4. THE TWO PATHS, REHEARSED FROM A REPLICA OF THE LIVE STATE
+   FORWARD (do nothing, then verify)
+     POST_VERIFY.sql    20 / 20 PASS, fingerprint e24f3871788893cafd1fc17c70fe41d5
+     RUNTIME_PROBE.sql  PASS -- cost frozen 850.0000, net revenue 4000.00,
+                        auth.users 7 -> 7; cleanup PASS, 0 probe rows survived
+     Writes required: NONE.
+
+   ROLLBACK to 0033
+     run WITH a transaction (psql):     succeeds, PRE_DEPLOY_AUDIT 28/28 after.
+     run WITHOUT one, clean:            succeeds, PRE_DEPLOY_AUDIT 28/28 after.
+     run WITHOUT one, halting mid-file: WRECKED. With a failure injected after
+       the sixth destructive statement, the database was left with 70 functions
+       but 17 views -- neither 0033 (14) nor 0048 (23). PRE_DEPLOY_AUDIT fails
+       (fingerprint, counts, and fourteen 0034-0046 objects still present) AND
+       POST_VERIFY fails (v_sale_lines gone, and twelve functions executable by
+       public or anon again because the grant restore had already run). The
+       application is broken and the security posture is regressed at the same
+       time, with no scripted way back.
+
+     That third case is the one that matters, because the SQL Editor is the
+     environment that just demonstrated it does not honour the transaction, and
+     ROLLBACK.sql is 2024 lines of destructive DDL.
+
+5. BASELINES
+   On the live-state replica: auth.users 7, none created in the last 24h,
+   orders 0, order_lines 0, customers 0, cost_snapshots 0, accounts 0,
+   businesses 0, recipes 0, ingredients 0, revenue 0. To be confirmed against
+   production by DIAGNOSE_LIVE_STATE.sql rows 5-11.
