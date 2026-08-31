@@ -14,9 +14,17 @@
 -- EXPECTED: 24 rows, every one PASS.
 -- ============================================================================
 with
+-- The fingerprint is built from BARE type names and ordered COLLATE "C" so it
+-- cannot vary with the database collation or the session search_path. The first
+-- version used oid::regprocedure ordered by the default collation, and both of
+-- those differ between this project and the rehearsal database -- which produced
+-- a mismatch from an identical set of functions.
 sig as (
-  select md5(string_agg(s,',' order by s)) as fp
-    from (select replace(p.oid::regprocedure::text,' ','') as s
+  select md5(string_agg(s,',' order by s collate "C")) as fp
+    from (select p.proname || '(' || coalesce((
+                   select string_agg(t.typname, ',' order by u.ord)
+                     from unnest(p.proargtypes) with ordinality as u(oid, ord)
+                     join pg_type t on t.oid = u.oid), '') || ')' as s
             from pg_proc p
            where p.pronamespace = 'public'::regnamespace
              and p.proname like 'fn\_%') z
@@ -43,8 +51,8 @@ ahead(migration, obj, present) as (
 checks(n, check_name, ok, detail) as (
   -- 1. IDENTITY: production must be exactly the catalogue we rehearsed against
   select 1, 'identity: function catalogue is exactly the rehearsed 0033 set',
-         (select fp from sig) = '26a45d7d98026721366ec58a66cb6d1b',
-         'fingerprint ' || (select fp from sig) || ' (expect 26a45d7d98026721366ec58a66cb6d1b)'
+         (select fp from sig) = '0566a47b992936813893b40bcba5c6ac',
+         'fingerprint ' || (select fp from sig) || ' (expect 0566a47b992936813893b40bcba5c6ac)'
   union all select 2, 'identity: 60 fn_* functions',
          (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%') = 60,
          (select count(*)::text from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%')

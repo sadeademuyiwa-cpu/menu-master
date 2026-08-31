@@ -51,11 +51,16 @@ ORDER="0048 0047 0046 0045 0044 0043 0042 0041 0040 0039 0038 0037 0036 0035 003
 do $$
 declare v_fp text; v_ahead text;
 begin
-  select md5(string_agg(s,',' order by s)) into v_fp
-    from (select replace(p.oid::regprocedure::text,' ','') as s from pg_proc p
+  -- Same collation- and search_path-independent fingerprint the audit uses.
+  select md5(string_agg(s,',' order by s collate "C")) into v_fp
+    from (select p.proname || '(' || coalesce((
+                   select string_agg(t.typname, ',' order by u.ord)
+                     from unnest(p.proargtypes) with ordinality as u(oid, ord)
+                     join pg_type t on t.oid = u.oid), '') || ')' as s
+            from pg_proc p
            where p.pronamespace='public'::regnamespace and p.proname like 'fn\_%') z;
-  if v_fp <> '26a45d7d98026721366ec58a66cb6d1b' then
-    raise exception 'ROLLBACK INCOMPLETE: function catalogue is %, expected the 0033 fingerprint 26a45d7d98026721366ec58a66cb6d1b', v_fp;
+  if v_fp <> '0566a47b992936813893b40bcba5c6ac' then
+    raise exception 'ROLLBACK INCOMPLETE: function catalogue is %, expected the 0033 fingerprint 0566a47b992936813893b40bcba5c6ac', v_fp;
   end if;
   select string_agg(o,', ') into v_ahead from (
     select 'order_lines.business_id' as o where exists(select 1 from information_schema.columns where table_name='order_lines' and column_name='business_id')

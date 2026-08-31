@@ -13,16 +13,19 @@
 -- ============================================================================
 with
 sig as (
-  select md5(string_agg(s,',' order by s)) as fp
-    from (select replace(p.oid::regprocedure::text,' ','') as s
+  select md5(string_agg(s,',' order by s collate "C")) as fp
+    from (select p.proname || '(' || coalesce((
+                   select string_agg(t.typname, ',' order by u.ord)
+                     from unnest(p.proargtypes) with ordinality as u(oid, ord)
+                     join pg_type t on t.oid = u.oid), '') || ')' as s
             from pg_proc p
            where p.pronamespace = 'public'::regnamespace
              and p.proname like 'fn\_%') z
 ),
 checks(n, check_name, ok, detail) as (
   select 1,'identity: function catalogue is exactly the rehearsed 0048 set',
-         (select fp from sig) = '6761c292aa10be1f9fd40c4a76690fe8',
-         'fingerprint ' || (select fp from sig) || ' (expect 6761c292aa10be1f9fd40c4a76690fe8)'
+         (select fp from sig) = 'e24f3871788893cafd1fc17c70fe41d5',
+         'fingerprint ' || (select fp from sig) || ' (expect e24f3871788893cafd1fc17c70fe41d5)'
   union all select 2,'schema: all fifteen migrations landed',
          (select count(*) from information_schema.columns
            where table_name='order_lines' and column_name in ('business_id','discount_amount')) = 2

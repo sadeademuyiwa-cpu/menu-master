@@ -1,0 +1,53 @@
+REHEARSAL R2 -- corrected replica, complete battery
+generated 2026-08-31T22:03:13Z
+PostgreSQL 17.6 on port 55432, database collation C.UTF-8
+
+Replica 'prod0033' rebuilt from migrations 0001-0033.
+Stable fn_* fingerprint 0566a47b992936813893b40bcba5c6ac (60 functions),
+verified invariant across search_path = 'pg_catalog,public' / 'public' /
+'pg_catalog' / default, and identical to an independently rebuilt replica
+('fresh0033').
+
+1. PRE_DEPLOY_AUDIT.sql        24 checks, 23 PASS.
+                               Only failure is check 16 (auth.users = 0 here vs
+                               7 in production); the local shim seeds no login
+                               accounts. Check 1 PASSES on the stable value.
+
+2. PRE_DEPLOY_AUDIT negative   database at 0034 -> FAIL (checks 1,2,7)
+   tests, gate must not open    database at 0042 -> FAIL (checks 1,2,3,7)
+                               database at 0048 -> FAIL (checks 1,2,3,5,7,12,13)
+                               The gate still fails closed; it was not weakened.
+
+3. MIGRATE_0034_TO_0048.sql    applied clean in one transaction. Every embedded
+                               self-check raised its OK notice, including
+                               "0048 OK: no function is executable by public or
+                               anon, 116 policies unchanged."
+
+4. POST_VERIFY.sql             20 checks, 19 PASS. Only failure is check 12
+                               (auth.users = 0 locally). Check 1 PASSES on the
+                               stable 0048 value e24f3871788893cafd1fc17c70fe41d5.
+
+5. RUNTIME_PROBE.sql           PASS. lines_frozen=1, cost frozen at 850.0000,
+                               net revenue 4000.00, auth.users 0 -> 0.
+                               Cleanup PASS: 0 probe rows survived the rollback.
+
+6. ATOMIC-FAILURE TEST         a division by zero injected immediately before
+                               COMMIT, past all fifteen migrations and every
+                               self-check, aborted the whole bundle. Afterwards:
+                               fingerprint 0566a47b992936813893b40bcba5c6ac,
+                               14 views, fn_ingredient_cost_basis absent,
+                               order_lines.business_id absent. Nothing partial
+                               can be left behind.
+
+7. ROLLBACK.sql                applied clean in one transaction, 0048 -> 0033.
+                               "ROLLBACK OK: back at the 0033 catalogue,
+                               116 policies, auth.users untouched."
+                               Full-schema fingerprint of the rolled-back
+                               database (columns, function bodies, view
+                               definitions and reloptions, grants, policies,
+                               triggers, constraints, composite types --
+                               2112 lines, md5 048b2e19d1392d1ce71948de4912c795)
+                               is IDENTICAL to a freshly built 0033. The
+                               rollback is byte-faithful, not merely close.
+
+8. FULL SQL SUITE              19 suites, 517 assertions, 517 pass, 0 fail.

@@ -1,0 +1,21 @@
+FINGERPRINT DISCREPANCY -- ROOT CAUSE EVIDENCE
+generated 2026-08-31T22:00:30Z against local replica prod0033 (migrations 0001-0033)
+
+local replica collation:
+datcollate=C.UTF-8 datctype=C.UTF-8
+
+The SAME 60 function signatures, hashed by the OLD (regprocedure) method
+under different orderings, versus the NEW stable method:
+
+OLD  ordered by default (this db = C.UTF-8)  26a45d7d98026721366ec58a66cb6d1b
+OLD  ordered COLLATE "C"  26a45d7d98026721366ec58a66cb6d1b
+OLD  ordered COLLATE "en-US-x-icu"  4285b6818c1d210150996bc7e13420ad
+OLD  ordered COLLATE "und-x-icu"  4285b6818c1d210150996bc7e13420ad
+NEW  ordered COLLATE "C"  0566a47b992936813893b40bcba5c6ac
+
+PRODUCTION REPORTED: 4285b6818c1d210150996bc7e13420ad
+That value is reproduced EXACTLY, line 3 above, from this replica's own
+0033 catalogue. A different SET of functions cannot be made to collide with
+the expected value by reordering; therefore production's fn_* catalogue is
+identical to the rehearsed 0033 replica. The gate mis-fired on collation,
+not on drift.
