@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Field, Submit, inputClass, inputStyle, Notice, SectionHeading, Empty, Card,
 } from '@/components/ui'
@@ -20,10 +20,9 @@ type Cost = { recipe_id: string; is_complete: boolean; cost_per_portion: string 
 async function createRecipe(formData: FormData) {
   'use server'
   const here = '/recipes'
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) {
-    redirect(withNotice(here, 'Set up your business before creating recipes.'))
-  }
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, here))
 
   const batchYield = Number(formData.get('batch_yield_qty'))
   const portionRaw = String(formData.get('portion_qty') ?? '').trim()

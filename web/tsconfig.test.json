@@ -1,0 +1,16 @@
+{
+  "//": "Tests only. Production tsconfig.json is untouched: its include glob '**/*.ts' does not match .mts, so the test file is invisible to it. This config adds the one setting Node's --experimental-strip-types requires -- relative TypeScript imports must carry their extension, which tsc permits only behind allowImportingTsExtensions.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "tests/**/*.mts",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
+}

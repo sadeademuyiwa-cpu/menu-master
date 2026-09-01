@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import { PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading } from '@/components/ui'
 import { quantity } from '@/lib/format'
 
@@ -22,8 +22,9 @@ type Unit = { id: string; code: string; name: string; kind: string }
  */
 async function addFormat(formData: FormData) {
   'use server'
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) redirect(withNotice('/formats', 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, '/formats'))
 
   const name = String(formData.get('name') ?? '').trim()
   if (!name) redirect(withNotice('/formats', 'Give this format a name your customers would recognise.'))
@@ -53,8 +54,9 @@ export default async function FormatsPage({
   searchParams,
 }: { searchParams: Promise<{ notice?: string }> }) {
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/formats'))
 
   const [{ data: formats }, { data: units }] = await Promise.all([
     supabase.from('serving_formats')

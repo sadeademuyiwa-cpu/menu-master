@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Stat, StatRow, Badge, Disclosure,
@@ -36,8 +36,9 @@ async function addLine(formData: FormData) {
   'use server'
   const id = String(formData.get('order_id') ?? '')
   const here = `/sales/${id}`
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
 
   const qty = Number(formData.get('qty'))
   const price = Number(formData.get('unit_price'))
@@ -73,7 +74,8 @@ async function removeLine(formData: FormData) {
   'use server'
   const id = String(formData.get('order_id') ?? '')
   const here = `/sales/${id}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('order_lines')
     .delete().eq('id', String(formData.get('line_id') ?? ''))
   revalidatePath(here)
@@ -88,7 +90,8 @@ async function setOrderDiscount(formData: FormData) {
   if (!Number.isFinite(amount) || amount < 0) {
     redirect(withNotice(here, 'A discount is an amount in naira, and cannot be negative.'))
   }
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('orders')
     .update({ order_discount: amount }).eq('id', id)
   revalidatePath(here)
@@ -105,7 +108,8 @@ async function confirm(formData: FormData) {
   'use server'
   const id = String(formData.get('order_id') ?? '')
   const here = `/sales/${id}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
 
   const { data, error } = await supabase.rpc('fn_confirm_order', { p_order_id: id })
   if (error) redirect(withNotice(here, describeWriteError(error) ?? 'Could not confirm that sale.'))
@@ -123,7 +127,8 @@ async function markPaid(formData: FormData) {
   const id = String(formData.get('order_id') ?? '')
   const here = `/sales/${id}`
   const paid = Number(formData.get('amount_paid') || 0)
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('orders')
     .update({
       amount_paid: paid,
@@ -140,7 +145,8 @@ async function voidSale(formData: FormData) {
   const here = `/sales/${id}`
   const reason = String(formData.get('reason') ?? '').trim()
   if (!reason) redirect(withNotice(here, 'Tell us why you are cancelling this sale.'))
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.rpc('fn_void_order', { p_order_id: id, p_reason: reason })
   if (error) redirect(withNotice(here, describeWriteError(error) ?? 'Could not cancel that sale.'))
   revalidatePath(here)
@@ -150,7 +156,8 @@ async function voidSale(formData: FormData) {
 async function reissue(formData: FormData) {
   'use server'
   const id = String(formData.get('order_id') ?? '')
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { data, error } = await supabase.rpc('fn_reissue_order', { p_voided_order_id: id })
   if (error || !data?.new_order_id) {
     redirect(withNotice(`/sales/${id}`, describeWriteError(error) ?? 'Could not start a replacement.'))
@@ -162,7 +169,8 @@ async function reissue(formData: FormData) {
 async function deleteDraft(formData: FormData) {
   'use server'
   const id = String(formData.get('order_id') ?? '')
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('orders').delete().eq('id', id)
   if (error) redirect(withNotice(`/sales/${id}`, describeWriteError(error) ?? 'Could not discard that draft.'))
   revalidatePath('/sales')
@@ -188,8 +196,9 @@ export default async function SaleDetail({
 }) {
   const { id } = await params
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/sales'))
 
   const { data: order } = await supabase.from('orders')
     .select('id,order_no,order_date,status,payment_status,amount_paid,order_discount,' +

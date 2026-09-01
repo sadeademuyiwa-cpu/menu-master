@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { currentContext } from '@/lib/data/context'
+import { currentContext, contextRedirect } from '@/lib/data/context'
 import { PageHeader, Card, SectionHeading } from '@/components/ui'
 
 export const dynamic = 'force-dynamic'
@@ -41,8 +41,9 @@ const GROUPS = [
 ]
 
 export default async function MorePage() {
-  const { accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/more'))
 
   return (
     <div className="space-y-6">

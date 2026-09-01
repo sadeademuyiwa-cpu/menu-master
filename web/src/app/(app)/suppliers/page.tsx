@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import { PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading } from '@/components/ui'
 
 export const dynamic = 'force-dynamic'
@@ -12,8 +12,9 @@ type Supplier = {
 
 async function addSupplier(formData: FormData) {
   'use server'
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect(withNotice('/suppliers', 'No account found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/suppliers'))
   const name = String(formData.get('name') ?? '').trim()
   if (!name) redirect(withNotice('/suppliers', 'Give the supplier or market a name.'))
 
@@ -30,7 +31,8 @@ async function addSupplier(formData: FormData) {
  *  history must stay readable. */
 async function deactivate(formData: FormData) {
   'use server'
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('suppliers')
     .update({ is_active: false }).eq('id', String(formData.get('id') ?? ''))
   revalidatePath('/suppliers')
@@ -41,8 +43,9 @@ export default async function SuppliersPage({
   searchParams,
 }: { searchParams: Promise<{ notice?: string }> }) {
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/suppliers'))
 
   const { data: suppliers } = await supabase.from('suppliers')
     .select('id,name,phone,location,notes,is_active')

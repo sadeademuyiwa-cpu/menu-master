@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading,
 } from '@/components/ui'
@@ -25,8 +25,9 @@ type Settings = {
 
 async function addRate(formData: FormData) {
   'use server'
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) redirect(withNotice('/settings', 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, '/settings'))
   const name = String(formData.get('name') ?? '').trim()
   if (!name) redirect(withNotice('/settings', 'Give this kind of work a name.'))
 
@@ -47,8 +48,9 @@ async function addRate(formData: FormData) {
 
 async function addOverhead(formData: FormData) {
   'use server'
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) redirect(withNotice('/settings', 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, '/settings'))
   const name = String(formData.get('name') ?? '').trim()
   if (!name) redirect(withNotice('/settings', 'Give this running cost a name.'))
 
@@ -82,8 +84,9 @@ async function addOverhead(formData: FormData) {
 
 async function saveOverheadSettings(formData: FormData) {
   'use server'
-  const { supabase, businessId } = await currentContext()
-  if (!businessId) redirect(withNotice('/settings', 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, businessId } = ctx
+  if (!businessId) redirect(contextRedirect(ctx, '/settings'))
 
   // The engine (fn_overhead_rate, 0023) spreads running costs over HOW MUCH
   // YOU PRODUCE, expressed as a quantity and a unit -- litres of soup, kilos
@@ -111,7 +114,8 @@ async function saveOverheadSettings(formData: FormData) {
 
 async function deactivateRate(formData: FormData) {
   'use server'
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('labour_rates')
     .update({ is_active: false }).eq('id', String(formData.get('id') ?? ''))
   revalidatePath('/settings')
@@ -120,7 +124,8 @@ async function deactivateRate(formData: FormData) {
 
 async function deactivateOverhead(formData: FormData) {
   'use server'
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('overhead_items')
     .update({ is_active: false }).eq('id', String(formData.get('id') ?? ''))
   revalidatePath('/settings')
@@ -131,8 +136,9 @@ export default async function SettingsPage({
   searchParams,
 }: { searchParams: Promise<{ notice?: string }> }) {
   const { notice } = await searchParams
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/settings'))
 
   const [{ data: rates }, { data: overheads }, { data: settings }, { data: units }] = await Promise.all([
     supabase.from('labour_rates').select('id,name,rate_per_hour,is_active')

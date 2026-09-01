@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading,
   BackLink, Stat, StatRow, Badge,
@@ -26,7 +26,8 @@ async function saveCustomer(formData: FormData) {
   'use server'
   const id = String(formData.get('customer_id') ?? '')
   const here = `/customers/${id}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const name = String(formData.get('name') ?? '').trim()
   if (!name) redirect(withNotice(here, 'A customer needs a name.'))
 
@@ -49,8 +50,9 @@ export default async function CustomerDetail({
 }) {
   const { id } = await params
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/customers'))
 
   const { data: customer } = await supabase.from('customers')
     .select('id,name,company,phone,email,notes').eq('id', id).maybeSingle<Customer>()

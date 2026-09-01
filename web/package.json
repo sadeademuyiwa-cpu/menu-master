@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit",
-    "e2e": "node e2e/run.mjs"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "e2e": "node e2e/run.mjs",
+    "test": "node --test --experimental-strip-types \"tests/*.test.mts\""
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Stat, StatRow,
@@ -29,8 +29,9 @@ async function addLine(formData: FormData) {
   'use server'
   const id = String(formData.get('purchase_id') ?? '')
   const here = `/purchases/${id}`
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
 
   const qty = Number(formData.get('qty'))
   const amount = Number(formData.get('amount'))
@@ -54,7 +55,8 @@ async function removeLine(formData: FormData) {
   'use server'
   const id = String(formData.get('purchase_id') ?? '')
   const here = `/purchases/${id}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('purchase_lines')
     .delete().eq('id', String(formData.get('line_id') ?? ''))
   revalidatePath(here)
@@ -71,7 +73,8 @@ async function post(formData: FormData) {
   'use server'
   const id = String(formData.get('purchase_id') ?? '')
   const here = `/purchases/${id}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
 
   const { data, error } = await supabase.rpc('fn_post_purchase', { p_purchase_id: id })
   if (error) redirect(withNotice(here, describeWriteError(error) ?? 'Could not record that purchase.'))
@@ -103,7 +106,8 @@ async function reverse(formData: FormData) {
   const reason = String(formData.get('reason') ?? '').trim()
   if (!reason) redirect(withNotice(here, 'Tell us why you are cancelling this purchase.'))
 
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.rpc('fn_reverse_purchase',
     { p_purchase_id: id, p_reason: reason })
   if (error) redirect(withNotice(here, describeWriteError(error) ?? 'Could not cancel that purchase.'))
@@ -121,8 +125,9 @@ export default async function PurchaseDetail({
 }) {
   const { id } = await params
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/purchases'))
 
   const { data: purchase } = await supabase.from('purchases')
     .select('id,purchase_date,status,reference,note,supplier_id,reverses,reversal_reason')

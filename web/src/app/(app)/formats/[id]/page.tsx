@@ -1,6 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Badge,
@@ -25,8 +25,9 @@ async function addPackaging(formData: FormData) {
   'use server'
   const fid = String(formData.get('format_id') ?? '')
   const here = `/formats/${fid}`
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) redirect(withNotice(here, 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, here))
 
   const qty = Number(formData.get('qty'))
   if (!Number.isFinite(qty) || qty <= 0) {
@@ -44,7 +45,8 @@ async function removePackaging(formData: FormData) {
   'use server'
   const fid = String(formData.get('format_id') ?? '')
   const here = `/formats/${fid}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('serving_format_packaging')
     .delete().eq('id', String(formData.get('id') ?? ''))
   revalidatePath(here)
@@ -59,8 +61,9 @@ export default async function FormatDetail({
 }) {
   const { id } = await params
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/formats'))
 
   const { data: format } = await supabase.from('serving_formats')
     .select('id,name,description,capacity_qty,is_active,capacity_unit:units(code)')

@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import Link from 'next/link'
 import { PageHeader, Card, Field, Submit, inputClass, inputStyle, Empty, Notice } from '@/components/ui'
 import { NOT_ENTERED, money } from '@/lib/format'
@@ -20,11 +20,12 @@ type Row = {
 async function addIngredient(formData: FormData) {
   'use server'
   const here = '/ingredients'
-  const { supabase, accountId } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
 
   // account_id is required by the table; RLS still refuses a foreign one, so
   // this is a convenience lookup, never an authorization decision.
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  if (!accountId) redirect(contextRedirect(ctx, here))
 
   const name = String(formData.get('name') ?? '').trim()
   if (!name) redirect(withNotice(here, 'Give the item a name.'))

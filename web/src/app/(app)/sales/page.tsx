@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading, HeroStat, Badge,
 } from '@/components/ui'
@@ -41,8 +41,9 @@ type Customer = { id: string; name: string }
  *  confirmed, so an abandoned draft affects no report. */
 async function startSale(formData: FormData) {
   'use server'
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) redirect(withNotice('/sales', 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, '/sales'))
 
   const customerRaw = String(formData.get('customer_id') ?? '')
   const { data, error } = await supabase.from('orders').insert({
@@ -74,8 +75,9 @@ export default async function SalesPage({
   searchParams,
 }: { searchParams: Promise<{ notice?: string }> }) {
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/sales'))
 
   const today = new Date().toISOString().slice(0, 10)
 

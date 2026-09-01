@@ -1,5 +1,11 @@
 import 'server-only'
 import { createClient } from '@/lib/supabase/server'
+import { resolveContext, type ResolvedContext } from './resolve-context'
+
+export {
+  contextRedirect, withNotice,
+  type ContextStatus, type ResolvedContext,
+} from './resolve-context'
 
 /**
  * The caller's account and default business.
@@ -7,23 +13,41 @@ import { createClient } from '@/lib/supabase/server'
  * This is a CONVENIENCE LOOKUP, never an authorization decision. Every write
  * still passes through RLS, which refuses a foreign account_id regardless of
  * what this returns.
+ *
+ * `status` says WHICH of the four outcomes happened -- signed out, no account,
+ * no business, or a failed lookup. Callers must branch on it through
+ * contextRedirect() rather than inferring a cause from a missing id: an
+ * unauthenticated PostgREST request returns zero rows without raising, so an
+ * absent id alone cannot tell those cases apart.
  */
-export async function currentContext() {
+export async function currentContext(): Promise<
+  ResolvedContext & { supabase: Awaited<ReturnType<typeof createClient>> }
+> {
   const supabase = await createClient()
 
-  const [{ data: membership }, { data: business }] = await Promise.all([
-    supabase.from('memberships').select('account_id, role').limit(1).maybeSingle(),
-    supabase.from('businesses').select('id, name').is('deleted_at', null)
-      .order('created_at').limit(1).maybeSingle(),
-  ])
+  const resolved = await resolveContext({
+    // Awaited first and alone: validates the token with the auth server, and
+    // completes any refresh before the two lookups run.
+    getUserId: async () => {
+      const { data, error } = await supabase.auth.getUser()
+      return { userId: data?.user?.id ?? null, error }
+    },
+    // await, not returned directly: the PostgREST builder is a thenable, not a
+    // Promise, so it does not satisfy the port's return type on its own.
+    getMembership: async () =>
+      await supabase.from('memberships').select('account_id, role').limit(1).maybeSingle(),
+    getBusiness: async () =>
+      await supabase.from('businesses').select('id, name').is('deleted_at', null)
+        .order('created_at').limit(1).maybeSingle(),
+  })
 
-  return {
-    supabase,
-    accountId: membership?.account_id as string | undefined,
-    role: membership?.role as string | undefined,
-    businessId: business?.id as string | undefined,
-    businessName: business?.name as string | undefined,
+  // The real reason stays on the server. contextRedirect() sends the browser a
+  // fixed generic sentence, so nothing about the database travels in a URL.
+  if (resolved.status === 'error') {
+    console.error('[currentContext] lookup failed:', resolved.failure)
   }
+
+  return { supabase, ...resolved }
 }
 
 export type EntitlementStatus = {
@@ -86,12 +110,4 @@ export function describeWriteError(error: PgError): string | null {
   if (message) return message
 
   return 'Menu Master could not save that. Nothing was changed.'
-}
-
-/** Server actions cannot return values to a plain form, so the outcome rides
- *  on the URL. It survives a refresh, which a client-side toast does not. */
-export function withNotice(path: string, notice: string | null): string {
-  if (!notice) return path
-  const sep = path.includes('?') ? '&' : '?'
-  return `${path}${sep}notice=${encodeURIComponent(notice)}`
 }

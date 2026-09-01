@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, inputClass, inputStyle,
   Notice, SectionHeading, BackLink, Empty, Stat, StatRow, HeroStat, CostBar, Disclosure, Badge,
@@ -75,8 +75,9 @@ async function addLine(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
 
   const qty = Number(formData.get('qty'))
   if (!Number.isFinite(qty) || qty <= 0) {
@@ -101,7 +102,8 @@ async function updateLineQty(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
 
   const qty = Number(formData.get('qty'))
   if (!Number.isFinite(qty) || qty <= 0) {
@@ -121,7 +123,8 @@ async function removeLine(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
 
   const { error } = await supabase.from('recipe_lines')
     .delete().eq('id', String(formData.get('line_id') ?? ''))
@@ -149,8 +152,9 @@ async function setFormatPrice(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
 
   const price = Number(formData.get('price'))
   if (!Number.isFinite(price) || price <= 0) {
@@ -169,8 +173,9 @@ async function addVariant(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) redirect(withNotice(here, 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, here))
 
   const { error } = await supabase.from('recipe_variants').insert({
     account_id: accountId, business_id: businessId, recipe_id: recipeId,
@@ -185,7 +190,8 @@ async function removeVariant(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('recipe_variants')
     .delete().eq('id', String(formData.get('id') ?? ''))
   if (!error) await recompute(supabase, recipeId)
@@ -197,8 +203,9 @@ async function addLabour(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
 
   const hours = Number(formData.get('hours'))
   if (!Number.isFinite(hours) || hours <= 0) {
@@ -217,7 +224,8 @@ async function removeLabour(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase } = await currentContext()
+  const ctx = await currentContext()
+  const { supabase } = ctx
   const { error } = await supabase.from('recipe_labour')
     .delete().eq('id', String(formData.get('id') ?? ''))
   if (!error) await recompute(supabase, recipeId)
@@ -236,8 +244,9 @@ async function setSellingPrice(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
 
   const price = Number(formData.get('price'))
   if (!Number.isFinite(price) || price < 0) {

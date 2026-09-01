@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import { PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading } from '@/components/ui'
 import { money } from '@/lib/format'
 
@@ -18,8 +18,9 @@ type Supplier = { id: string; name: string }
  *  until fn_post_purchase runs, so an abandoned draft affects no recipe. */
 async function startPurchase(formData: FormData) {
   'use server'
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) redirect(withNotice('/purchases', 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, '/purchases'))
 
   const supplierRaw = String(formData.get('supplier_id') ?? '')
   const { data, error } = await supabase.from('purchases').insert({
@@ -39,8 +40,9 @@ export default async function PurchasesPage({
   searchParams,
 }: { searchParams: Promise<{ notice?: string }> }) {
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/purchases'))
 
   const [{ data: purchases }, { data: suppliers }] = await Promise.all([
     // v_purchase_summary (0035). purchase_lines carries two foreign keys to

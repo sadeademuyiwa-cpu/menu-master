@@ -1,7 +1,7 @@
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, inputClass, inputStyle,
   DataList, Notice, SectionHeading, BackLink, Empty,
@@ -37,9 +37,10 @@ async function addPrice(formData: FormData) {
   'use server'
   const id = String(formData.get('ingredient_id') ?? '')
   const here = `/ingredients/${id}`
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
-  if (!businessId) redirect(withNotice(here, 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
+  if (!businessId) redirect(contextRedirect(ctx, here))
 
   const qty = Number(formData.get('qty'))
   const unitId = String(formData.get('unit_id') ?? '')
@@ -110,8 +111,9 @@ async function addConversion(formData: FormData) {
   'use server'
   const id = String(formData.get('ingredient_id') ?? '')
   const here = `/ingredients/${id}`
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect(withNotice(here, 'No account found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
 
   const qtyInBase = Number(formData.get('qty_in_base'))
   if (!Number.isFinite(qtyInBase) || qtyInBase <= 0) {

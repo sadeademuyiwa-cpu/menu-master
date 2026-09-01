@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import { PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading } from '@/components/ui'
 
 export const dynamic = 'force-dynamic'
@@ -13,8 +13,9 @@ type Customer = {
 
 async function addCustomer(formData: FormData) {
   'use server'
-  const { supabase, accountId, businessId } = await currentContext()
-  if (!accountId || !businessId) redirect(withNotice('/customers', 'No business found for your login.'))
+  const ctx = await currentContext()
+  const { supabase, accountId, businessId } = ctx
+  if (!accountId || !businessId) redirect(contextRedirect(ctx, '/customers'))
 
   const name = String(formData.get('name') ?? '').trim()
   if (!name) redirect(withNotice('/customers', 'A customer needs a name.'))
@@ -36,8 +37,9 @@ export default async function CustomersPage({
   searchParams,
 }: { searchParams: Promise<{ notice?: string }> }) {
   const { notice } = await searchParams
-  const { supabase, accountId } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/customers'))
 
   const { data: customers } = await supabase.from('customers')
     .select('id,name,company,phone,email,notes').order('name').returns<Customer[]>()

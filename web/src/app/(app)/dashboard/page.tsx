@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { currentContext } from '@/lib/data/context'
+import { currentContext, contextRedirect } from '@/lib/data/context'
 import {
   PageHeader, Card, Notice, Empty, SectionHeading, Badge, HeroStat, StatRow, Stat,
 } from '@/components/ui'
@@ -29,8 +29,9 @@ type PriceRow = {
 }
 
 export default async function DashboardPage() {
-  const { supabase, accountId, businessName } = await currentContext()
-  if (!accountId) redirect('/onboarding')
+  const ctx = await currentContext()
+  const { supabase, accountId, businessName } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, '/dashboard'))
 
   const [{ data: setupRows }, { data: products }, { data: prices }] = await Promise.all([
     supabase.from('v_onboarding_status')
