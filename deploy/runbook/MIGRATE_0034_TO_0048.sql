@@ -1,3 +1,20 @@
+-- ############################################################################
+-- ##  ALREADY DEPLOYED -- DO NOT RUN THIS FILE.                             ##
+-- ##                                                                        ##
+-- ##  Migrations 0034-0048 are fully applied to production as of            ##
+-- ##  2026-08-31, certified by POST_VERIFY 20/20 (fingerprint              ##
+-- ##  e24f3871788893cafd1fc17c70fe41d5, 116 policies, 7 login accounts,     ##
+-- ##  every data baseline 0) and by a passing runtime probe.                ##
+-- ##                                                                        ##
+-- ##  Running it again does NOT damage anything: 0034s preflight is the    ##
+-- ##  first executable statement and refuses with                           ##
+-- ##      0034 preflight FAILED: ingredient_cost_basis already exists.      ##
+-- ##  That refusal is the guard working. It changes nothing.                ##
+-- ##                                                                        ##
+-- ##  To check what is actually applied, run (read-only):                   ##
+-- ##      deploy/runbook/DIAGNOSE_MIGRATION_INVENTORY.sql                   ##
+-- ############################################################################
+
 -- ============================================================================
 -- PHASE 6 -- STEP 2: THE MIGRATION
 --
