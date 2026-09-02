@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { requiredAmount } from '@/lib/money-input'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, inputClass, inputStyle,
@@ -156,8 +157,9 @@ async function setFormatPrice(formData: FormData) {
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, here))
 
-  const price = Number(formData.get('price'))
-  if (!Number.isFinite(price) || price <= 0) {
+  // A selling price left blank must not become a free dish. See money-input.ts.
+  const price = requiredAmount(formData, 'price')
+  if (price === null) {
     redirect(withNotice(here, 'Enter what you charge for this size. It must be more than zero.'))
   }
   const { error } = await supabase.from('recipe_prices').insert({
@@ -248,8 +250,9 @@ async function setSellingPrice(formData: FormData) {
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, here))
 
-  const price = Number(formData.get('price'))
-  if (!Number.isFinite(price) || price < 0) {
+  // A selling price left blank must not become a free dish. See money-input.ts.
+  const price = requiredAmount(formData, 'price')
+  if (price === null) {
     redirect(withNotice(here, 'Enter the price you sell one portion for.'))
   }
 

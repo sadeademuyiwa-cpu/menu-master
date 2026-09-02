@@ -75,6 +75,23 @@ const table = (name) => ({
   plans: [{ id: 'trial', name: 'Free Trial' }],
   v_onboarding_status: [], v_dashboard_waterfall: [],
   v_profit_by_period: [], v_profit_by_product: [], v_voided_sales: [],
+
+  // An empty draft sale, so the "Add an item" form renders and its price
+  // prefill can be exercised. Jollof Rice already sells for N2,000, which is
+  // what v_product_attention reports and what the form must offer.
+  orders: [{
+    id: U(60), order_no: 'TEST-1', order_date: '2026-09-02', status: 'draft',
+    payment_status: 'unpaid', amount_paid: '0.00', order_discount: '0.00',
+    customer_id: null, finalised_at: null, voided_at: null, void_reason: null, replaces: null,
+  }],
+  v_sale_lines: [],
+  recipe_variants: [],
+  customers: [],
+  v_product_attention: [{
+    recipe_id: U(20), variant_id: null, product_name: 'Jollof Rice', format_name: null,
+    is_complete: true, true_cost: '1000.00', selling_price: '2000.00', profit: '1000.00',
+    margin_pct: '50.00', recommended_price: '2000.00', state: 'ok', attention_rank: 1,
+  }],
 }[name] ?? [])
 
 createServer((req, res) => {

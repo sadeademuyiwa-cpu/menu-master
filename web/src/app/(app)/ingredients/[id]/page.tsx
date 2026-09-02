@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { requiredAmount } from '@/lib/money-input'
 import { createClient } from '@/lib/supabase/server'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
@@ -44,11 +45,13 @@ async function addPrice(formData: FormData) {
 
   const qty = Number(formData.get('qty'))
   const unitId = String(formData.get('unit_id') ?? '')
-  const amount = Number(formData.get('amount'))
+  // A purchase recorded at zero naira would drag the weighted-average cost of
+  // this ingredient down for every recipe that uses it.
+  const amount = requiredAmount(formData, 'amount')
   const effective = String(formData.get('effective_date') ?? '')
 
-  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(amount) || amount < 0) {
-    redirect(withNotice(here, 'Enter a quantity greater than zero and the amount you paid.'))
+  if (!Number.isFinite(qty) || qty <= 0 || amount === null) {
+    redirect(withNotice(here, 'Enter a quantity greater than zero and the amount you paid, using digits only.'))
   }
 
   const { data: qtyBase, error: resolveError } = await supabase.rpc('fn_resolve_qty_to_base', {
