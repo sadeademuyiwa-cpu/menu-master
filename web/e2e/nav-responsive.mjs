@@ -48,7 +48,9 @@ for (const [label, width, height, expectHeaderNav] of [
   await page.goto(`${BASE}/dashboard`, { waitUntil: 'domcontentloaded' })
 
   const headerNav = page.locator('header nav[aria-label="Primary"]')
-  const bottomNav = page.locator('body > div > nav[aria-label="Primary"]')
+  // Every Primary nav that is NOT the header one. Anchored by DOM order so a
+  // future wrapper element cannot silently break the selector.
+  const bottomNav = page.locator('nav[aria-label="Primary"]').nth(1)
 
   const headerVisible = await headerNav.isVisible().catch(() => false)
   const bottomVisible = await bottomNav.isVisible().catch(() => false)
@@ -80,6 +82,48 @@ for (const [label, width, height, expectHeaderNav] of [
       `nav.y=${navBox?.y} main.y=${mainBox?.y}`)
   }
   await page.close()
+}
+
+// ---------------------------------------------------------------------------
+// ACTIVE STATE. A navigation where nothing is lit is the failure a user
+// notices; two things lit at once is worse. Checked on the real rendered
+// markup, at both the desktop and the phone width, on section pages and on a
+// child page.
+// ---------------------------------------------------------------------------
+for (const [label, width, height] of [['desktop', 1280, 800], ['mobile', 390, 844]]) {
+  for (const [path, expected] of [
+    ['/dashboard', 'Home'],
+    ['/sales', 'Sales'],
+    ['/purchases', 'Purchases'],
+    ['/recipes', 'Recipes'],
+    ['/more', 'More'],
+    // a child page must light its parent
+    ['/recipes/00000000-0000-0000-0000-000000000020', 'Recipes'],
+    // a page with no section of its own is reached from More
+    ['/ingredients/00000000-0000-0000-0000-000000000010', 'More'],
+  ]) {
+    const page = await ctx.newPage()
+    await page.setViewportSize({ width, height })
+    await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' })
+
+    const shown = width >= 640
+      ? page.locator('header nav[aria-label="Primary"]')
+      : page.locator('nav[aria-label="Primary"]').nth(1)
+
+    const current = await shown.locator('a[aria-current="page"]').allTextContents()
+    check(`${label} ${path}: exactly one item marked current`, current.length === 1,
+      `got ${current.length}: ${current.join('|')}`)
+    check(`${label} ${path}: it is ${expected}`, current[0]?.trim() === expected,
+      `got "${current[0]?.trim()}"`)
+
+    // aria-current is the accessible signal; the visual one must agree.
+    const weight = await shown.locator('a[aria-current="page"]')
+      .evaluate((el) => getComputedStyle(el).fontWeight).catch(() => null)
+    check(`${label} ${path}: the current item is visually distinct`,
+      weight !== null && Number(weight) >= 500, `font-weight=${weight}`)
+
+    await page.close()
+  }
 }
 
 await browser.close()
