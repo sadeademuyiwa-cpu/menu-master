@@ -1,4 +1,6 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { currentContext } from '@/lib/data/context'
 import { PageHeader, Card, Empty, DataList } from '@/components/ui'
 import { money, percent, coverageLabel, NOT_ENTERED } from '@/lib/format'
 
@@ -31,16 +33,26 @@ type Voided = {
   sale_date: string | null
   voided_at: string | null
   void_reason: string | null
+  /** Who cancelled it. v_voided_sales has always carried these two; nothing
+   *  selected them, so the audit trail was less complete on screen than it was
+   *  in the database. */
+  voided_by: string | null
+  /** The sale issued to replace it, if one was. */
+  replaced_by: string | null
 }
 
 export default async function ReportsPage() {
   const supabase = await createClient()
+  // Only to say "cancelled by you" rather than printing a raw user id, which
+  // would mean nothing to an owner and expose an identifier for no benefit.
+  const { userId } = await currentContext()
   const [{ data: byPeriod }, { data: byProduct }, { data: voided }] = await Promise.all([
     supabase.from('v_profit_by_period').select('*').order('period', { ascending: false })
       .limit(12).returns<ByPeriod[]>(),
     supabase.from('v_profit_by_product').select('*').order('revenue', { ascending: false })
       .limit(50).returns<ByProduct[]>(),
-    supabase.from('v_voided_sales').select('record_id,reference,sale_date,voided_at,void_reason')
+    supabase.from('v_voided_sales')
+      .select('record_id,reference,sale_date,voided_at,void_reason,voided_by,replaced_by')
       .order('voided_at', { ascending: false }).limit(20).returns<Voided[]>(),
   ])
 
@@ -104,10 +116,28 @@ export default async function ReportsPage() {
               {(voided ?? []).map((v) => (
                 <li key={v.record_id}>
                   <Card>
-                    <p>{v.reference ?? v.record_id}</p>
-                    <p className="mm-absent">
-                      {v.sale_date} · voided {v.voided_at} · {v.void_reason ?? 'no reason given'}
-                    </p>
+                      <p>
+                        <Link href={`/sales/${v.record_id}`} className="underline">
+                          {v.reference ?? v.record_id}
+                        </Link>
+                      </p>
+                      <p className="mm-absent">
+                        {v.sale_date} · voided {v.voided_at} · {v.void_reason ?? 'no reason given'}
+                      </p>
+                      {/* v_voided_sales has always carried these two. Nothing
+                          selected them, so the audit trail was thinner on
+                          screen than it was in the database. */}
+                      <p className="mm-absent">
+                        {v.voided_by
+                          ? (v.voided_by === userId
+                              ? 'cancelled by you'
+                              : 'cancelled by another user on this account')
+                          : 'no record of who cancelled it'}
+                        {' · '}
+                        {v.replaced_by
+                          ? <Link href={`/sales/${v.replaced_by}`} className="underline">see the sale that replaced it</Link>
+                          : 'not replaced'}
+                      </p>
                   </Card>
                 </li>
               ))}

@@ -33,6 +33,23 @@ type Variant = { id: string; recipe_id: string; format: { name: string } | null 
 type Customer = { id: string; name: string }
 type ProductPrice = { recipe_id: string; variant_id: string | null; selling_price: string | null }
 
+/** A line of a CANCELLED sale, read straight from order_lines.
+ *  v_sale_lines deliberately excludes voided and cancelled orders -- that is
+ *  its documented contract and the reason live totals are correct -- so the
+ *  historical record has to be read from the table it was never deleted from. */
+type HistoryLine = {
+  id: string; qty: string; unit_price: string; discount_amount: string
+  unit_cost_at_sale: string | null; description: string | null
+  recipe: { name: string } | null
+}
+/** One row of fn_allocate_order_discount(order_id) -- the SAME function
+ *  v_sale_lines joins, so a cancelled sale's figures are computed by the same
+ *  code as a live one and cannot drift from it. */
+type Allocation = {
+  order_line_id: string; gross_revenue: string; line_discount: string
+  allocated_order_discount: string; net_revenue: string
+}
+
 /* ---------------------------------------------------------------- actions */
 
 async function addLine(formData: FormData) {
@@ -232,6 +249,47 @@ export default async function SaleDetail({
   const rows = lines ?? []
   const confirmed = order.finalised_at !== null
   const voided = order.voided_at !== null
+
+  // A cancelled sale keeps everything: fn_void_order writes only voided_at,
+  // voided_by and void_reason, and trg_order_lines_revenue refuses any edit or
+  // delete on a finalised sale's lines. Only v_sale_lines hides it, by design.
+  // So read the preserved record directly, and let the database do the money.
+  const [{ data: histLines }, { data: allocations }, { data: replacement }] = voided
+    ? await Promise.all([
+        supabase.from('order_lines')
+          .select('id,qty,unit_price,discount_amount,unit_cost_at_sale,description,' +
+                  'recipe:recipes(name)')
+          .eq('order_id', id).returns<HistoryLine[]>(),
+        // The rpc's generated return type is not array-shaped, so it is cast
+        // where it is consumed rather than through .returns<>().
+        supabase.rpc('fn_allocate_order_discount', { p_order_id: id }),
+        supabase.from('orders').select('id,order_no').eq('replaces', id)
+          .maybeSingle<{ id: string; order_no: string | null }>(),
+      ])
+    : [{ data: null }, { data: null }, { data: null }]
+
+  // Array.isArray, not `?? []`: the page must still show the preserved lines
+  // even if the allocation call answers with something unexpected. Losing the
+  // money figures is bad; losing the whole record on a page whose purpose is to
+  // prove the record survived would be worse.
+  const allocRows: Allocation[] = Array.isArray(allocations) ? allocations as Allocation[] : []
+  const allocOf = new Map(allocRows.map((a) => [a.order_line_id, a]))
+  const history = (histLines ?? []).map((l) => ({ line: l, alloc: allocOf.get(l.id) ?? null }))
+
+  // The same arithmetic the live page uses, over the preserved rows. These
+  // figures are displayed as history and are NOT added to any live total --
+  // revenue, COGS and profit reporting still exclude cancelled sales entirely,
+  // because those come from v_sales_unified, which is untouched.
+  const histNet = history.reduce((t, h) => t + Number(h.alloc?.net_revenue ?? 0), 0)
+  const histGross = history.reduce((t, h) => t + Number(h.alloc?.gross_revenue ?? 0), 0)
+  const histCosted = history.filter((h) => h.line.unit_cost_at_sale !== null)
+  const histCogs = histCosted.reduce(
+    (t, h) => t + Number(h.line.qty) * Number(h.line.unit_cost_at_sale), 0)
+  const histCostedRevenue = histCosted.reduce(
+    (t, h) => t + Number(h.alloc?.net_revenue ?? 0), 0)
+  const histProfit = histCosted.length ? histCostedRevenue - histCogs : null
+  const histMargin = histProfit !== null && histCostedRevenue !== 0
+    ? (100 * histProfit) / histCostedRevenue : null
   const customerName = (customers ?? []).find((c) => c.id === order.customer_id)?.name ?? null
 
   // Totals are summed from the view, which is the same arithmetic the reports
@@ -299,6 +357,12 @@ export default async function SaleDetail({
           This sale was cancelled: {order.void_reason ?? 'no reason recorded'}. It no longer
           counts in your figures. The record and the cost frozen onto it are kept, so nothing
           disappears without a trace.
+          {replacement && (
+            <> It was replaced by{' '}
+              <Link href={`/sales/${replacement.id}`} className="underline">
+                {replacement.order_no ?? 'a later sale'}
+              </Link>.</>
+          )}
         </Notice>
       )}
       {!confirmed && !voided && (
@@ -318,6 +382,71 @@ export default async function SaleDetail({
         </Notice>
       )}
 
+      {voided ? (
+        <>
+          {/* HISTORY, not live figures. Labelled as such, and summed only over
+              the preserved rows: nothing here reaches revenue, COGS or profit
+              reporting, which read v_sales_unified and exclude cancelled sales
+              at the database. */}
+          <SectionHeading sub="What this sale was when it was cancelled. These figures are kept for your records and are NOT counted in your revenue, cost or profit.">
+            The original cancelled sale
+          </SectionHeading>
+          <StatRow>
+            <Stat label="Was charged" value={money(histGross)} />
+            <Stat label="Came to" value={money(histNet)} />
+            <Stat
+              label="Cost frozen at the time"
+              value={histCosted.length ? money(histCogs) : money(null, 'never known')}
+            />
+            <Stat
+              label="Would have kept"
+              value={histProfit === null ? money(null, 'not known') : money(histProfit)}
+              sub={histMargin === null
+                ? 'No item on this sale had a known cost.'
+                : `${percent(histMargin)} of ${money(histCostedRevenue)}`}
+            />
+          </StatRow>
+
+          <section className="space-y-3">
+            <SectionHeading sub="Read from the original record, which cancellation never altered.">
+              What was on it
+            </SectionHeading>
+            {history.length === 0 ? (
+              <Empty>This sale had no items on it when it was cancelled.</Empty>
+            ) : (
+              <ul className="space-y-2">
+                {history.map(({ line, alloc }) => {
+                  const lineCogs = line.unit_cost_at_sale === null ? null
+                    : Number(line.qty) * Number(line.unit_cost_at_sale)
+                  const lineNet = Number(alloc?.net_revenue ?? 0)
+                  return (
+                    <li key={line.id}>
+                      <Card>
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                          <span className="font-medium">
+                            {line.recipe?.name ?? line.description ?? 'Item'}
+                          </span>
+                          <span className="mm-num font-medium">{money(lineNet)}</span>
+                        </div>
+                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                          {Number(line.qty).toLocaleString('en-NG')} × {money(line.unit_price)}
+                          {Number(line.discount_amount) > 0
+                            ? ` · less ${money(line.discount_amount)} off` : ''}
+                          {' · '}
+                          {lineCogs === null
+                            ? 'cost was never known'
+                            : `cost frozen at ${money(lineCogs)}, kept ${money(lineNet - lineCogs)}`}
+                        </div>
+                      </Card>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        </>
+      ) : (
+      <>
       <StatRow>
         <Stat label="Charged" value={money(gross)}
               sub={discounts > 0 ? `less ${money(discounts)} in discounts` : undefined} />
@@ -386,6 +515,8 @@ export default async function SaleDetail({
           </ul>
         )}
       </section>
+      </>
+      )}
 
       {!confirmed && !voided && (
         <>
