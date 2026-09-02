@@ -184,7 +184,14 @@ export default async function SalesPage({
       )}
 
       <section className="space-y-3">
-        <SectionHeading sub="Newest first.">All sales</SectionHeading>
+        {/* NOT "All sales". v_orders_attention ends `where o.voided_at is null
+            and o.status <> 'cancelled'`, so a cancelled sale is deliberately
+            absent here -- it keeps its record, its frozen cost and its reason
+            under Reports. The heading has to say what the list actually is. */}
+        <SectionHeading sub={
+          <>Newest first. Cancelled sales are kept under{' '}
+            <Link href="/reports" className="underline">Reports &rarr; Voided sales</Link>.</>
+        }>Active sales</SectionHeading>
         {!orders?.length ? (
           <Empty>
             No sales recorded yet. Record one above and Menu Master starts telling you

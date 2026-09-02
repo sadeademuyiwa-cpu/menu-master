@@ -40,7 +40,31 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/dashboard" className="font-semibold tracking-tight">
             Menu Master NG
           </Link>
-          <span className="truncate text-xs" style={{ color: 'var(--mm-muted)' }}>
+
+          {/* DESKTOP NAVIGATION, in the header where a desktop user looks for
+              it. Below `sm` this is display:none -- so it is out of the
+              accessibility tree too -- and the fixed bar at the bottom takes
+              over. Exactly one of the two is ever rendered to a given
+              viewport; they are never both visible. */}
+          <nav aria-label="Primary" className="hidden sm:block">
+            <ul className="flex items-center gap-1">
+              {NAV.map((item) => (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    className="mm-tap block whitespace-nowrap rounded px-3 py-1.5 text-sm"
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          {/* One element, always rendered, as before. It truncates rather than
+              disappearing at any width, so there is no band where the signed-in
+              address is silently absent. */}
+          <span className="min-w-0 truncate text-xs" style={{ color: 'var(--mm-muted)' }}>
             {user.email}
           </span>
         </div>
@@ -51,10 +75,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {children}
       </main>
 
-      {/* Mobile: bottom nav. Desktop: the same links inline. Built together,
-          not retrofitted. */}
+      {/* MOBILE NAVIGATION, thumb-reachable at the bottom. Hidden from `sm`
+          upward, where the header carries the same five destinations.
+          Previously this was `sm:static`, which did not move the bar into the
+          header on a desktop -- it simply left it below the page content, so a
+          desktop read as a stretched phone. */}
       <nav
-        className="fixed inset-x-0 bottom-0 border-t sm:static sm:border-t-0"
+        aria-label="Primary"
+        className="fixed inset-x-0 bottom-0 border-t sm:hidden"
         style={{ borderColor: 'var(--mm-line)', background: 'var(--mm-bg)' }}
       >
         <ul className="mx-auto flex max-w-5xl">
@@ -64,7 +92,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 href={item.href}
                 /* Five destinations at a legible size. Six at 11px ran into
                    each other on a 360px screen: "IngredientsPurchases". */
-                className="mm-tap block w-full justify-center whitespace-nowrap px-1 text-center text-xs sm:px-3 sm:text-sm"
+                className="mm-tap block w-full justify-center whitespace-nowrap px-1 text-center text-xs"
               >
                 {item.label}
               </Link>

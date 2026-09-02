@@ -179,3 +179,28 @@ test('F2. the false messages are gone from the application source', () => {
     assert.match(src, /contextRedirect\(/, `${f} must consult the context status`)
   }
 })
+
+// ---------------------------------------------------------------------------
+// The /sales list is fed by v_orders_attention, which ends
+//   where o.voided_at is null and o.status <> 'cancelled'
+// so a cancelled sale is deliberately absent from it. It keeps its record, its
+// frozen cost and its reason, and is reachable under Reports -> Voided sales.
+// The heading must not claim otherwise. Certified Phase 6 behaviour; this
+// guards the WORDING, not the query.
+// ---------------------------------------------------------------------------
+test('G. the sales list does not claim to show every sale', () => {
+  const src = readFileSync(join(import.meta.dirname, '..', 'src/app/(app)/sales/page.tsx'), 'utf8')
+
+  // It still reads the attention view -- the fix must not have changed the query.
+  assert.match(src, /from\('v_orders_attention'\)/,
+    'the list must still come from v_orders_attention')
+
+  // And it must not label that view "All sales".
+  assert.doesNotMatch(src, />All sales</,
+    'v_orders_attention excludes cancelled sales, so it cannot be headed "All sales"')
+
+  // It must say where the cancelled ones went.
+  assert.match(src, /Cancelled sales are kept under/,
+    'the heading must point at Reports -> Voided sales')
+  assert.match(src, /Voided sales/, 'it must name the destination')
+})
