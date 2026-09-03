@@ -257,8 +257,16 @@ export default async function SaleDetail({
   const [{ data: histLines }, { data: allocations }, { data: replacement }] = voided
     ? await Promise.all([
         supabase.from('order_lines')
+          // The constraint hint is REQUIRED. order_lines has TWO foreign keys
+          // to recipes -- order_lines_recipe_id_fkey (recipe_id) and
+          // fk_order_lines_recipe_id_account (recipe_id, account_id) -- and an
+          // unhinted embed makes PostgREST answer PGRST201 / HTTP 300 rather
+          // than rows. That shipped once: every cancelled sale then rendered
+          // 0.00 with no items, because the error left histLines null.
+          // e2e/postgrest-embeds.mjs now proves every embed against real
+          // PostgREST so this cannot return silently.
           .select('id,qty,unit_price,discount_amount,unit_cost_at_sale,description,' +
-                  'recipe:recipes(name)')
+                  'recipe:recipes!order_lines_recipe_id_fkey(name)')
           .eq('order_id', id).returns<HistoryLine[]>(),
         // The rpc's generated return type is not array-shaped, so it is cast
         // where it is consumed rather than through .returns<>().

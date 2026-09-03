@@ -166,6 +166,28 @@ createServer((req, res) => {
       }])
     }
   if (url.pathname.startsWith('/rest/v1/rpc/')) return send(8000)
+    // AMBIGUOUS EMBEDS. This mock returns pre-shaped objects and does not
+    // implement embedding, so it used to accept `recipe:recipes(name)` on
+    // order_lines and hand back a row -- while real PostgREST answers PGRST201
+    // / HTTP 300, because order_lines has TWO foreign keys to recipes. Fifteen
+    // browser assertions passed on a query that could never work in
+    // production. A mock must not be more permissive than the thing it stands
+    // in for, so the known-ambiguous pairs are refused here exactly as
+    // PostgREST refuses them. e2e/postgrest-embeds.mjs is the real check.
+    const AMBIGUOUS = { order_lines: ['recipes'] }
+    const sel = url.searchParams.get('select') ?? ''
+    const parent = url.pathname.replace('/rest/v1/', '').split('?')[0]
+    for (const child of AMBIGUOUS[parent] ?? []) {
+      // hinted as `child!constraint(...)` is fine; bare `child(...)` is not
+      if (new RegExp(`[a-z_]+:${child}\\(`).test(sel)) {
+        return send({
+          code: 'PGRST201',
+          message: `Could not embed because more than one relationship was found for '${parent}' and '${child}'`,
+          hint: `Try changing '${child}' to one of the following: '${child}!<constraint>'`,
+        }, 300)
+      }
+    }
+
   if (url.pathname.startsWith('/rest/v1/')) {
     const name = url.pathname.replace('/rest/v1/', '')
     let rows = table(name)
