@@ -164,8 +164,11 @@ begin
   select count(*) into n from pg_policies where schemaname='public';
   -- 105 before 0031/0032. After them: +12 -3 on the cost tables, +1 for
   -- subscription_changes, +1 for billing_config = 116.
-  insert into t9 values (14,'the policy count moved only by what 0031/0032 declare',
-    case when n in (105, 116) then 'PASS' else 'FAIL' end, n::text);
+  -- 0049 declares exactly one more: the read-only policy on founder_slots. It
+  -- drops and recreates 13 Sales write policies but adds none of them, so the
+  -- only legal value after 0049 is 117.
+  insert into t9 values (14,'the policy count moved only by what 0031/0032/0049 declare',
+    case when n in (105, 116, 117) then 'PASS' else 'FAIL' end, n::text);
 
   select count(*) into n from pg_proc p where p.proname='fn_account_is_entitled'
     and has_function_privilege('anon', p.oid, 'EXECUTE');
