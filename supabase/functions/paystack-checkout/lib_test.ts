@@ -3,7 +3,15 @@
 // No server, no network, no real secret.
 //   deno test supabase/functions/paystack-checkout/lib_test.ts
 // ============================================================================
-import { initializeBody, missingPlanCode, parseTier, safeError, type Quote } from "./lib.ts";
+import {
+  billableEmail,
+  initializeBody,
+  missingPlanCode,
+  parseTier,
+  pickAccount,
+  safeError,
+  type Quote,
+} from "./lib.ts";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
@@ -102,4 +110,33 @@ Deno.test("an error response is a fixed code and never a provider message", () =
   const e = safeError("provider_unavailable");
   assertEquals(e, { error: "provider_unavailable" });
   assertEquals(Object.keys(e), ["error"]);
+});
+
+Deno.test("one membership resolves to that account", () => {
+  assertEquals(pickAccount([{ account_id: "a1" }]), { accountId: "a1" });
+  // the same account listed twice is still one account: a user can hold a
+  // membership per business under one account
+  assertEquals(pickAccount([{ account_id: "a1" }, { account_id: "a1" }]), { accountId: "a1" });
+});
+
+Deno.test("no membership is refused, not defaulted", () => {
+  assertEquals(pickAccount([]), { error: "no_account" });
+  assertEquals(pickAccount(null), { error: "no_account" });
+  assertEquals(pickAccount([{}]), { error: "no_account" });
+});
+
+Deno.test("TWO accounts REFUSES rather than billing the wrong business", () => {
+  assertEquals(pickAccount([{ account_id: "a1" }, { account_id: "a2" }]),
+    { error: "ambiguous_account" });
+  // and order must not decide it -- there is no 'first' account to prefer
+  assertEquals(pickAccount([{ account_id: "a2" }, { account_id: "a1" }]),
+    { error: "ambiguous_account" });
+});
+
+Deno.test("a session without a usable email is refused before Paystack", () => {
+  assertEquals(billableEmail({ email: "a@b.test" }), "a@b.test");
+  assertEquals(billableEmail({}), null);
+  assertEquals(billableEmail({ email: "" }), null);
+  assertEquals(billableEmail({ email: "not-an-email" }), null);
+  assertEquals(billableEmail(null), null);
 });

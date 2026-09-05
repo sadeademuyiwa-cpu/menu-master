@@ -99,6 +99,10 @@ function message(code: unknown): string {
       return 'Your session has expired. Please sign in again.'
     case 'no_account':
       return 'This login is not on a business account yet.'
+    case 'ambiguous_account':
+      return 'This login belongs to more than one business, so we cannot tell which one to bill. Please contact us and we will sort it out.'
+    case 'no_email':
+      return 'Your login has no email address on it, and Paystack needs one. Please contact us.'
     case 'no_price_available':
     case 'plan_not_mapped':
       return 'This plan is not open for online payment yet. Please contact us and we will set you up.'

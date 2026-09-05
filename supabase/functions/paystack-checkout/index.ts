@@ -25,7 +25,15 @@
 //   SITE_URL                     where Paystack sends the browser back
 // ============================================================================
 
-import { initializeBody, missingPlanCode, parseTier, safeError, type Quote } from "./lib.ts";
+import {
+  billableEmail,
+  initializeBody,
+  missingPlanCode,
+  parseTier,
+  pickAccount,
+  safeError,
+  type Quote,
+} from "./lib.ts";
 
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), {
@@ -72,12 +80,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const tier = parseTier(await req.json().catch(() => ({})));
   if (!tier) return json(safeError("choose_costing_or_trading"), 400);
 
+  const email = billableEmail(user);
+  if (!email) return json(safeError("no_email"), 400);
+
   // WHICH ACCOUNT. Read with the service role from memberships -- never from
   // the request body. A user who posts someone else's account_id is posting a
   // field nothing reads.
+  //
+  // No limit=1: a user on two accounts must NOT have one of them picked for
+  // them and billed. pickAccount refuses instead, the same way the quote
+  // refuses when no price exists.
   const memRes = await fetch(
     `${Deno.env.get("SUPABASE_URL")}/rest/v1/memberships` +
-      `?user_id=eq.${user.id}&select=account_id&limit=1`,
+      `?user_id=eq.${user.id}&select=account_id`,
     {
       headers: {
         apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -85,9 +100,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       },
     },
   );
-  const mem = memRes.ok ? await memRes.json() : [];
-  const accountId = mem?.[0]?.account_id;
-  if (!accountId) return json(safeError("no_account"), 403);
+  const picked = pickAccount(memRes.ok ? await memRes.json() : []);
+  if ("error" in picked) {
+    return json(safeError(picked.error), picked.error === "no_account" ? 403 : 409);
+  }
+  const accountId = picked.accountId;
 
   // THE QUOTE. The database decides plan, price, price tier, founding
   // eligibility and slot availability. This function decides nothing.
@@ -113,7 +130,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
     body: JSON.stringify(
-      initializeBody(quote, user.email, `${siteUrl}/checkout/callback`),
+      initializeBody(quote, email, `${siteUrl}/checkout/callback`),
     ),
   });
 
