@@ -32,10 +32,14 @@ drop table _tx_probe;
 -- ---------------------------------------------------------------------------
 create temp table _codes (plan_id text primary key, code text not null, naira int not null);
 insert into _codes values
-  ('costing',          'PLN_REPLACE_ME_costing',          7500),
-  ('trading',          'PLN_REPLACE_ME_trading',         15000),
-  ('founding_costing', 'PLN_REPLACE_ME_founding_costing', 3500),
-  ('founding_trading', 'PLN_REPLACE_ME_founding_trading', 7500);
+  ('costing',          'PLN_j5p9kupsu05lkz9',  7500),
+  ('trading',          'PLN_ma08b5nju78bfom', 15000),
+  ('founding_costing', 'PLN_fy0sypwvmce67wl',  3500),
+  ('founding_trading', 'PLN_igp4tj8nbsyznq4',  7500);
+-- Owner-supplied, Paystack TEST mode, 2026-09-05. The two N7,500 rows are
+-- DIFFERENT plans: costing grants costing only, founding_trading grants Sales.
+-- They were transposed twice while being read off the dashboard, which is why
+-- the checks above refuse a repeated code rather than trusting the list.
 
 -- ---------------------------------------------------------------------------
 -- Refuse before writing anything

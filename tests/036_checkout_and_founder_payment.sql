@@ -290,6 +290,64 @@ begin
     case when msg='42501' then 'PASS' else 'FAIL' end, msg);
 end $$;
 
+-- ======================================================= 11. THE TWO N7,500 PLANS
+--
+-- costing and founding_trading are BOTH N7,500 and are NOT the same product:
+-- one grants Sales and one does not. Paystack sends only a plan code, and
+-- fn_billing_apply reads that code before it reads anything else. So the
+-- entitlement has to fall out of the code alone.
+--
+-- This is here because the two were transposed twice while being read off the
+-- Paystack dashboard. A mapping mistake that survives to production sells the
+-- wrong product at the right price, which no amount of care at the till fixes.
+do $$
+declare u uuid; a uuid; res jsonb; ing jsonb; b text; i int;
+  pairs text[][] := array[['PLN_t36_costing','costing'],
+                          ['PLN_t36_founding_trading','founding_trading']];
+  v_plan text; v_sales boolean; v_kobo int;
+begin
+  update plans set provider_plan_code='PLN_t36_costing'          where id='costing';
+  update plans set provider_plan_code='PLN_t36_founding_trading' where id='founding_trading';
+
+  for i in 1..2 loop
+    u := gen_random_uuid();
+    insert into auth.users(id,email) values (u, 't36-code-'||i||'@t36.test');
+    res := fn_create_account_and_business('code '||i,'K','other',u,
+             p_idempotency_key => gen_random_uuid()::text);
+    a := (res->>'account_id')::uuid;
+    b := gen_random_uuid()::text;
+    -- the payload carries the plan CODE and no plan_id in metadata, exactly
+    -- as Paystack sends it for a subscription charge
+    ing := fn_billing_ingest(
+      p_body_sha256 => encode(digest(b,'sha256'),'hex'), p_signature_valid => true,
+      p_event_type => 'charge.success', p_provider_event_id => b, p_reference => b,
+      p_payload => jsonb_build_object('event','charge.success','data',
+         jsonb_build_object('id', 900+i, 'reference', b,
+           'plan', jsonb_build_object('plan_code', pairs[i][1]),
+           'metadata', jsonb_build_object('account_id', a::text),
+           'customer', jsonb_build_object('customer_code','CUS_t36_'||i))),
+      p_body_bytes => 10, p_source_ip => '127.0.0.1'::inet);
+    perform fn_billing_apply((ing->>'event_id')::uuid);
+
+    select s.plan_id, s.price_kobo into v_plan, v_kobo
+      from subscriptions s where s.account_id = a;
+    v_sales := fn_account_has_sales(a);
+
+    insert into t36 values (29 + i,
+      'a N7,500 payment under '||pairs[i][1]||' grants the right product',
+      case when v_plan = pairs[i][2]
+            and v_kobo = 750000
+            and v_sales = (pairs[i][2] = 'founding_trading')
+           then 'PASS' else 'FAIL' end,
+      'resolved to '||v_plan||', sales='||v_sales::text||', N'||(v_kobo/100));
+  end loop;
+
+  insert into t36 values (32,'and the two codes cannot collide in the table',
+    case when (select count(distinct provider_plan_code) from plans
+                where provider_plan_code is not null) = 2 then 'PASS' else 'FAIL' end,
+    'ux_plans_provider_plan_code (0030) makes one code for two plans unstorable');
+end $$;
+
 select n, check_name, verdict, left(detail,60) as detail from t36 order by n;
 select count(*) filter (where verdict='PASS') as pass,
        count(*) filter (where verdict='FAIL') as fail from t36;
