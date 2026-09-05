@@ -107,18 +107,115 @@ function Test-RepoState {
 }
 
 # -----------------------------------------------------------------------------
+# CLI OUTPUT PARSING, kept pure so it can be tested without a CLI
+#
+# Both of these exist because parsing the Supabase CLI's table on Windows went
+# wrong in two different ways on the first real run. Neither is allowed to
+# report success from output it did not understand.
+# -----------------------------------------------------------------------------
+
+function Split-CliLines {
+    param([Parameter(Mandatory)] [AllowNull()] $Output)
+    # The CLI may hand back $null, one string, or an array of strings, and on
+    # Windows the line ending is CRLF. Out-String normalises all of that;
+    # without it, a single-line result is a bare string with no .Count and
+    # StrictMode throws "The property 'Count' cannot be found on this object."
+    @(($Output | Out-String) -split "\r?\n")
+}
+
+function Test-SecretNamePresent {
+    param(
+        [Parameter(Mandatory)] [AllowNull()] $Output,
+        [Parameter(Mandatory)] [string] $Name
+    )
+    # Bounded by non-word characters rather than by the table's separators: the
+    # CLI draws them with box-drawing glyphs that a non-UTF8 Windows console
+    # mangles, and a mangled separator must not turn a present secret into an
+    # absent one. Underscores are word characters, so PAYSTACK_SECRET_KEY
+    # cannot be matched by a longer name containing it.
+    $pattern = "(?<![\w-])$([regex]::Escape($Name))(?![\w-])"
+    @(Split-CliLines $Output | Where-Object { $_ -match $pattern }).Count -gt 0
+}
+
+function Resolve-LinkState {
+    param(
+        [Parameter(Mandatory)] [AllowNull()] $ProjectsListOutput,
+        [Parameter(Mandatory)] [string] $ProjectRef,
+        [AllowNull()] [string] $LinkedRefOnDisk
+    )
+    $lines   = Split-CliLines $ProjectsListOutput
+    $refLine = @($lines | Where-Object { $_ -match [regex]::Escape($ProjectRef) })
+    $visible = $refLine.Count -gt 0
+
+    if (-not $visible) {
+        return [pscustomobject]@{ Result = 'FAIL'
+            Detail = "$ProjectRef is not in this login's project list" }
+    }
+
+    # supabase/.temp/project-ref is what the CLI itself reads to decide which
+    # project a command targets, so it is the authority -- not a bullet in a
+    # table. It is also plain ASCII, which the table's LINKED marker is not:
+    # that marker is drawn with a glyph a Windows console can mangle, which is
+    # exactly how a correctly linked project was reported as unlinked.
+    if ($LinkedRefOnDisk) {
+        if ($LinkedRefOnDisk -eq $ProjectRef) {
+            return [pscustomobject]@{ Result = 'PASS'
+                Detail = "$ProjectRef (from supabase/.temp/project-ref)" }
+        }
+        # Linked to a DIFFERENT project. Deploying here would deploy to
+        # somebody else's project, so this is a hard failure, not a fallback.
+        return [pscustomobject]@{ Result = 'FAIL'
+            Detail = "this repo is linked to $LinkedRefOnDisk, not $ProjectRef. Run: npx supabase link --project-ref $ProjectRef" }
+    }
+
+    # No link file. Fall back to the table marker, and accept only a marker we
+    # actually recognise -- an unreadable line stays a FAIL.
+    if (($refLine -join ' ') -match '●|✔|\bLINKED\b|\*') {
+        return [pscustomobject]@{ Result = 'PASS'
+            Detail = "$ProjectRef (marked linked in the project list)" }
+    }
+    [pscustomobject]@{ Result = 'FAIL'
+        Detail = "$ProjectRef is visible but no link was found. Run: npx supabase link --project-ref $ProjectRef" }
+}
+
+function Get-LinkedProjectRefOnDisk {
+    param([Parameter(Mandatory)] [string] $RepoRoot)
+    $path = Join-Path $RepoRoot 'supabase' | Join-Path -ChildPath '.temp' | Join-Path -ChildPath 'project-ref'
+    if (Test-Path -LiteralPath $path) {
+        $v = (Get-Content -Raw -LiteralPath $path -ErrorAction SilentlyContinue)
+        if ($v) { return $v.Trim() }
+    }
+    $null
+}
+
+# -----------------------------------------------------------------------------
 # 2. Supabase link
 # -----------------------------------------------------------------------------
-function Invoke-Supabase {
-    param([Parameter(Mandatory)] [string[]] $CliArgs)
+# The CLI call is injectable so the gates around it can be tested against real
+# recorded output. Without this the parsing was only ever exercised through a
+# live CLI, which is why two Windows-specific shapes reached the operator
+# instead of a test.
+$script:SupabaseInvoker = {
+    param([string[]] $CliArgs)
     $out = & npx --yes supabase @CliArgs 2>&1 | Out-String
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $out }
+}
+
+function Set-SupabaseInvoker {
+    param([Parameter(Mandatory)] [scriptblock] $Invoker)
+    $script:SupabaseInvoker = $Invoker
+}
+
+function Invoke-Supabase {
+    param([Parameter(Mandatory)] [string[]] $CliArgs)
+    & $script:SupabaseInvoker $CliArgs
 }
 
 function Test-SupabaseLink {
     param(
         [Parameter(Mandatory)] [System.Collections.IList] $Log,
-        [Parameter(Mandatory)] [string] $ProjectRef
+        [Parameter(Mandatory)] [string] $ProjectRef,
+        [Parameter(Mandatory)] [string] $RepoRoot
     )
     $r = Invoke-Supabase @('projects', 'list')
     if ($r.ExitCode -ne 0) {
@@ -128,21 +225,9 @@ function Test-SupabaseLink {
     }
     Add-Gate $Log 'supabase: CLI is authenticated' 'PASS'
 
-    if ($r.Output -notmatch [regex]::Escape($ProjectRef)) {
-        Add-Gate $Log 'supabase: the project is visible to this login' 'FAIL' `
-            "$ProjectRef was not in the project list"
-        return
-    }
-    # The linked project is marked with a bullet in the CLI's table. Rather than
-    # depend on that glyph, confirm the ref appears on a line the CLI marks as
-    # linked, and fall back to reporting UNKNOWN rather than guessing PASS.
-    $linkedLine = ($r.Output -split "`n" | Where-Object { $_ -match [regex]::Escape($ProjectRef) }) -join ' '
-    if ($linkedLine -match '●|LINKED|\*') {
-        Add-Gate $Log 'supabase: project is linked' 'PASS' $ProjectRef
-    } else {
-        Add-Gate $Log 'supabase: project is linked' 'FAIL' `
-            "$ProjectRef is visible but does not look linked. Run: npx supabase link --project-ref $ProjectRef"
-    }
+    $onDisk = Get-LinkedProjectRefOnDisk -RepoRoot $RepoRoot
+    $state  = Resolve-LinkState -ProjectsListOutput $r.Output -ProjectRef $ProjectRef -LinkedRefOnDisk $onDisk
+    Add-Gate $Log 'supabase: project is linked' $state.Result $state.Detail
 }
 
 # -----------------------------------------------------------------------------
@@ -160,8 +245,7 @@ function Test-SecretNames {
     # supabase secrets list prints NAME and a DIGEST. We match on the name only
     # and never echo the line, so a digest cannot reach a log or a screenshot.
     foreach ($name in $Required) {
-        $present = ($r.Output -split "`n" | Where-Object { $_ -match "(^|\s|\|)$([regex]::Escape($name))(\s|\||$)" }).Count -gt 0
-        if ($present) {
+        if (Test-SecretNamePresent -Output $r.Output -Name $name) {
             Add-Gate $Log "secrets: $name is set" 'PASS' 'name present; value not read'
         } else {
             Add-Gate $Log "secrets: $name is set" 'FAIL' `

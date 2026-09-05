@@ -94,7 +94,7 @@ try {
 
     # -- 2. supabase link ----------------------------------------------------
     Write-Host ''; Write-Host 'SUPABASE' -ForegroundColor Cyan
-    Test-SupabaseLink -Log $log -ProjectRef $ProjectRef
+    Test-SupabaseLink -Log $log -ProjectRef $ProjectRef -RepoRoot $RepoRoot
 
     # -- 3. secret NAMES -----------------------------------------------------
     Test-SecretNames -Log $log -Required @('PAYSTACK_SECRET_KEY', 'SITE_URL')

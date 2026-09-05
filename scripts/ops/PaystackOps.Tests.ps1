@@ -164,6 +164,157 @@ do $$ begin end $$;
     Remove-Item $tmpl, $out -ErrorAction SilentlyContinue
 }
 
+
+# =============================================================================
+# REGRESSIONS FROM THE FIRST REAL WINDOWS RUN (commit 4da6882)
+#
+# Two gates failed on a machine that was correctly configured:
+#   * "supabase: project is linked" FAILED although the repo was linked --
+#     the LINKED column is drawn with a glyph a Windows console mangles.
+#   * Test-SecretNames CRASHED with "The property 'Count' cannot be found on
+#     this object" -- Where-Object returned ONE line, not an array, and
+#     StrictMode has no .Count on a bare string.
+# =============================================================================
+
+Write-Host "`nTest-SecretNamePresent  (regression: the 'Count' crash)`n"
+
+# The real shape: box-drawing separators, CRLF, one row per secret.
+$secretsTable = "  NAME                 │ DIGEST`r`n" +
+                "  ──────────────────── │ ────────`r`n" +
+                "  PAYSTACK_SECRET_KEY  │ a1b2c3`r`n" +
+                "  SITE_URL             │ d4e5f6`r`n"
+
+It 'finds a secret in the real CRLF box-drawing table' {
+    Expect (Test-SecretNamePresent -Output $secretsTable -Name 'PAYSTACK_SECRET_KEY') $true
+    Expect (Test-SecretNamePresent -Output $secretsTable -Name 'SITE_URL') $true
+}
+
+It 'REGRESSION: a single matching line does not crash on .Count' {
+    # Exactly one line matches, so Where-Object returns a bare string. This is
+    # the input that threw on the real machine.
+    $one = "  PAYSTACK_SECRET_KEY  | a1b2c3"
+    Expect (Test-SecretNamePresent -Output $one -Name 'PAYSTACK_SECRET_KEY') $true
+}
+
+It 'REGRESSION: zero matches returns false instead of crashing' {
+    Expect (Test-SecretNamePresent -Output $secretsTable -Name 'NOT_SET_ANYWHERE') $false
+}
+
+It 'REGRESSION: null and empty output are handled, not thrown on' {
+    Expect (Test-SecretNamePresent -Output $null -Name 'PAYSTACK_SECRET_KEY') $false
+    Expect (Test-SecretNamePresent -Output '' -Name 'PAYSTACK_SECRET_KEY') $false
+    Expect (Test-SecretNamePresent -Output @() -Name 'PAYSTACK_SECRET_KEY') $false
+}
+
+It 'accepts output handed back as an array of lines' {
+    $arr = @('  NAME | DIGEST', '  PAYSTACK_SECRET_KEY | a1', '  SITE_URL | b2')
+    Expect (Test-SecretNamePresent -Output $arr -Name 'SITE_URL') $true
+}
+
+It 'survives a console that mangled the separators' {
+    $mangled = "  NAME ? DIGEST`r`n  PAYSTACK_SECRET_KEY ? a1b2c3`r`n"
+    Expect (Test-SecretNamePresent -Output $mangled -Name 'PAYSTACK_SECRET_KEY') $true
+}
+
+It 'does not match a name that is only part of a longer one' {
+    $other = "  PAYSTACK_SECRET_KEY_OLD | a1"
+    Expect (Test-SecretNamePresent -Output $other -Name 'PAYSTACK_SECRET_KEY') $false
+}
+
+Write-Host "`nResolve-LinkState  (regression: linked project reported unlinked)`n"
+
+$ref  = 'mgbrrrjxbufstsjrdoug'
+# The real table, with the LINKED marker replaced by the '?' a non-UTF8
+# Windows console renders it as. This is what actually reached the parser.
+$mangledList = "   LINKED │ ORG ID │ REFERENCE ID         │ NAME`r`n" +
+               "  ──────── ┼ ────── ┼ ──────────────────── ┼ ─────`r`n" +
+               "     ?    │ abc    │ $ref │ Menu Master NG`r`n"
+$goodList    = "   LINKED │ ORG ID │ REFERENCE ID         │ NAME`r`n" +
+               "     ●    │ abc    │ $ref │ Menu Master NG`r`n"
+
+It 'REGRESSION: a mangled LINKED glyph still PASSES via the link file' {
+    $r = Resolve-LinkState -ProjectsListOutput $mangledList -ProjectRef $ref -LinkedRefOnDisk $ref
+    Expect $r.Result 'PASS'
+    ExpectMatch $r.Detail 'project-ref'
+}
+
+It 'still PASSES from the table marker when there is no link file' {
+    $r = Resolve-LinkState -ProjectsListOutput $goodList -ProjectRef $ref -LinkedRefOnDisk $null
+    Expect $r.Result 'PASS'
+}
+
+It 'FAILS when linked to a DIFFERENT project -- deploying would hit the wrong one' {
+    $r = Resolve-LinkState -ProjectsListOutput $goodList -ProjectRef $ref -LinkedRefOnDisk 'someoneelsesref'
+    Expect $r.Result 'FAIL'
+    ExpectMatch $r.Detail 'linked to someoneelsesref'
+}
+
+It 'FAILS when the project is not in the list at all' {
+    $r = Resolve-LinkState -ProjectsListOutput "   LINKED │ REFERENCE ID`r`n  ● │ otherref`r`n" `
+            -ProjectRef $ref -LinkedRefOnDisk $null
+    Expect $r.Result 'FAIL'
+    ExpectMatch $r.Detail 'not in this login'
+}
+
+It 'FAILS -- does NOT pass -- on output it cannot understand' {
+    # visible but no marker and no link file: unknown state, and unknown is
+    # not success. This is the gate that must never be weakened.
+    $r = Resolve-LinkState -ProjectsListOutput $mangledList -ProjectRef $ref -LinkedRefOnDisk $null
+    Expect $r.Result 'FAIL'
+    ExpectMatch $r.Detail 'npx supabase link'
+}
+
+It 'handles null and empty projects-list output without crashing' {
+    Expect (Resolve-LinkState -ProjectsListOutput $null -ProjectRef $ref -LinkedRefOnDisk $ref).Result 'FAIL'
+    Expect (Resolve-LinkState -ProjectsListOutput '' -ProjectRef $ref -LinkedRefOnDisk $ref).Result 'FAIL'
+}
+
+It 'an empty link file is treated as no link file, not as a match' {
+    $r = Resolve-LinkState -ProjectsListOutput $goodList -ProjectRef $ref -LinkedRefOnDisk ''
+    Expect $r.Result 'PASS'   # falls through to the table marker, which is present
+    $r2 = Resolve-LinkState -ProjectsListOutput $mangledList -ProjectRef $ref -LinkedRefOnDisk ''
+    Expect $r2.Result 'FAIL'  # and with no marker either, it stays a FAIL
+}
+
+
+Write-Host "`nEnd-to-end replay of the first real Windows run`n"
+
+It 'REGRESSION: both gates PASS against the exact output that failed' {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("repo" + [guid]::NewGuid())
+    New-Item -ItemType Directory -Path (Join-Path $tmp 'supabase' | Join-Path -ChildPath '.temp') -Force | Out-Null
+    Set-Content -NoNewline -LiteralPath (Join-Path $tmp 'supabase' | Join-Path -ChildPath '.temp' | Join-Path -ChildPath 'project-ref') `
+        -Value 'mgbrrrjxbufstsjrdoug'
+    try {
+        Set-SupabaseInvoker {
+            param([string[]] $CliArgs)
+            if ($CliArgs[0] -eq 'projects') {
+                [pscustomobject]@{ ExitCode = 0; Output =
+                    "   LINKED | ORG ID | REFERENCE ID         | NAME`r`n     ?    | abc    | mgbrrrjxbufstsjrdoug | Menu Master NG`r`n" }
+            } else {
+                [pscustomobject]@{ ExitCode = 0; Output =
+                    "  NAME                 | DIGEST`r`n  PAYSTACK_SECRET_KEY  | a1b2c3`r`n  SITE_URL             | d4e5f6`r`n" }
+            }
+        }
+        $log = [System.Collections.ArrayList]::new()
+        Test-SupabaseLink -Log $log -ProjectRef 'mgbrrrjxbufstsjrdoug' -RepoRoot $tmp
+        Test-SecretNames  -Log $log -Required @('PAYSTACK_SECRET_KEY', 'SITE_URL')
+        Expect (Test-AnyGateFailed $log) $false 'any gate failed'
+        Expect $log.Count 4 'gate count'
+    } finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+}
+
+It 'and a CLI that is not logged in still FAILS closed' {
+    Set-SupabaseInvoker {
+        param([string[]] $CliArgs)
+        [pscustomobject]@{ ExitCode = 1; Output = 'LegacyPlatformAuthRequiredError: Access token not provided.' }
+    }
+    $log = [System.Collections.ArrayList]::new()
+    Test-SupabaseLink -Log $log -ProjectRef 'mgbrrrjxbufstsjrdoug' -RepoRoot (Get-Location).Path
+    Expect (Test-AnyGateFailed $log) $true 'should have failed'
+}
+
 Write-Host ''
 Write-Host ("{0} passed, {1} failed" -f $script:pass, $script:fail) `
     -ForegroundColor $(if ($script:fail) { 'Red' } else { 'Green' })
