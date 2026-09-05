@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { currentContext, entitlementStatus } from '@/lib/data/context'
 import { PageHeader, Card, SectionHeading, Notice, Empty, BackLink } from '@/components/ui'
@@ -98,9 +99,14 @@ export default async function AccountPage() {
             </dl>
           </Card>
         )}
+        <p className="text-sm">
+          <Link href="/subscribe" className="mm-tap underline">
+            {sub && sub.status === 'active' ? 'Change your plan' : 'Choose a plan'}
+          </Link>
+        </p>
         <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
-          Paid plans are not open yet. Nothing on this page charges you and no
-          payment details are held.
+          Payments are handled by Paystack. Menu Master NG never sees or stores
+          your card details.
         </p>
       </section>
     </div>
