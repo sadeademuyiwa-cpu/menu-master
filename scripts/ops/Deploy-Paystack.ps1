@@ -23,6 +23,11 @@
 .EXAMPLE
   pwsh -File scripts/ops/Deploy-Paystack.ps1 -Mode Live -Confirm
 #>
+# Windows ships PowerShell 5.1 as `powershell`. This script uses 7-only syntax
+# (three-argument Join-Path among others), so it declares the requirement
+# rather than failing later with a confusing binding error.
+#Requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [ValidateSet('Test', 'Live')] [string] $Mode = 'Test',

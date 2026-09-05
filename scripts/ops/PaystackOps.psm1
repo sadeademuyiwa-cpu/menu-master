@@ -345,7 +345,7 @@ function Invoke-ElevenScenarios {
         Add-Gate $Log 'eleven scenarios' 'FAIL' "harness not found at $script"; return
     }
     if (-not (Get-Command deno -ErrorAction SilentlyContinue)) {
-        Add-Gate $Log 'eleven scenarios' 'FAIL' 'deno is not on PATH -- install it, or run the harness on a machine that has it'
+        Add-Gate $Log 'eleven scenarios' 'FAIL' 'deno is not on PATH. Install it (winget install DenoLand.Deno), open a new terminal, and run again.'
         return
     }
 
