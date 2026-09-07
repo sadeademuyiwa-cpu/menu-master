@@ -343,7 +343,7 @@ Write-Host "`nInvoke-PaystackApi  (regression: the opaque 400)`n"
 It 'REGRESSION: a 400 surfaces Paystack own message instead of throwing' {
     Set-PaystackInvoker { param($m,$u,$h,$b)
         [pscustomobject]@{ StatusCode = 400; Content = '{"status":false,"message":"Invalid key"}' } }
-    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_abc') -Path '/plan'
+    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -Path '/plan'
     Expect $r.StatusCode 400
     Expect $r.Ok $false
     Expect $r.Message 'Invalid key'
@@ -352,7 +352,7 @@ It 'REGRESSION: a 400 surfaces Paystack own message instead of throwing' {
 It 'a 200 with status:false is NOT treated as success' {
     Set-PaystackInvoker { param($m,$u,$h,$b)
         [pscustomobject]@{ StatusCode = 200; Content = '{"status":false,"message":"Plan not found"}' } }
-    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_abc') -Path '/plan'
+    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -Path '/plan'
     Expect $r.Ok $false
     Expect $r.Message 'Plan not found'
 }
@@ -360,7 +360,7 @@ It 'a 200 with status:false is NOT treated as success' {
 It 'a non-JSON body does not crash and is reported honestly' {
     Set-PaystackInvoker { param($m,$u,$h,$b)
         [pscustomobject]@{ StatusCode = 502; Content = '<html>bad gateway</html>' } }
-    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_abc') -Path '/plan'
+    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -Path '/plan'
     Expect $r.Ok $false
     Expect $r.StatusCode 502
     ExpectMatch $r.Message 'no message field'
@@ -374,14 +374,14 @@ It 'the Authorization header is exactly Bearer + key, and the key is trimmed' {
 
 It 'the URI is built against api.paystack.co' {
     Set-FakePaystack 200 '{"status":true,"data":[]}'
-    [void](Invoke-PaystackApi -Secret (Sec 'sk_test_abc') -Path '/plan?perPage=100')
+    [void](Invoke-PaystackApi -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -Path '/plan?perPage=100')
     Expect $global:LastUri 'https://api.paystack.co/plan?perPage=100'
 }
 
 Write-Host "`nGet-SecretShape  (safe description, never the key)`n"
 
 It 'describes a good test key without revealing it' {
-    $sh = Get-SecretShape -Secret (Sec 'sk_test_0123456789abcdef')
+    $sh = Get-SecretShape -Secret (Sec 'sk_test_FIXTURE_short_dddd')
     Expect $sh.Prefix 'sk_test_'
     Expect $sh.Usable $true
     Expect $sh.Padded $false
@@ -389,14 +389,24 @@ It 'describes a good test key without revealing it' {
 }
 
 It 'catches the PUBLIC key being pasted instead of the secret' {
-    $sh = Get-SecretShape -Secret (Sec 'pk_test_0123456789')
+    $sh = Get-SecretShape -Secret (Sec 'pk_test_FIXTURE_public_eeee')
     Expect $sh.Prefix 'pk_test_'
     Expect $sh.Usable $false
 }
 
-It 'catches surrounding whitespace and quotes -- the shell-paste mistakes' {
-    Expect (Get-SecretShape -Secret (Sec "  sk_test_abc  ")).Padded $true
-    Expect (Get-SecretShape -Secret (Sec "'sk_test_abc'")).Quoted $true
+It 'reports surrounding whitespace and quotes, and cleans them anyway' {
+    # length asserted from the fixture, never a hardcoded number: the last one
+    # rotted the moment the fixture was renamed to get past secret scanning
+    $k = 'sk_test_FIXTURE_not_a_real_key_aaaa'
+
+    $padded = Get-SecretShape -Secret (Sec "  $k  ")
+    Expect $padded.Padded $true 'padded reported'
+    Expect $padded.Length $k.Length 'and the length is the CLEANED length'
+    Expect $padded.Usable $true
+
+    $quoted = Get-SecretShape -Secret (Sec "'$k'")
+    Expect $quoted.Quoted $true 'quoted reported'
+    Expect $quoted.Length $k.Length 'and the quotes are gone from the value'
 }
 
 It 'reports an unrecognised key shape rather than assuming it is fine' {
@@ -415,20 +425,20 @@ It 'REFUSES a public key before any request is made' {
 
 It 'REFUSES a LIVE key during a TEST run' {
     $log = [System.Collections.ArrayList]::new()
-    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_live_abc') -Mode 'Test') $false
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_live_FIXTURE_not_a_real_key_bbbb') -Mode 'Test') $false
     ExpectMatch (($log | ForEach-Object Detail) -join ' ') 'LIVE key and this is a TEST run'
 }
 
 It 'REFUSES a TEST key during a LIVE run' {
     $log = [System.Collections.ArrayList]::new()
-    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_abc') -Mode 'Live') $false
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -Mode 'Live') $false
 }
 
 It 'reports the provider message when the key is rejected' {
     Set-PaystackInvoker { param($m,$u,$h,$b)
         [pscustomobject]@{ StatusCode = 401; Content = '{"status":false,"message":"Invalid key"}' } }
     $log = [System.Collections.ArrayList]::new()
-    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_abc') -Mode 'Test') $false
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -Mode 'Test') $false
     ExpectMatch (($log | ForEach-Object Detail) -join ' ') 'HTTP 401 .* Invalid key'
 }
 
@@ -436,7 +446,7 @@ It 'PASSES a good key' {
     Set-PaystackInvoker { param($m,$u,$h,$b)
         [pscustomobject]@{ StatusCode = 200; Content = '{"status":true,"data":[]}' } }
     $log = [System.Collections.ArrayList]::new()
-    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_abc') -Mode 'Test') $true
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -Mode 'Test') $true
     Expect (Test-AnyGateFailed $log) $false
 }
 
@@ -445,7 +455,7 @@ Write-Host "`nTest-PaystackInitialize  (the checkout request, replayed locally)`
 It 'sends the same body shape the edge function sends' {
     Set-FakePaystack 200 '{"status":true,"data":{"authorization_url":"https://checkout.paystack.com/x"}}'
     $log = [System.Collections.ArrayList]::new()
-    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_abc') -PlanCode 'PLN_x' `
+    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -PlanCode 'PLN_x' `
               -Kobo 350000 -Email 'a@b.test' -CallbackUrl 'https://x.test/cb') $true
     $sent = $global:LastBody | ConvertFrom-Json
     Expect $sent.amount '350000'
@@ -458,7 +468,7 @@ It 'REGRESSION: a bad plan code reports Plan not found, not a bare 400' {
     Set-PaystackInvoker { param($m,$u,$h,$b)
         [pscustomobject]@{ StatusCode = 400; Content = '{"status":false,"message":"Plan not found"}' } }
     $log = [System.Collections.ArrayList]::new()
-    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_abc') -PlanCode 'PLN_wrong' `
+    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -PlanCode 'PLN_wrong' `
               -Kobo 350000 -Email 'a@b.test' -CallbackUrl 'https://x.test/cb') $false
     ExpectMatch (($log | ForEach-Object Detail) -join ' ') 'HTTP 400 .* Plan not found'
 }
@@ -467,7 +477,7 @@ It 'a 200 with no authorization_url is a FAIL, not a pass' {
     Set-PaystackInvoker { param($m,$u,$h,$b)
         [pscustomobject]@{ StatusCode = 200; Content = '{"status":true,"data":{}}' } }
     $log = [System.Collections.ArrayList]::new()
-    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_abc') -PlanCode 'PLN_x' `
+    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') -PlanCode 'PLN_x' `
               -Kobo 1 -Email 'a@b.test' -CallbackUrl 'u') $false
 }
 
@@ -477,9 +487,133 @@ It 'REGRESSION: throws a message naming the status and reason' {
     Set-PaystackInvoker { param($m,$u,$h,$b)
         [pscustomobject]@{ StatusCode = 400; Content = '{"status":false,"message":"Invalid key"}' } }
     $threw = $false
-    try { [void](Get-PaystackPlans -Secret (Sec 'sk_test_abc')) }
+    try { [void](Get-PaystackPlans -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa')) }
     catch { $threw = $true; ExpectMatch $_.Exception.Message 'HTTP 400.*Invalid key' }
     Expect $threw $true 'should have thrown'
+}
+
+
+# =============================================================================
+# REGRESSION: the Windows prompt returned ONE non-ASCII character
+#
+# Entering a correct key twice produced:
+#   "prefix (unrecognised), 1 chars, CONTAINS NON-ASCII"
+# That is bracketed paste: the terminal sends ESC [ 200 ~ ahead of the text,
+# Read-Host -AsSecureString takes the ESC as the whole input, and the rest is
+# swallowed as a control sequence.
+# =============================================================================
+
+$ESC = [char]27
+$REALKEY = 'sk_test_FIXTURE_not_a_real_key_cccc'   # fixture. Underscores on purpose: an all-alphanumeric tail matches
+# GitHub's Stripe/Paystack secret detector and blocks the push.
+
+Write-Host "`nConvertTo-CleanSecretText  (regression: the one-character read)`n"
+
+It 'REGRESSION: a bare ESC -- the exact failing input -- cleans to nothing' {
+    Expect (ConvertTo-CleanSecretText "$ESC") '' 'bare ESC'
+    Expect (ConvertTo-CleanSecretText "$ESC[200~") '' 'a bracketed-paste opener alone'
+}
+
+It 'REGRESSION: a bracketed-paste WRAPPED key comes back whole' {
+    $wrapped = "$ESC[200~$REALKEY$ESC[201~"
+    Expect (ConvertTo-CleanSecretText $wrapped) $REALKEY 'unwrapped key'
+    Expect (ConvertTo-CleanSecretText $wrapped).Length $REALKEY.Length 'full length, not 1'
+}
+
+It 'strips stray control characters anywhere in the value' {
+    Expect (ConvertTo-CleanSecretText "`r`n$REALKEY`t`0") $REALKEY
+    Expect (ConvertTo-CleanSecretText ($REALKEY -replace '^sk_', "sk`b_")) $REALKEY
+}
+
+It 'strips surrounding quotes a shell kept, but not quotes inside' {
+    Expect (ConvertTo-CleanSecretText "'$REALKEY'") $REALKEY
+    Expect (ConvertTo-CleanSecretText "`"$REALKEY`"") $REALKEY
+    Expect (ConvertTo-CleanSecretText "sk_test_a'b") "sk_test_a'b" 'an inner quote is part of the value'
+}
+
+It 'trims whitespace from a paste' {
+    Expect (ConvertTo-CleanSecretText "   $REALKEY   ") $REALKEY
+}
+
+It 'leaves an already-clean key exactly as it is' {
+    Expect (ConvertTo-CleanSecretText $REALKEY) $REALKEY
+}
+
+It 'handles null and empty without throwing' {
+    Expect (ConvertTo-CleanSecretText '') ''
+    Expect (ConvertTo-CleanSecretText $null) ''
+}
+
+Write-Host "`nGet-SecretShape after cleaning`n"
+
+It 'REGRESSION: the wrapped key now reports the right prefix and length' {
+    $sh = Get-SecretShape -Secret (Sec "$ESC[200~$REALKEY$ESC[201~")
+    Expect $sh.Prefix 'sk_test_'
+    Expect $sh.Length $REALKEY.Length
+    # NonAscii stays TRUE on purpose: it is reported from the RAW paste, so the
+    # operator is told their terminal wrapped the key in control characters --
+    # while the cleaned value is used and is perfectly good.
+    Expect $sh.NonAscii $true 'the control characters in the paste are reported'
+    Expect $sh.Usable $true
+}
+
+It 'REGRESSION: a bare ESC is reported as empty, not as a one-character key' {
+    $sh = Get-SecretShape -Secret (Sec "$ESC")
+    Expect $sh.Usable $false
+    Expect $sh.Length 0 'length after cleaning'
+}
+
+Write-Host "`nTest-PaystackKey refuses a truncated read before calling Paystack`n"
+
+It 'REGRESSION: a one-character read is named as a bad READ, not a bad key' {
+    Set-PaystackInvoker { param($m,$u,$h,$b) throw 'Paystack must not be called for a truncated key' }
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackKey -Log $log -Secret (Sec "${ESC}x") -Mode 'Test') $false
+    $d = ($log | ForEach-Object Detail) -join ' '
+    ExpectMatch $d 'did not read your paste'
+    ExpectMatch $d '-SecretFrom Clipboard'
+}
+
+It 'a full, valid key is accepted and reaches Paystack' {
+    Set-FakePaystack 200 '{"status":true,"data":[]}'
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackKey -Log $log -Secret (Sec $REALKEY) -Mode 'Test') $true
+    Expect $global:LastAuth "Bearer $REALKEY" 'the whole key reaches the header'
+}
+
+It 'REGRESSION: a wrapped key still produces a clean Authorization header' {
+    Set-FakePaystack 200 '{"status":true,"data":[]}'
+    [void](Invoke-PaystackApi -Secret (Sec "$ESC[200~$REALKEY$ESC[201~") -Path '/plan')
+    Expect $global:LastAuth "Bearer $REALKEY" 'header carries the unwrapped key'
+}
+
+Write-Host "`nRead-PaystackSecret -From Env`n"
+
+It 'reads and cleans a key from an environment variable' {
+    $env:MM_TEST_KEY = "$ESC[200~$REALKEY$ESC[201~"
+    try {
+        $sec = Read-PaystackSecret -Prompt 'x' -From 'Env' -EnvVarName 'MM_TEST_KEY'
+        Expect (Get-SecretShape -Secret $sec).Length $REALKEY.Length
+        Expect (Get-SecretShape -Secret $sec).Prefix 'sk_test_'
+    } finally { Remove-Item Env:MM_TEST_KEY -ErrorAction SilentlyContinue }
+}
+
+It 'says so plainly when the environment variable is not set' {
+    Remove-Item Env:MM_TEST_KEY_MISSING -ErrorAction SilentlyContinue
+    $threw = $false
+    try { [void](Read-PaystackSecret -Prompt 'x' -From 'Env' -EnvVarName 'MM_TEST_KEY_MISSING') }
+    catch { $threw = $true; ExpectMatch $_.Exception.Message 'is not set in this session' }
+    Expect $threw $true 'should have thrown'
+}
+
+It 'refuses an environment variable holding only a control character' {
+    $env:MM_TEST_KEY = "$ESC"
+    try {
+        $threw = $false
+        try { [void](Read-PaystackSecret -Prompt 'x' -From 'Env' -EnvVarName 'MM_TEST_KEY') }
+        catch { $threw = $true; ExpectMatch $_.Exception.Message 'nothing usable' }
+        Expect $threw $true 'should have thrown'
+    } finally { Remove-Item Env:MM_TEST_KEY -ErrorAction SilentlyContinue }
 }
 
 Write-Host ''

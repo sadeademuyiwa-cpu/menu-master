@@ -128,3 +128,15 @@ not applied to that database. That is precisely the defect 0050 exists to fix.
 
 Do not switch to live mode from here. Live keys, live plan codes and the
 production 0050 migration are a separate gate with its own report.
+
+### If the key prompt does not read your paste
+
+On some Windows consoles `Read-Host -AsSecureString` captures only the
+bracketed-paste escape and reports *"prefix (unrecognised), 1 chars"*. The
+script now names that rather than sending a broken header to Paystack. Two
+ways round it, neither of which types or echoes anything:
+
+```powershell
+... -SecretFrom Clipboard      # reads the key you already copied
+... -SecretFrom Env            # reads $env:PAYSTACK_SECRET_KEY from your session
+```

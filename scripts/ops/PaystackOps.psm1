@@ -419,6 +419,92 @@ function Test-CanPrompt {
 
 <#
 .SYNOPSIS
+  Clean a pasted secret without judging what it should contain.
+.DESCRIPTION
+  On Windows, Read-Host -AsSecureString captured a SINGLE non-ASCII character
+  where a whole key was pasted. That is the signature of bracketed paste: the
+  terminal sends ESC [ 200 ~ before the text, the reader takes the ESC as the
+  entire input, and the rest is swallowed as a control sequence.
+
+  So nothing that arrives from a paste is trusted to be clean. This strips the
+  bracketed-paste wrappers, every C0/C1 control character, and a surrounding
+  pair of quotes a shell may have kept -- then trims. It never inspects or
+  reshapes the key body itself.
+#>
+function ConvertTo-CleanSecretText {
+    param([Parameter(Mandatory)] [AllowNull()] [AllowEmptyString()] [string] $Raw)
+    if ([string]::IsNullOrEmpty($Raw)) { return '' }
+    $esc = [char]27
+    $s = $Raw -replace ([regex]::Escape("$esc[200~")), '' `
+              -replace ([regex]::Escape("$esc[201~")), ''
+    $s = $s -replace '[\x00-\x1F\x7F-\x9F]', ''
+    $s = $s.Trim()
+    if ($s.Length -ge 2 -and $s[0] -eq $s[$s.Length - 1] -and ($s[0] -eq "'" -or $s[0] -eq '"')) {
+        $s = $s.Substring(1, $s.Length - 2)
+    }
+    $s.Trim()
+}
+
+<#
+.SYNOPSIS
+  Read the Paystack secret without it reaching the screen, a file, history or
+  a command line.
+.DESCRIPTION
+  Three sources, because the obvious one is the one that broke:
+
+    Prompt     Get-Credential's password field. Its own reader, not
+               Read-Host's, and it handles a paste on Windows.
+    Clipboard  the key is already in the clipboard -- that is how it was being
+               pasted. Nothing is typed, echoed or stored.
+    Env        a variable the operator sets in their own session.
+
+  Whatever the source, the value is cleaned and its SHAPE is checked before it
+  is used, so a truncated read is named rather than sent to Paystack as a
+  malformed header.
+#>
+function Read-PaystackSecret {
+    param(
+        [Parameter(Mandatory)] [string] $Prompt,
+        [ValidateSet('Prompt', 'Clipboard', 'Env')] [string] $From = 'Prompt',
+        [string] $EnvVarName = 'PAYSTACK_SECRET_KEY'
+    )
+    $plain = ''
+    try {
+        switch ($From) {
+            'Env' {
+                $plain = [Environment]::GetEnvironmentVariable($EnvVarName)
+                if ([string]::IsNullOrWhiteSpace($plain)) {
+                    throw "`$env:$EnvVarName is not set in this session."
+                }
+            }
+            'Clipboard' {
+                if (-not (Get-Command Get-Clipboard -ErrorAction SilentlyContinue)) {
+                    throw 'Get-Clipboard is not available on this host.'
+                }
+                Write-Host "  reading the key from the clipboard (nothing is typed or echoed)" -ForegroundColor DarkGray
+                $plain = (Get-Clipboard -Raw)
+            }
+            default {
+                # NOT Read-Host -AsSecureString: on this operator's Windows
+                # console it returned one control character for a full paste.
+                $cred = Get-Credential -UserName 'paystack-secret-key' -Message $Prompt
+                if (-not $cred) { throw 'cancelled at the credential prompt.' }
+                $plain = [System.Net.NetworkCredential]::new('', $cred.Password).Password
+            }
+        }
+        $clean = ConvertTo-CleanSecretText $plain
+        if ([string]::IsNullOrEmpty($clean)) {
+            throw 'nothing usable was read. Try -SecretFrom Clipboard.'
+        }
+        return (ConvertTo-SecureString $clean -AsPlainText -Force)
+    } finally {
+        $plain = $null
+        $clean = $null
+    }
+}
+
+<#
+.SYNOPSIS
   A safe description of a secret: enough to diagnose, never enough to use.
 .DESCRIPTION
   Reports the key's PREFIX (sk_test_ / sk_live_ / pk_test_ ...), its length,
@@ -435,17 +521,20 @@ function Get-SecretShape {
     }
     $raw = [System.Net.NetworkCredential]::new('', $Secret).Password
     try {
-        $trim   = $raw.Trim()
-        $prefix = if ($trim -match '^(sk|pk)_(test|live)_') { $Matches[0] } else { '(unrecognised)' }
+        $clean  = ConvertTo-CleanSecretText $raw
+        $prefix = if ($clean -match '^(sk|pk)_(test|live)_') { $Matches[0] } else { '(unrecognised)' }
+        # Reported from the RAW value, because the cleaner has already removed
+        # them from $clean -- and the operator still wants to know their paste
+        # arrived wrapped in something.
         [pscustomobject]@{
             Prefix   = $prefix
-            Length   = $trim.Length
-            Padded   = ($raw -ne $trim)
-            Quoted   = ($trim -match "^['`"].*['`"]$")
-            NonAscii = ($trim -match '[^\x20-\x7E]')
+            Length   = $clean.Length
+            Padded   = ($raw -ne $raw.Trim())
+            Quoted   = ($raw.Trim() -match "^['`"].*['`"]$")
+            NonAscii = ($raw -match '[\x00-\x1F\x7F-\x9F]')
             Usable   = ($prefix -like 'sk_*')
         }
-    } finally { $raw = $null }
+    } finally { $raw = $null; $clean = $null }
 }
 
 function Invoke-PaystackApi {
@@ -457,11 +546,15 @@ function Invoke-PaystackApi {
     )
     # Trimmed deliberately: a trailing newline from a paste or a shell here-doc
     # produces a header Paystack rejects, and the operator cannot see it.
-    $key = ([System.Net.NetworkCredential]::new('', $Secret).Password).Trim()
+    $key = ConvertTo-CleanSecretText ([System.Net.NetworkCredential]::new('', $Secret).Password)
     try {
         $r = & $script:PaystackInvoker $Method "https://api.paystack.co$Path" `
                 @{ Authorization = "Bearer $key" } $JsonBody
-    } finally { $key = $null }
+    } finally {
+        # cleared the moment the request is away, not at the end of the run
+        $key = $null
+        [System.GC]::Collect()
+    }
 
     $parsed = $null
     try { $parsed = $r.Content | ConvertFrom-Json -ErrorAction Stop } catch { }
@@ -499,9 +592,14 @@ function Test-PaystackKey {
              $(if ($shape.Quoted)   { ', HAS SURROUNDING QUOTES' }) +
              $(if ($shape.NonAscii) { ', CONTAINS NON-ASCII' })
 
-    if (-not $shape.Usable) {
+    # Order matters, and it is: what the key IS, then whether it arrived whole,
+    # then whether it is recognisable at all. A live key must be refused as a
+    # live key however few characters of it arrived; but an unrecognisable
+    # ONE-character value is a failed read, and saying "a secret key starts
+    # sk_" about it sends the operator hunting for the wrong problem.
+    if ($shape.Prefix -eq 'pk_test_' -or $shape.Prefix -eq 'pk_live_') {
         Add-Gate $Log 'paystack: the key is a SECRET key' 'FAIL' `
-            "$desc -- a secret key starts sk_. A pk_ key is the PUBLIC key and cannot call this API."
+            "$desc -- that is the PUBLIC key. The secret key starts sk_ and is on the same dashboard page."
         return $false
     }
     if ($Mode -eq 'Test' -and $shape.Prefix -eq 'sk_live_') {
@@ -511,6 +609,18 @@ function Test-PaystackKey {
     }
     if ($Mode -eq 'Live' -and $shape.Prefix -eq 'sk_test_') {
         Add-Gate $Log 'paystack: the key matches the mode' 'FAIL' "$desc -- that is a TEST key and this is a LIVE run."
+        return $false
+    }
+    if ($shape.Length -lt 20) {
+        # The signature of the Windows bracketed-paste failure: a real key is
+        # around forty characters, so anything this short was not read at all.
+        Add-Gate $Log 'paystack: the key was read intact' 'FAIL' `
+            "$desc -- far too short to be a Paystack key, so the prompt did not read your paste. Re-run with: -SecretFrom Clipboard"
+        return $false
+    }
+    if (-not $shape.Usable) {
+        Add-Gate $Log 'paystack: the key is a SECRET key' 'FAIL' `
+            "$desc -- a Paystack secret key starts sk_test_ or sk_live_."
         return $false
     }
     Add-Gate $Log 'paystack: the key is a SECRET key for this mode' 'PASS' $desc

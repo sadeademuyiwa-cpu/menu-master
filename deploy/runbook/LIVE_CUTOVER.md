@@ -142,3 +142,15 @@ That is a Vercel production deployment and it is your call, separately.
 **Rolling back 0050 is not available** once any founder slot is confirmed — by
 design. After the first founder pays, 0050 is the only thing keeping their slot
 and price correct.
+
+### If the key prompt does not read your paste
+
+On some Windows consoles `Read-Host -AsSecureString` captures only the
+bracketed-paste escape and reports *"prefix (unrecognised), 1 chars"*. The
+script now names that rather than sending a broken header to Paystack. Two
+ways round it, neither of which types or echoes anything:
+
+```powershell
+... -SecretFrom Clipboard      # reads the key you already copied
+... -SecretFrom Env            # reads $env:PAYSTACK_SECRET_KEY from your session
+```

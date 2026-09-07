@@ -53,6 +53,11 @@ param(
     # no database, deploys nothing, charges nothing.
     [switch] $DiagnosePaystack,
 
+    # Where to read the Paystack secret from. Prompt uses Get-Credential's
+    # password field; Clipboard reads what you already copied, typing nothing;
+    # Env reads $env:PAYSTACK_SECRET_KEY from your own session.
+    [ValidateSet('Prompt', 'Clipboard', 'Env')] [string] $SecretFrom = 'Prompt',
+
     # LIVE only. Without it, -Mode Live refuses.
     [switch] $Confirm
 )
@@ -75,11 +80,18 @@ try {
     if ($DiagnosePaystack) {
         Write-Host 'PAYSTACK DIAGNOSIS -- reads only. No deploy, no database, no charge.' -ForegroundColor Cyan
         Write-Host ''
-        if (-not (Test-CanPrompt -Log $log)) {
+        if ($SecretFrom -eq 'Prompt' -and -not (Test-CanPrompt -Log $log)) {
             [void](Write-GateSummary $log 'PAYSTACK DIAGNOSIS -- CANNOT RUN')
             exit 1
         }
-        $secret = Read-Host "Paystack $($Mode.ToUpper()) secret key (not echoed, not stored)" -AsSecureString
+        try {
+            $secret = Read-PaystackSecret -From $SecretFrom `
+                        -Prompt "Paystack $($Mode.ToUpper()) secret key (never echoed or stored)"
+        } catch {
+            Add-Gate $log 'paystack: the key was read' 'FAIL' $_.Exception.Message
+            [void](Write-GateSummary $log 'PAYSTACK DIAGNOSIS -- COULD NOT READ THE KEY')
+            exit 1
+        }
         try {
             if (Test-PaystackKey -Log $log -Secret $secret -Mode $Mode) {
                 $remote = Get-PaystackPlans -Secret $secret
@@ -157,8 +169,9 @@ try {
     if ($SyncPlanCodes -or $isLive) {
         Write-Host ''; Write-Host 'PLAN CODES' -ForegroundColor Cyan
         Write-Host "  reading your $($Mode.ToUpper())-mode plans from the Paystack API" -ForegroundColor DarkGray
-        if (-not (Test-CanPrompt -Log $log)) { [void](Write-GateSummary $log 'CANNOT PROMPT'); exit 1 }
-        $secret = Read-Host "Paystack $($Mode.ToUpper()) secret key (not echoed, not stored)" -AsSecureString
+        if ($SecretFrom -eq 'Prompt' -and -not (Test-CanPrompt -Log $log)) { [void](Write-GateSummary $log 'CANNOT PROMPT'); exit 1 }
+        $secret = Read-PaystackSecret -From $SecretFrom `
+                    -Prompt "Paystack $($Mode.ToUpper()) secret key (never echoed or stored)"
         try {
             $remote = Get-PaystackPlans -Secret $secret
             $r = Resolve-PaystackPlanMap -RemotePlans $remote
@@ -205,8 +218,9 @@ try {
     } elseif (-not $TestAccountId) {
         Add-Gate $log 'eleven scenarios' 'FAIL' 'pass -TestAccountId <uuid from your accounts table>'
     } else {
-        if (-not (Test-CanPrompt -Log $log)) { [void](Write-GateSummary $log 'CANNOT PROMPT'); exit 1 }
-        $secret = Read-Host 'Paystack TEST secret key, to sign the payloads (not echoed, not stored)' -AsSecureString
+        if ($SecretFrom -eq 'Prompt' -and -not (Test-CanPrompt -Log $log)) { [void](Write-GateSummary $log 'CANNOT PROMPT'); exit 1 }
+        $secret = Read-PaystackSecret -From $SecretFrom `
+                    -Prompt 'Paystack TEST secret key, to sign the payloads (never echoed or stored)'
         try {
             Invoke-ElevenScenarios -Log $log -Secret $secret -WebhookUrl $webhookUrl `
                 -TestAccountId $TestAccountId -RepoRoot $RepoRoot
