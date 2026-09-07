@@ -45,7 +45,10 @@ function Add-Gate {
     }
     Write-Host ('  {0,-6} {1}' -f $Result, $Name) -ForegroundColor $colour
     if ($Detail) { Write-Host ('         {0}' -f $Detail) -ForegroundColor DarkGray }
-    $row
+    # Deliberately returns nothing. It used to emit the row, which meant any
+    # function that both logged a gate and returned a boolean returned BOTH --
+    # so "return $false" became @(row, $false), which is truthy. Caught by the
+    # tests for Test-PaystackKey.
 }
 
 function Test-AnyGateFailed {
@@ -369,19 +372,166 @@ function Resolve-PaystackPlanMap {
     }
 }
 
+# -----------------------------------------------------------------------------
+# PAYSTACK HTTP
+#
+# Invoke-RestMethod -ErrorAction Stop throws a generic
+# "Response status code does not indicate success" and discards the response
+# BODY -- which is where Paystack puts the only useful thing, its own message.
+# That turned a one-line diagnosis into a guessing game, so every call now goes
+# through here and the status and message are always available.
+#
+# Paystack's message field never contains the key; it is safe to print.
+# -----------------------------------------------------------------------------
+
+$script:PaystackInvoker = {
+    param([string] $Method, [string] $Uri, [hashtable] $Headers, [string] $Body)
+    $p = @{ Method = $Method; Uri = $Uri; Headers = $Headers
+            SkipHttpErrorCheck = $true; ErrorAction = 'Stop' }
+    if ($Body) { $p.Body = $Body; $p.ContentType = 'application/json' }
+    $r = Invoke-WebRequest @p
+    [pscustomobject]@{ StatusCode = [int]$r.StatusCode; Content = $r.Content }
+}
+
+function Set-PaystackInvoker {
+    param([Parameter(Mandatory)] [scriptblock] $Invoker)
+    $script:PaystackInvoker = $Invoker
+}
+
+<#
+.SYNOPSIS
+  Refuse to prompt when nothing can answer.
+.DESCRIPTION
+  Read-Host against a redirected or closed stdin does not return -- PowerShell
+  ends the script there, with exit code 0. A wrapper reading that exit code
+  would call a silent abort a success. Checked before every prompt so the
+  failure is loud instead.
+#>
+function Test-CanPrompt {
+    param([Parameter(Mandatory)] [System.Collections.IList] $Log)
+    if ([Console]::IsInputRedirected) {
+        Add-Gate $Log 'terminal: can prompt for the secret' 'FAIL' `
+            'stdin is redirected, so the secret prompt cannot be answered. Run this in an interactive terminal.'
+        return $false
+    }
+    $true
+}
+
+<#
+.SYNOPSIS
+  A safe description of a secret: enough to diagnose, never enough to use.
+.DESCRIPTION
+  Reports the key's PREFIX (sk_test_ / sk_live_ / pk_test_ ...), its length,
+  and whether it arrived with whitespace or quotes around it. Those four facts
+  identify every mistake we have actually hit -- pasting the public key,
+  pasting the live key, and a shell wrapping the value in quotes -- without
+  revealing a single character of the key body.
+#>
+function Get-SecretShape {
+    param([Parameter(Mandatory)] [AllowNull()] [securestring] $Secret)
+    if (-not $Secret -or $Secret.Length -eq 0) {
+        return [pscustomobject]@{ Prefix = '(empty)'; Length = 0; Padded = $false
+                                  Quoted = $false; NonAscii = $false; Usable = $false }
+    }
+    $raw = [System.Net.NetworkCredential]::new('', $Secret).Password
+    try {
+        $trim   = $raw.Trim()
+        $prefix = if ($trim -match '^(sk|pk)_(test|live)_') { $Matches[0] } else { '(unrecognised)' }
+        [pscustomobject]@{
+            Prefix   = $prefix
+            Length   = $trim.Length
+            Padded   = ($raw -ne $trim)
+            Quoted   = ($trim -match "^['`"].*['`"]$")
+            NonAscii = ($trim -match '[^\x20-\x7E]')
+            Usable   = ($prefix -like 'sk_*')
+        }
+    } finally { $raw = $null }
+}
+
+function Invoke-PaystackApi {
+    param(
+        [Parameter(Mandatory)] [securestring] $Secret,
+        [Parameter(Mandatory)] [string] $Path,
+        [string] $Method = 'GET',
+        [string] $JsonBody
+    )
+    # Trimmed deliberately: a trailing newline from a paste or a shell here-doc
+    # produces a header Paystack rejects, and the operator cannot see it.
+    $key = ([System.Net.NetworkCredential]::new('', $Secret).Password).Trim()
+    try {
+        $r = & $script:PaystackInvoker $Method "https://api.paystack.co$Path" `
+                @{ Authorization = "Bearer $key" } $JsonBody
+    } finally { $key = $null }
+
+    $parsed = $null
+    try { $parsed = $r.Content | ConvertFrom-Json -ErrorAction Stop } catch { }
+
+    # Property lookup by indexer, never by .Properties.Name -contains: under
+    # StrictMode the latter throws on an empty object, which turned a clean
+    # "no authorization_url" failure into an unrelated crash.
+    $prop = { param($o, $n) if ($o) { $o.PSObject.Properties[$n] } else { $null } }
+    $statusProp = & $prop $parsed 'status'
+    $msgProp    = & $prop $parsed 'message'
+    $dataProp   = & $prop $parsed 'data'
+
+    [pscustomobject]@{
+        StatusCode = $r.StatusCode
+        Ok         = ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300 -and
+                      $statusProp -and [bool]$statusProp.Value)
+        Message    = if ($msgProp) { [string]$msgProp.Value } else { '(no message field in the response body)' }
+        Data       = if ($dataProp) { $dataProp.Value } else { $null }
+    }
+}
+
+<#
+.SYNOPSIS
+  Is this key usable, and what does Paystack say about it?
+#>
+function Test-PaystackKey {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IList] $Log,
+        [Parameter(Mandatory)] [securestring] $Secret,
+        [Parameter(Mandatory)] [ValidateSet('Test', 'Live')] [string] $Mode
+    )
+    $shape = Get-SecretShape -Secret $Secret
+    $desc  = "prefix $($shape.Prefix), $($shape.Length) chars" +
+             $(if ($shape.Padded)   { ', HAS SURROUNDING WHITESPACE' }) +
+             $(if ($shape.Quoted)   { ', HAS SURROUNDING QUOTES' }) +
+             $(if ($shape.NonAscii) { ', CONTAINS NON-ASCII' })
+
+    if (-not $shape.Usable) {
+        Add-Gate $Log 'paystack: the key is a SECRET key' 'FAIL' `
+            "$desc -- a secret key starts sk_. A pk_ key is the PUBLIC key and cannot call this API."
+        return $false
+    }
+    if ($Mode -eq 'Test' -and $shape.Prefix -eq 'sk_live_') {
+        Add-Gate $Log 'paystack: the key matches the mode' 'FAIL' `
+            "$desc -- that is a LIVE key and this is a TEST run. Refusing."
+        return $false
+    }
+    if ($Mode -eq 'Live' -and $shape.Prefix -eq 'sk_test_') {
+        Add-Gate $Log 'paystack: the key matches the mode' 'FAIL' "$desc -- that is a TEST key and this is a LIVE run."
+        return $false
+    }
+    Add-Gate $Log 'paystack: the key is a SECRET key for this mode' 'PASS' $desc
+
+    $r = Invoke-PaystackApi -Secret $Secret -Path '/plan?perPage=1'
+    if ($r.Ok) {
+        Add-Gate $Log 'paystack: the API accepts the key' 'PASS' "HTTP $($r.StatusCode)"
+        return $true
+    }
+    Add-Gate $Log 'paystack: the API accepts the key' 'FAIL' `
+        "HTTP $($r.StatusCode) -- Paystack says: $($r.Message)"
+    $false
+}
+
 function Get-PaystackPlans {
     param([Parameter(Mandatory)] [securestring] $Secret)
-    $key = [System.Net.NetworkCredential]::new('', $Secret).Password
-    try {
-        $res = Invoke-RestMethod -Method Get -Uri 'https://api.paystack.co/plan?perPage=100' `
-            -Headers @{ Authorization = "Bearer $key" } -ErrorAction Stop
-        if (-not $res.status) { throw 'Paystack returned status=false' }
-        return $res.data
-    } finally {
-        # do not leave the plaintext key in a variable a later error can dump
-        $key = $null
-        [System.GC]::Collect()
+    $r = Invoke-PaystackApi -Secret $Secret -Path '/plan?perPage=100'
+    if (-not $r.Ok) {
+        throw "Paystack returned HTTP $($r.StatusCode): $($r.Message)"
     }
+    $r.Data
 }
 
 function Write-PlanCodeMapSql {
@@ -411,6 +561,52 @@ function Write-PlanCodeMapSql {
 
     Set-Content -LiteralPath $OutPath -Value $sql -NoNewline:$false
     $OutPath
+}
+
+<#
+.SYNOPSIS
+  Reproduce the checkout initialization locally and print what Paystack says.
+.DESCRIPTION
+  The edge function's failure is only visible in its logs, and the CLI has no
+  `functions logs` subcommand. This sends the SAME request body the function
+  sends, from here, so the provider's own status and message are on screen.
+
+  It creates a pending transaction and charges nothing -- no card is entered,
+  and an uninitialised transaction expires on its own. TEST mode only.
+#>
+function Test-PaystackInitialize {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IList] $Log,
+        [Parameter(Mandatory)] [securestring] $Secret,
+        [Parameter(Mandatory)] [string] $PlanCode,
+        [Parameter(Mandatory)] [int] $Kobo,
+        [Parameter(Mandatory)] [string] $Email,
+        [Parameter(Mandatory)] [string] $CallbackUrl,
+        [string] $Label = 'initialize'
+    )
+    # Byte-identical in shape to supabase/functions/paystack-checkout/lib.ts
+    # initializeBody(). If this succeeds and the function does not, the
+    # difference is the function's environment, not the request.
+    $body = @{
+        email        = $Email
+        amount       = "$Kobo"
+        currency     = 'NGN'
+        callback_url = $CallbackUrl
+        plan         = $PlanCode
+        metadata     = @{ account_id = '00000000-0000-0000-0000-000000000000'
+                          plan_id    = 'diagnostic' }
+    } | ConvertTo-Json -Depth 5
+
+    $r = Invoke-PaystackApi -Secret $Secret -Path '/transaction/initialize' -Method 'POST' -JsonBody $body
+    $urlProp = if ($r.Data) { $r.Data.PSObject.Properties['authorization_url'] } else { $null }
+    $url = if ($urlProp) { [string]$urlProp.Value } else { $null }
+    if ($r.Ok -and $url) {
+        Add-Gate $Log "paystack: $Label ($PlanCode)" 'PASS' "HTTP $($r.StatusCode), authorization_url returned"
+        return $true
+    }
+    Add-Gate $Log "paystack: $Label ($PlanCode)" 'FAIL' `
+        "HTTP $($r.StatusCode) -- Paystack says: $($r.Message)"
+    $false
 }
 
 # -----------------------------------------------------------------------------

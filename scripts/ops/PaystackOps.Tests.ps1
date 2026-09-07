@@ -315,6 +315,173 @@ It 'and a CLI that is not logged in still FAILS closed' {
     Expect (Test-AnyGateFailed $log) $true 'should have failed'
 }
 
+
+# =============================================================================
+# REGRESSION: the 400 that told us nothing
+#
+# Invoke-RestMethod -ErrorAction Stop threw
+#   "Response status code does not indicate success: 400 (Bad Request)."
+# and discarded the response body, which is where Paystack puts the reason.
+# Every call now surfaces status AND message.
+# =============================================================================
+
+function Set-FakePaystack {
+    param([int] $Status, [string] $Json)
+    Set-PaystackInvoker {
+        param([string]$Method, [string]$Uri, [hashtable]$Headers, [string]$Body)
+        # the header must be exactly "Bearer <key>" with nothing else attached
+        $global:LastAuth = $Headers.Authorization
+        $global:LastUri  = $Uri
+        $global:LastBody = $Body
+        [pscustomobject]@{ StatusCode = $Status; Content = $Json }
+    }.GetNewClosure()
+}
+function Sec { param([string]$s) ConvertTo-SecureString $s -AsPlainText -Force }
+
+Write-Host "`nInvoke-PaystackApi  (regression: the opaque 400)`n"
+
+It 'REGRESSION: a 400 surfaces Paystack own message instead of throwing' {
+    Set-PaystackInvoker { param($m,$u,$h,$b)
+        [pscustomobject]@{ StatusCode = 400; Content = '{"status":false,"message":"Invalid key"}' } }
+    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_abc') -Path '/plan'
+    Expect $r.StatusCode 400
+    Expect $r.Ok $false
+    Expect $r.Message 'Invalid key'
+}
+
+It 'a 200 with status:false is NOT treated as success' {
+    Set-PaystackInvoker { param($m,$u,$h,$b)
+        [pscustomobject]@{ StatusCode = 200; Content = '{"status":false,"message":"Plan not found"}' } }
+    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_abc') -Path '/plan'
+    Expect $r.Ok $false
+    Expect $r.Message 'Plan not found'
+}
+
+It 'a non-JSON body does not crash and is reported honestly' {
+    Set-PaystackInvoker { param($m,$u,$h,$b)
+        [pscustomobject]@{ StatusCode = 502; Content = '<html>bad gateway</html>' } }
+    $r = Invoke-PaystackApi -Secret (Sec 'sk_test_abc') -Path '/plan'
+    Expect $r.Ok $false
+    Expect $r.StatusCode 502
+    ExpectMatch $r.Message 'no message field'
+}
+
+It 'the Authorization header is exactly Bearer + key, and the key is trimmed' {
+    Set-FakePaystack 200 '{"status":true,"data":[]}'
+    [void](Invoke-PaystackApi -Secret (Sec "  sk_test_padded`n") -Path '/plan')
+    Expect $global:LastAuth 'Bearer sk_test_padded' 'Authorization header'
+}
+
+It 'the URI is built against api.paystack.co' {
+    Set-FakePaystack 200 '{"status":true,"data":[]}'
+    [void](Invoke-PaystackApi -Secret (Sec 'sk_test_abc') -Path '/plan?perPage=100')
+    Expect $global:LastUri 'https://api.paystack.co/plan?perPage=100'
+}
+
+Write-Host "`nGet-SecretShape  (safe description, never the key)`n"
+
+It 'describes a good test key without revealing it' {
+    $sh = Get-SecretShape -Secret (Sec 'sk_test_0123456789abcdef')
+    Expect $sh.Prefix 'sk_test_'
+    Expect $sh.Usable $true
+    Expect $sh.Padded $false
+    if ("$sh" -match '0123456789') { throw 'the key body leaked into the shape' }
+}
+
+It 'catches the PUBLIC key being pasted instead of the secret' {
+    $sh = Get-SecretShape -Secret (Sec 'pk_test_0123456789')
+    Expect $sh.Prefix 'pk_test_'
+    Expect $sh.Usable $false
+}
+
+It 'catches surrounding whitespace and quotes -- the shell-paste mistakes' {
+    Expect (Get-SecretShape -Secret (Sec "  sk_test_abc  ")).Padded $true
+    Expect (Get-SecretShape -Secret (Sec "'sk_test_abc'")).Quoted $true
+}
+
+It 'reports an unrecognised key shape rather than assuming it is fine' {
+    $sh = Get-SecretShape -Secret (Sec 'not-a-key-at-all')
+    Expect $sh.Prefix '(unrecognised)'
+    Expect $sh.Usable $false
+}
+
+Write-Host "`nTest-PaystackKey  (refusals)`n"
+
+It 'REFUSES a public key before any request is made' {
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'pk_test_abc') -Mode 'Test') $false
+    Expect (Test-AnyGateFailed $log) $true
+}
+
+It 'REFUSES a LIVE key during a TEST run' {
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_live_abc') -Mode 'Test') $false
+    ExpectMatch (($log | ForEach-Object Detail) -join ' ') 'LIVE key and this is a TEST run'
+}
+
+It 'REFUSES a TEST key during a LIVE run' {
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_abc') -Mode 'Live') $false
+}
+
+It 'reports the provider message when the key is rejected' {
+    Set-PaystackInvoker { param($m,$u,$h,$b)
+        [pscustomobject]@{ StatusCode = 401; Content = '{"status":false,"message":"Invalid key"}' } }
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_abc') -Mode 'Test') $false
+    ExpectMatch (($log | ForEach-Object Detail) -join ' ') 'HTTP 401 .* Invalid key'
+}
+
+It 'PASSES a good key' {
+    Set-PaystackInvoker { param($m,$u,$h,$b)
+        [pscustomobject]@{ StatusCode = 200; Content = '{"status":true,"data":[]}' } }
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackKey -Log $log -Secret (Sec 'sk_test_abc') -Mode 'Test') $true
+    Expect (Test-AnyGateFailed $log) $false
+}
+
+Write-Host "`nTest-PaystackInitialize  (the checkout request, replayed locally)`n"
+
+It 'sends the same body shape the edge function sends' {
+    Set-FakePaystack 200 '{"status":true,"data":{"authorization_url":"https://checkout.paystack.com/x"}}'
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_abc') -PlanCode 'PLN_x' `
+              -Kobo 350000 -Email 'a@b.test' -CallbackUrl 'https://x.test/cb') $true
+    $sent = $global:LastBody | ConvertFrom-Json
+    Expect $sent.amount '350000'
+    Expect $sent.plan 'PLN_x'
+    Expect $sent.currency 'NGN'
+    Expect $sent.metadata.plan_id 'diagnostic'
+}
+
+It 'REGRESSION: a bad plan code reports Plan not found, not a bare 400' {
+    Set-PaystackInvoker { param($m,$u,$h,$b)
+        [pscustomobject]@{ StatusCode = 400; Content = '{"status":false,"message":"Plan not found"}' } }
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_abc') -PlanCode 'PLN_wrong' `
+              -Kobo 350000 -Email 'a@b.test' -CallbackUrl 'https://x.test/cb') $false
+    ExpectMatch (($log | ForEach-Object Detail) -join ' ') 'HTTP 400 .* Plan not found'
+}
+
+It 'a 200 with no authorization_url is a FAIL, not a pass' {
+    Set-PaystackInvoker { param($m,$u,$h,$b)
+        [pscustomobject]@{ StatusCode = 200; Content = '{"status":true,"data":{}}' } }
+    $log = [System.Collections.ArrayList]::new()
+    Expect (Test-PaystackInitialize -Log $log -Secret (Sec 'sk_test_abc') -PlanCode 'PLN_x' `
+              -Kobo 1 -Email 'a@b.test' -CallbackUrl 'u') $false
+}
+
+Write-Host "`nGet-PaystackPlans  (legible failure)`n"
+
+It 'REGRESSION: throws a message naming the status and reason' {
+    Set-PaystackInvoker { param($m,$u,$h,$b)
+        [pscustomobject]@{ StatusCode = 400; Content = '{"status":false,"message":"Invalid key"}' } }
+    $threw = $false
+    try { [void](Get-PaystackPlans -Secret (Sec 'sk_test_abc')) }
+    catch { $threw = $true; ExpectMatch $_.Exception.Message 'HTTP 400.*Invalid key' }
+    Expect $threw $true 'should have thrown'
+}
+
 Write-Host ''
 Write-Host ("{0} passed, {1} failed" -f $script:pass, $script:fail) `
     -ForegroundColor $(if ($script:fail) { 'Red' } else { 'Green' })

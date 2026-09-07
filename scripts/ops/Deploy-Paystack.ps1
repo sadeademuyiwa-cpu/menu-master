@@ -48,6 +48,11 @@ param(
     # Re-read the four plan codes from Paystack and write a mapping file.
     [switch] $SyncPlanCodes,
 
+    # Ask Paystack directly what is wrong: key shape, key acceptance, and a
+    # real initialize call using the request the edge function sends. Touches
+    # no database, deploys nothing, charges nothing.
+    [switch] $DiagnosePaystack,
+
     # LIVE only. Without it, -Mode Live refuses.
     [switch] $Confirm
 )
@@ -65,6 +70,49 @@ try {
 
     Write-Host ''
     Write-Host "MENU MASTER NG -- Paystack deployment, $($Mode.ToUpper()) mode" -ForegroundColor Cyan
+
+    # -- DIAGNOSE: ask the provider, do nothing else -------------------------
+    if ($DiagnosePaystack) {
+        Write-Host 'PAYSTACK DIAGNOSIS -- reads only. No deploy, no database, no charge.' -ForegroundColor Cyan
+        Write-Host ''
+        if (-not (Test-CanPrompt -Log $log)) {
+            [void](Write-GateSummary $log 'PAYSTACK DIAGNOSIS -- CANNOT RUN')
+            exit 1
+        }
+        $secret = Read-Host "Paystack $($Mode.ToUpper()) secret key (not echoed, not stored)" -AsSecureString
+        try {
+            if (Test-PaystackKey -Log $log -Secret $secret -Mode $Mode) {
+                $remote = Get-PaystackPlans -Secret $secret
+                Write-Host ''
+                Write-Host '  plans Paystack actually holds for this key:' -ForegroundColor DarkGray
+                @($remote) | Where-Object { $_ } | ForEach-Object {
+                    Write-Host ("    {0,-30} {1,-24} N{2,-10} {3}" -f `
+                        $_.name, $_.plan_code, ([int]$_.amount / 100), $_.interval)
+                }
+                Write-Host ''
+                $r = Resolve-PaystackPlanMap -RemotePlans $remote
+                if ($r.Ok) {
+                    Add-Gate $log 'plans: all four resolved from the provider' 'PASS' `
+                        ((@($r.Map.Values | ForEach-Object { "$($_.PlanId)=$($_.Code)" })) -join ', ')
+                    foreach ($k in @('costing', 'founding_trading')) {
+                        if ($r.Map.Contains($k)) {
+                            [void](Test-PaystackInitialize -Log $log -Secret $secret `
+                                -PlanCode $r.Map[$k].Code -Kobo $r.Map[$k].Kobo `
+                                -Email 'diagnostic@menumasterng.com' `
+                                -CallbackUrl 'https://menumasterng.com/checkout/callback' `
+                                -Label "initialize $k")
+                        }
+                    }
+                } else {
+                    Add-Gate $log 'plans: all four resolved from the provider' 'FAIL' ($r.Problems -join "`n         ")
+                }
+            }
+        } finally { $secret = $null }
+
+        $ok = Write-GateSummary $log 'PAYSTACK DIAGNOSIS'
+        exit ([int](-not $ok))
+    }
+
     Write-Host "project $ProjectRef   repo $RepoRoot" -ForegroundColor DarkGray
     Write-Host ''
 
@@ -109,6 +157,7 @@ try {
     if ($SyncPlanCodes -or $isLive) {
         Write-Host ''; Write-Host 'PLAN CODES' -ForegroundColor Cyan
         Write-Host "  reading your $($Mode.ToUpper())-mode plans from the Paystack API" -ForegroundColor DarkGray
+        if (-not (Test-CanPrompt -Log $log)) { [void](Write-GateSummary $log 'CANNOT PROMPT'); exit 1 }
         $secret = Read-Host "Paystack $($Mode.ToUpper()) secret key (not echoed, not stored)" -AsSecureString
         try {
             $remote = Get-PaystackPlans -Secret $secret
@@ -156,6 +205,7 @@ try {
     } elseif (-not $TestAccountId) {
         Add-Gate $log 'eleven scenarios' 'FAIL' 'pass -TestAccountId <uuid from your accounts table>'
     } else {
+        if (-not (Test-CanPrompt -Log $log)) { [void](Write-GateSummary $log 'CANNOT PROMPT'); exit 1 }
         $secret = Read-Host 'Paystack TEST secret key, to sign the payloads (not echoed, not stored)' -AsSecureString
         try {
             Invoke-ElevenScenarios -Log $log -Secret $secret -WebhookUrl $webhookUrl `

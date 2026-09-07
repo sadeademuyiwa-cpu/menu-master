@@ -134,14 +134,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ),
   });
 
-  if (!init.ok) {
-    // never echo Paystack's body
-    console.error(`paystack-checkout: initialize returned ${init.status}`);
+  // Paystack's own `message` is the only thing that says WHY -- "Plan not
+  // found", "Invalid key" -- and it never contains the key, so it is logged.
+  // Without it the status alone sent us hunting through three layers.
+  // It is logged, never returned: the browser still gets a fixed code.
+  const body = await init.json().catch(() => null);
+  const why = typeof body?.message === "string" ? body.message : "(no message)";
+
+  if (!init.ok || !body?.status) {
+    console.error(`paystack-checkout: initialize HTTP ${init.status}: ${why}`);
     return json(safeError("provider_unavailable"), 502);
   }
-  const body = await init.json();
-  if (!body?.status || !body?.data?.authorization_url) {
-    console.error("paystack-checkout: initialize returned no authorization_url");
+  if (!body?.data?.authorization_url) {
+    console.error(`paystack-checkout: initialize returned no authorization_url: ${why}`);
     return json(safeError("provider_unavailable"), 502);
   }
 
