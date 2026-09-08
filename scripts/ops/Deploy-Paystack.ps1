@@ -53,6 +53,11 @@ param(
     # no database, deploys nothing, charges nothing.
     [switch] $DiagnosePaystack,
 
+    # Verify a key against Paystack, store it as the Supabase secret, redeploy
+    # the checkout function, and prove by digest that what is stored is what
+    # was verified. Touches no database.
+    [switch] $SetSecret,
+
     # Where to read the Paystack secret from. Prompt uses Get-Credential's
     # password field; Clipboard reads what you already copied, typing nothing;
     # Env reads $env:PAYSTACK_SECRET_KEY from your own session.
@@ -75,6 +80,76 @@ try {
 
     Write-Host ''
     Write-Host "MENU MASTER NG -- Paystack deployment, $($Mode.ToUpper()) mode" -ForegroundColor Cyan
+
+    # -- SET SECRET: verify first, then store, then prove ---------------------
+    if ($SetSecret) {
+        Write-Host 'SET THE PAYSTACK SECRET -- verified before it is stored.' -ForegroundColor Cyan
+        Write-Host 'The key is never printed, never echoed, and never put on a command line.' -ForegroundColor DarkGray
+        Write-Host ''
+
+        if ($SecretFrom -eq 'Prompt' -and -not (Test-CanPrompt -Log $log)) {
+            [void](Write-GateSummary $log 'SET SECRET -- CANNOT RUN'); exit 1
+        }
+        try {
+            $secret = Read-PaystackSecret -From $SecretFrom `
+                        -Prompt "Paystack $($Mode.ToUpper()) secret key (never echoed or stored)"
+        } catch {
+            Add-Gate $log 'secret: the key was read' 'FAIL' $_.Exception.Message
+            [void](Write-GateSummary $log 'SET SECRET -- COULD NOT READ THE KEY'); exit 1
+        }
+
+        try {
+            # NEVER store a key the provider has not just accepted. Storing an
+            # unverified secret is how the broken value got there.
+            if (-not (Test-PaystackKey -Log $log -Secret $secret -Mode $Mode)) {
+                [void](Write-GateSummary $log 'SET SECRET -- REFUSED, the key was not accepted by Paystack')
+                exit 1
+            }
+
+            Test-SupabaseLink -Log $log -ProjectRef $ProjectRef -RepoRoot $RepoRoot
+            if (Test-AnyGateFailed $log) {
+                [void](Write-GateSummary $log 'SET SECRET -- REFUSED'); exit 1
+            }
+
+            $before = Get-SecretDigest -SecretsListOutput (Invoke-Supabase @('secrets','list')).Output `
+                        -Name 'PAYSTACK_SECRET_KEY'
+
+            $scratch = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+            if (-not (Set-PaystackSecretInSupabase -Log $log -Secret $secret -ScratchDir $scratch)) {
+                [void](Write-GateSummary $log 'SET SECRET -- FAILED'); exit 1
+            }
+
+            # Prove what is stored, without either value on screen.
+            $after = Get-SecretDigest -SecretsListOutput (Invoke-Supabase @('secrets','list')).Output `
+                       -Name 'PAYSTACK_SECRET_KEY'
+            $mine  = Get-Sha256Hex -Secret $secret
+
+            if ($after -and $mine -and ($after -eq $mine -or $mine.StartsWith($after))) {
+                Add-Gate $log 'secret: what is stored IS the key Paystack accepted' 'PASS' `
+                    'digests match; neither value shown'
+            } elseif ($before -and $after -and $before -ne $after) {
+                Add-Gate $log 'secret: the stored value changed' 'PASS' `
+                    'the digest moved, so the old value is gone. Byte-equality is inconclusive: this CLI computes its digest differently from a plain sha256.'
+            } else {
+                Add-Gate $log 'secret: the stored value changed' 'FAIL' `
+                    'the digest did not move. The secret may not have been written -- do not proceed.'
+            }
+        } finally { $secret = $null }
+
+        # The function reads the secret at runtime, but a redeploy is what
+        # guarantees the new value AND the newer logging are both live.
+        Write-Host ''; Write-Host 'REDEPLOY' -ForegroundColor Cyan
+        $r = Invoke-Supabase @('functions', 'deploy', 'paystack-checkout')
+        if ($r.ExitCode -eq 0) { Add-Gate $log 'deploy: paystack-checkout' 'PASS' }
+        else { Add-Gate $log 'deploy: paystack-checkout' 'FAIL' $r.Output.Trim() }
+        Test-FunctionsActive -Log $log -Names @('paystack-checkout')
+
+        Add-Gate $log 'browser: confirm end to end' 'MANUAL' `
+            'open /subscribe on the preview and click a plan -- it should now redirect to Paystack rather than say it did not respond'
+
+        $ok = Write-GateSummary $log 'SET THE PAYSTACK SECRET'
+        exit ([int](-not $ok))
+    }
 
     # -- DIAGNOSE: ask the provider, do nothing else -------------------------
     if ($DiagnosePaystack) {

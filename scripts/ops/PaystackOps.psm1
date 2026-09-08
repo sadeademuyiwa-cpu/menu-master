@@ -257,6 +257,96 @@ function Test-SecretNames {
     }
 }
 
+<#
+.SYNOPSIS
+  Prove what is stored without revealing it.
+.DESCRIPTION
+  `supabase secrets list` prints a DIGEST beside each name. Hashing the key we
+  just verified and comparing the two says whether the stored secret is the
+  same bytes -- with neither value on screen. If the CLI's digest is computed
+  some other way the comparison is INCONCLUSIVE, which is reported as such
+  rather than as a mismatch: an unknown is not evidence of a fault.
+#>
+function Get-Sha256Hex {
+    param([Parameter(Mandatory)] [securestring] $Secret)
+    $plain = ConvertTo-CleanSecretText ([System.Net.NetworkCredential]::new('', $Secret).Password)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($plain)) |
+                ForEach-Object { $_.ToString('x2') }) -join ''
+        } finally { $sha.Dispose() }
+    } finally { $plain = $null; [System.GC]::Collect() }
+}
+
+function Get-SecretDigest {
+    param(
+        [Parameter(Mandatory)] [AllowNull()] $SecretsListOutput,
+        [Parameter(Mandatory)] [string] $Name
+    )
+    # NAME and DIGEST on one row, whatever the separator glyph rendered as.
+    # Count first: indexing [0] into an empty array throws under StrictMode,
+    # which turned "this secret is not set" into an unrelated crash.
+    $matched = @(Split-CliLines $SecretsListOutput |
+                 Where-Object { $_ -match "(?<![\w-])$([regex]::Escape($Name))(?![\w-])" })
+    if ($matched.Count -eq 0) { return $null }
+    $line = $matched[0]
+    $hex = [regex]::Match($line, '[0-9a-f]{16,}')
+    if ($hex.Success) { return $hex.Value }
+    $null
+}
+
+<#
+.SYNOPSIS
+  Put a verified key into the Supabase secret store.
+.DESCRIPTION
+  The key is never printed, never echoed, and never placed on a command line:
+  it goes through --env-file, written to the session scratchpad and overwritten
+  then deleted immediately afterwards. PowerShell history records the command
+  you typed, which mentions a file path and no value.
+
+  It refuses to store a key Paystack has not just accepted. Storing an
+  unverified secret is how the current broken value got there.
+#>
+function Set-PaystackSecretInSupabase {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IList] $Log,
+        [Parameter(Mandatory)] [securestring] $Secret,
+        [Parameter(Mandatory)] [string] $ScratchDir,
+        [string] $Name = 'PAYSTACK_SECRET_KEY'
+    )
+    $envFile = Join-Path $ScratchDir ("mm-" + [guid]::NewGuid().ToString('N') + ".env")
+    $plain = $null
+    try {
+        $plain = ConvertTo-CleanSecretText ([System.Net.NetworkCredential]::new('', $Secret).Password)
+        Set-Content -LiteralPath $envFile -Value "$Name=$plain" -NoNewline -Encoding utf8
+
+        $r = Invoke-Supabase @('secrets', 'set', '--env-file', $envFile)
+        if ($r.ExitCode -ne 0 -and $r.Output -match 'unknown flag|unknown shorthand|--env-file') {
+            # Older CLIs have no --env-file. Fall back to the inline form: the
+            # value reaches argv, which is worse, so it is said out loud.
+            Add-Gate $Log 'secret: --env-file supported' 'SKIP' `
+                'this CLI has no --env-file; falling back to the inline form, which puts the value in the process arguments'
+            $r = Invoke-Supabase @('secrets', 'set', "$Name=$plain")
+        }
+        if ($r.ExitCode -eq 0) {
+            Add-Gate $Log "secret: $Name stored" 'PASS' 'value never printed'
+            return $true
+        }
+        Add-Gate $Log "secret: $Name stored" 'FAIL' $r.Output.Trim()
+        return $false
+    } finally {
+        $plain = $null
+        if (Test-Path -LiteralPath $envFile) {
+            # overwrite before unlinking so the bytes do not survive as a
+            # recoverable deleted file
+            try { Set-Content -LiteralPath $envFile -Value ('0' * 512) -NoNewline -ErrorAction SilentlyContinue } catch { }
+            Remove-Item -LiteralPath $envFile -Force -ErrorAction SilentlyContinue
+        }
+        [System.GC]::Collect()
+    }
+}
+
 # -----------------------------------------------------------------------------
 # 4. Deploy. The two flags differ on purpose and the difference is the security
 #    boundary: the webhook authenticates by HMAC alone and would be locked out

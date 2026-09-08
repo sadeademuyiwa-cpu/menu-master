@@ -616,6 +616,121 @@ It 'refuses an environment variable holding only a control character' {
     } finally { Remove-Item Env:MM_TEST_KEY -ErrorAction SilentlyContinue }
 }
 
+
+# =============================================================================
+# SETTING THE SECRET
+#
+# The site said provider_unavailable while the very same key passed 5/5 gates
+# from the operator's terminal. The stored secret was set with the reader that
+# returned one character, so what Supabase holds is not what Paystack accepts.
+# These cover the replacement path.
+# =============================================================================
+
+Write-Host "`nGet-SecretDigest`n"
+
+$digestTable = "  NAME                 | DIGEST`r`n" +
+               "  PAYSTACK_SECRET_KEY  | 4a1b2c3d4e5f60718293a4b5c6d7e8f9`r`n" +
+               "  SITE_URL             | 00112233445566778899aabbccddeeff`r`n"
+
+It 'reads the digest for the right name' {
+    Expect (Get-SecretDigest -SecretsListOutput $digestTable -Name 'PAYSTACK_SECRET_KEY') `
+        '4a1b2c3d4e5f60718293a4b5c6d7e8f9'
+    Expect (Get-SecretDigest -SecretsListOutput $digestTable -Name 'SITE_URL') `
+        '00112233445566778899aabbccddeeff'
+}
+
+It 'returns nothing for a name that is not there, rather than a wrong digest' {
+    Expect (Get-SecretDigest -SecretsListOutput $digestTable -Name 'NOT_PRESENT') $null
+}
+
+It 'survives null, empty and mangled output' {
+    Expect (Get-SecretDigest -SecretsListOutput $null -Name 'PAYSTACK_SECRET_KEY') $null
+    Expect (Get-SecretDigest -SecretsListOutput '' -Name 'PAYSTACK_SECRET_KEY') $null
+    Expect (Get-SecretDigest -SecretsListOutput "  PAYSTACK_SECRET_KEY  ? no-digest-here" `
+              -Name 'PAYSTACK_SECRET_KEY') $null
+}
+
+Write-Host "`nGet-Sha256Hex`n"
+
+It 'hashes the CLEANED key, so a wrapped paste and a clean one agree' {
+    $k = 'sk_test_FIXTURE_not_a_real_key_aaaa'
+    $clean   = Get-Sha256Hex -Secret (Sec $k)
+    $wrapped = Get-Sha256Hex -Secret (Sec "$ESC[200~$k$ESC[201~")
+    Expect $wrapped $clean 'a wrapped paste hashes to the same value'
+    Expect $clean.Length 64 'sha256 hex length'
+    if ($clean -match 'FIXTURE') { throw 'the key leaked into its own digest' }
+}
+
+It 'different keys hash differently' {
+    $a = Get-Sha256Hex -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa')
+    $b = Get-Sha256Hex -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_bbbb')
+    if ($a -eq $b) { throw 'two different keys produced the same digest' }
+}
+
+Write-Host "`nSet-PaystackSecretInSupabase`n"
+
+It 'writes the key to an env file, then leaves NOTHING behind' {
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("mmsec" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    try {
+        $seen = $null
+        Set-SupabaseInvoker {
+            param([string[]] $CliArgs)
+            # capture what the CLI would have been handed
+            $global:LastCliArgs = $CliArgs
+            $i = [array]::IndexOf($CliArgs, '--env-file')
+            if ($i -ge 0) { $global:LastEnvFileBody = Get-Content -Raw -LiteralPath $CliArgs[$i + 1] }
+            [pscustomobject]@{ ExitCode = 0; Output = 'ok' }
+        }
+        $log = [System.Collections.ArrayList]::new()
+        Expect (Set-PaystackSecretInSupabase -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') `
+                  -ScratchDir $dir) $true
+
+        ExpectMatch $global:LastEnvFileBody 'PAYSTACK_SECRET_KEY=sk_test_FIXTURE_not_a_real_key_aaaa'
+        # the key must never appear in the arguments
+        if (($global:LastCliArgs -join ' ') -match 'sk_test_FIXTURE') {
+            throw 'the key reached the command line'
+        }
+        # and the file must be gone
+        Expect (@(Get-ChildItem -Path $dir -File).Count) 0 'files left in the scratch directory'
+    } finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
+}
+
+It 'shreds the env file even when the CLI fails' {
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("mmsec" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    try {
+        Set-SupabaseInvoker { param($a) [pscustomobject]@{ ExitCode = 1; Output = 'nope' } }
+        $log = [System.Collections.ArrayList]::new()
+        Expect (Set-PaystackSecretInSupabase -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') `
+                  -ScratchDir $dir) $false
+        Expect (@(Get-ChildItem -Path $dir -File).Count) 0 'files left behind after a failure'
+        Expect (Test-AnyGateFailed $log) $true
+    } finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
+}
+
+It 'falls back to the inline form on a CLI without --env-file, and says so' {
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("mmsec" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    try {
+        $global:Calls = 0
+        Set-SupabaseInvoker {
+            param([string[]] $CliArgs)
+            $global:Calls++
+            if ($CliArgs -contains '--env-file') {
+                return [pscustomobject]@{ ExitCode = 1; Output = 'unknown flag: --env-file' }
+            }
+            [pscustomobject]@{ ExitCode = 0; Output = 'ok' }
+        }
+        $log = [System.Collections.ArrayList]::new()
+        Expect (Set-PaystackSecretInSupabase -Log $log -Secret (Sec 'sk_test_FIXTURE_not_a_real_key_aaaa') `
+                  -ScratchDir $dir) $true
+        Expect $global:Calls 2 'it retried'
+        ExpectMatch (($log | ForEach-Object Detail) -join ' ') 'process arguments'
+        Expect (@(Get-ChildItem -Path $dir -File).Count) 0 'files left behind'
+    } finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
+}
+
 Write-Host ''
 Write-Host ("{0} passed, {1} failed" -f $script:pass, $script:fail) `
     -ForegroundColor $(if ($script:fail) { 'Red' } else { 'Green' })
