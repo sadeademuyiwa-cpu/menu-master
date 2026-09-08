@@ -74,6 +74,27 @@ export async function entitlementStatus(): Promise<EntitlementStatus | null> {
   return row as EntitlementStatus
 }
 
+/**
+ * Whether this account has paid for Sales.
+ *
+ * fn_my_has_sales() is the SAME predicate the thirteen Sales write policies
+ * consult, so the screen and the database cannot disagree about what a plan
+ * grants. The database remains the authority -- a false here hides a button,
+ * it does not protect anything. RLS does that, and still would if this
+ * returned true wrongly.
+ *
+ * Null when the function is absent (0051 not yet applied) or the lookup fails.
+ * Callers treat null as "do not claim either way" rather than as "no": telling
+ * a paying customer they cannot sell would be worse than showing a button the
+ * database will refuse.
+ */
+export async function hasSalesEntitlement(): Promise<boolean | null> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('fn_my_has_sales')
+  if (error || data === null || data === undefined) return null
+  return data === true
+}
+
 type PgError = { code?: string; message?: string; details?: string | null } | null
 
 /**

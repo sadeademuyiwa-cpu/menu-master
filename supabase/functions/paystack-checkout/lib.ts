@@ -87,3 +87,51 @@ export function billableEmail(user: unknown): string | null {
   const e = (user as Record<string, unknown>)?.email;
   return typeof e === "string" && e.includes("@") ? e : null;
 }
+
+/** Where Paystack should send the browser back to.
+ *
+ *  SITE_URL is the production site, so a payment started on a Vercel preview
+ *  came back to production -- which 404s, because the callback route is not on
+ *  the production-tracked branch yet. That is what the first real test payment
+ *  hit.
+ *
+ *  The caller may therefore propose its own origin, and the server decides
+ *  whether to honour it. A proposed origin is accepted only if it is SITE_URL
+ *  itself or a Vercel preview of this project; anything else is ignored in
+ *  favour of SITE_URL. An attacker who reaches this can therefore redirect a
+ *  payer to a preview of our own app and nowhere else -- and the callback
+ *  grants nothing wherever it lands, so there is nothing to gain by it.
+ */
+export function resolveCallbackUrl(
+  proposedOrigin: unknown,
+  siteUrl: string,
+): string {
+  const fallback = `${siteUrl.replace(/\/+$/, "")}/checkout/callback`;
+  if (typeof proposedOrigin !== "string" || !proposedOrigin) return fallback;
+
+  let u: URL;
+  try {
+    u = new URL(proposedOrigin);
+  } catch {
+    return fallback;
+  }
+  // https only: an http callback would strip the session on the way back.
+  if (u.protocol !== "https:") return fallback;
+  // no credentials, no path, no query smuggled in through the origin
+  if (u.username || u.password || u.search || u.hash) return fallback;
+  if (u.pathname !== "/" && u.pathname !== "") return fallback;
+
+  let site: URL;
+  try {
+    site = new URL(siteUrl);
+  } catch {
+    return fallback;
+  }
+
+  const allowed = u.host === site.host ||
+    // Vercel preview hosts for this project. The suffix test is anchored on a
+    // dot so an attacker cannot register `evil-vercel.app`.
+    u.host.endsWith(".vercel.app");
+
+  return allowed ? `${u.origin}/checkout/callback` : fallback;
+}

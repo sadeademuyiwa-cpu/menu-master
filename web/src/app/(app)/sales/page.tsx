@@ -1,7 +1,11 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import {
+  currentContext, contextRedirect, describeWriteError, withNotice, hasSalesEntitlement,
+} from '@/lib/data/context'
+import { SalesLocked } from '@/components/sales-locked'
+import { isSalesLocked } from '@/lib/sales-gate'
 import {
   PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading, HeroStat, Badge,
 } from '@/components/ui'
@@ -78,6 +82,26 @@ export default async function SalesPage({
   const ctx = await currentContext()
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/sales'))
+
+  // Ask the database whether this plan includes Sales, using the same
+  // predicate the write policies use. A Costing subscriber was being shown the
+  // full Record a Sale form and a Start Sale button that the database was
+  // always going to refuse.
+  //
+  // Null means we could not find out -- the function is absent, or the lookup
+  // failed. In that case the page renders as before: showing a button that may
+  // fail is better than telling a paying customer they cannot sell. RLS
+  // refuses either way, so nothing is protected by guessing.
+  const canSell = await hasSalesEntitlement()
+  if (isSalesLocked(canSell)) {
+    const { data: sub } = await supabase
+      .from('subscriptions').select('plan_id').maybeSingle<{ plan_id: string }>()
+    const { data: plan } = sub
+      ? await supabase.from('plans').select('name').eq('id', sub.plan_id)
+          .maybeSingle<{ name: string }>()
+      : { data: null }
+    return <SalesLocked planName={plan?.name ?? null} />
+  }
 
   const today = new Date().toISOString().slice(0, 10)
 

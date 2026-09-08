@@ -45,7 +45,10 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${session.access_token}`,
         apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       },
-      body: JSON.stringify({ tier }),
+      // Propose where to come back to. The edge function validates this
+      // against an allowlist -- a preview must return to itself, because
+      // production has no /checkout/callback until the cutover.
+      body: JSON.stringify({ tier, origin: request.nextUrl.origin }),
     })
   } catch (e) {
     console.error('checkout: could not reach the checkout function', String(e))

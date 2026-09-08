@@ -9,6 +9,7 @@ import {
   missingPlanCode,
   parseTier,
   pickAccount,
+  resolveCallbackUrl,
   safeError,
   type Quote,
 } from "./lib.ts";
@@ -139,4 +140,70 @@ Deno.test("a session without a usable email is refused before Paystack", () => {
   assertEquals(billableEmail({ email: "" }), null);
   assertEquals(billableEmail({ email: "not-an-email" }), null);
   assertEquals(billableEmail(null), null);
+});
+
+// ============================================================================
+// REGRESSION: the callback 404
+//
+// The first real test payment succeeded and Paystack sent the browser to
+// https://menumasterng.com/checkout/callback, which 404s -- the route is not
+// on the production-tracked branch. The payment was fine; the landing was not.
+// ============================================================================
+
+const SITE = "https://menumasterng.com";
+
+Deno.test("with no proposed origin it uses SITE_URL, as before", () => {
+  assertEquals(resolveCallbackUrl(undefined, SITE), `${SITE}/checkout/callback`);
+  assertEquals(resolveCallbackUrl(null, SITE), `${SITE}/checkout/callback`);
+  assertEquals(resolveCallbackUrl("", SITE), `${SITE}/checkout/callback`);
+});
+
+Deno.test("REGRESSION: a Vercel preview comes back to ITSELF, not to production", () => {
+  assertEquals(
+    resolveCallbackUrl("https://menu-master-work-abc123.vercel.app", SITE),
+    "https://menu-master-work-abc123.vercel.app/checkout/callback",
+  );
+});
+
+Deno.test("the production origin is honoured too", () => {
+  assertEquals(resolveCallbackUrl(SITE, SITE), `${SITE}/checkout/callback`);
+  assertEquals(resolveCallbackUrl(`${SITE}/`, SITE), `${SITE}/checkout/callback`);
+});
+
+Deno.test("a foreign origin is IGNORED, never redirected to", () => {
+  for (const hostile of [
+    "https://evil.test",
+    "https://menumasterng.com.evil.test",
+    "https://evil-vercel.app",              // the unanchored-suffix trap
+    "https://vercel.app.evil.test",
+    "http://menumasterng.com",              // http would strip the session
+    "https://user:pass@x.vercel.app",       // credentials in the origin
+    "https://x.vercel.app/../../elsewhere", // a path smuggled in
+    "https://x.vercel.app?next=evil",       // a query smuggled in
+    "javascript:alert(1)",
+    "not a url at all",
+    12345,
+    {},
+  ]) {
+    assertEquals(
+      resolveCallbackUrl(hostile as unknown, SITE),
+      `${SITE}/checkout/callback`,
+      `hostile origin was honoured: ${String(hostile)}`,
+    );
+  }
+});
+
+Deno.test("whatever it resolves to, the path is always our callback", () => {
+  for (const o of [undefined, SITE, "https://p.vercel.app", "https://evil.test"]) {
+    assert(
+      resolveCallbackUrl(o as unknown, SITE).endsWith("/checkout/callback"),
+      "the callback path must never be replaced",
+    );
+  }
+});
+
+Deno.test("the resolved callback is what reaches Paystack", () => {
+  const cb = resolveCallbackUrl("https://p.vercel.app", SITE);
+  const body = initializeBody(quote, "a@b.test", cb);
+  assertEquals(body.callback_url, "https://p.vercel.app/checkout/callback");
 });

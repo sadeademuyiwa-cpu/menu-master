@@ -2,13 +2,14 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { currentContext, entitlementStatus } from '@/lib/data/context'
 import { PageHeader, Card, SectionHeading, Notice, Empty, BackLink } from '@/components/ui'
-import { NOT_ENTERED } from '@/lib/format'
+import { NOT_ENTERED, money } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
 
 type Sub = {
   plan_id: string; status: string
   trial_ends_at: string | null; current_period_end: string | null
+  price_kobo: number | null; founding_price_active: boolean | null
 }
 
 function fmtDate(iso: string | null): string {
@@ -27,7 +28,8 @@ export default async function AccountPage() {
 
   const [{ data: sub }, { data: plans }, entitlement] = await Promise.all([
     supabase.from('subscriptions')
-      .select('plan_id,status,trial_ends_at,current_period_end').maybeSingle<Sub>(),
+      .select('plan_id,status,trial_ends_at,current_period_end,price_kobo,founding_price_active')
+      .maybeSingle<Sub>(),
     supabase.from('plans').select('id,name').returns<{ id: string; name: string }[]>(),
     entitlementStatus(),
   ])
@@ -89,12 +91,37 @@ export default async function AccountPage() {
           <Card>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
               <dt style={{ color: 'var(--mm-muted)' }}>Plan</dt>
-              <dd>{planName}</dd>
+              <dd>
+                {planName}
+                {sub.founding_price_active ? ' (founding price)' : ''}
+              </dd>
               <dt style={{ color: 'var(--mm-muted)' }}>Status</dt>
               <dd>{sub.status}</dd>
-              <dt style={{ color: 'var(--mm-muted)' }}>Trial ends</dt>
-              <dd>{fmtDate(sub.trial_ends_at)}</dd>
-              <dt style={{ color: 'var(--mm-muted)' }}>Access runs to</dt>
+
+              {/* The trial date is shown only while there IS a trial. A paid
+                  subscriber was being shown "Trial ends" beside a live
+                  subscription, which reads as though the payment changed
+                  nothing. */}
+              {sub.status === 'trialing' && (
+                <>
+                  <dt style={{ color: 'var(--mm-muted)' }}>Trial ends</dt>
+                  <dd>{fmtDate(sub.trial_ends_at)}</dd>
+                </>
+              )}
+
+              {sub.price_kobo !== null && sub.price_kobo > 0 && (
+                <>
+                  <dt style={{ color: 'var(--mm-muted)' }}>You pay</dt>
+                  <dd>{money(sub.price_kobo / 100)} a month</dd>
+                </>
+              )}
+
+              {/* "Renews on" and "Access runs to" are the same date meaning
+                  two different things, and the difference matters: one is a
+                  promise to charge again, the other is a deadline. */}
+              <dt style={{ color: 'var(--mm-muted)' }}>
+                {sub.status === 'active' ? 'Renews on' : 'Access runs to'}
+              </dt>
               <dd>{fmtDate(sub.current_period_end)}</dd>
             </dl>
           </Card>

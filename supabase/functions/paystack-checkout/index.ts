@@ -31,6 +31,7 @@ import {
   missingPlanCode,
   parseTier,
   pickAccount,
+  resolveCallbackUrl,
   safeError,
   type Quote,
 } from "./lib.ts";
@@ -77,8 +78,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const user = await who.json();
   if (!user?.id) return json(safeError("unauthenticated"), 401);
 
-  const tier = parseTier(await req.json().catch(() => ({})));
+  const payload = await req.json().catch(() => ({}));
+  const tier = parseTier(payload);
   if (!tier) return json(safeError("choose_costing_or_trading"), 400);
+
+  // The caller may PROPOSE where to come back to; resolveCallbackUrl decides.
+  // A preview deployment must return to itself, not to production, which has
+  // no /checkout/callback until the cutover.
+  const callbackUrl = resolveCallbackUrl(
+    (payload as Record<string, unknown>)?.origin,
+    siteUrl,
+  );
 
   const email = billableEmail(user);
   if (!email) return json(safeError("no_email"), 400);
@@ -130,7 +140,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
     body: JSON.stringify(
-      initializeBody(quote, email, `${siteUrl}/checkout/callback`),
+      initializeBody(quote, email, callbackUrl),
     ),
   });
 
