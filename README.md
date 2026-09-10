@@ -64,6 +64,32 @@ every push, with no secrets.
 `tests/0000_local_supabase_shim.sql` is **local only**. Never run it against
 Supabase, which provides `auth.users` and `auth.uid()` itself.
 
+### Running the app locally
+
+Nothing has to be pushed to see a change. One command serves the whole stack
+against a local database — the real PostgREST, the real policies and
+functions, and a local stand-in for Supabase Auth that writes real
+`auth.users` rows and signs real JWTs:
+
+```powershell
+# once: a PostgREST 12.2 Windows binary, and the database from the step above
+$env:POSTGREST = 'C:\tools\postgrest\postgrest.exe'   # github.com/PostgREST/postgrest/releases
+$env:PGBIN     = 'C:\Program Files\PostgreSQL\17\bin'  # PostgREST needs its libpq.dll on PATH
+
+pwsh -File scripts/dev_local.ps1                      # hot reload on http://127.0.0.1:3100
+pwsh -File scripts/dev_local.ps1 -Build -Run web/e2e/journey.mjs   # the full customer journey, 87 checks
+```
+
+The script writes `web/.env.local` (git-ignored) pointing the app at the
+local gateway on `:54321`, starts PostgREST on `:3000`, and stops everything
+on Ctrl-C. The app never reaches Supabase, Vercel or Paystack from here; the
+checkout page says so. Signing up needs no mailbox — the local auth stand-in
+confirms the address at once, so after "Check your email" open
+`/onboarding` directly.
+
+Once Docker is available, `supabase start` replaces the gateway with the
+real GoTrue, PostgREST and Inbucket; the app configuration is the same.
+
 ## Changing production
 
 Never through the Supabase SQL Editor for a migration: it commits every

@@ -68,6 +68,8 @@ alternatives to `0019c` and were never applied.
 | Ops script tests | 70 / 70 | `pwsh -File scripts/ops/PaystackOps.Tests.ps1` |
 | SQL suites (38) | run as `tests/MANIFEST` directs: each at head on a virgin copy unless pinned to the migration it was written for (`era=`), gated on one still proposed (`requires=`), or sharing a copy in sequence (`seq=`). The three boundary users the 006→007→009 chain needs come from `tests/fixtures/` (local shim only). Totals in the latest CI run | `scripts/setup_db.ps1 -Database mm` then `scripts/run_suites.ps1 -Template mm` |
 | Render evidence | 142 screenshots in `web/e2e/shots/` (three generations) | `cd web && npm run e2e` |
+| Customer journey, real browser, local stack | **87 / 87** on 10 Sep against `mm` (0001→0051) through real PostgREST 12.2.3: signup → onboarding → first cost → margin → purchases → formats → overhead → isolation between accounts → phone widths | `pwsh -File scripts/dev_local.ps1 -Build -Run web/e2e/journey.mjs` |
+| Route walk, real browser, local stack | 16 routes × 2 widths, all 200, no overflow, no `NaN`/`undefined`, no page errors | same stack; see README "Running the app locally" |
 
 ## Supabase advisors (10 Sep, read-only)
 
