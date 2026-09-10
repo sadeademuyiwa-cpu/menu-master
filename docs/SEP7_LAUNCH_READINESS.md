@@ -1,5 +1,9 @@
 # SEPTEMBER 7 — LAUNCH READINESS REPORT
 
+> **Superseded.** This is a dated record and no longer describes the present.
+> For what is true now — production level, branches, test state — read
+> [`STATUS.md`](../STATUS.md) at the repository root. (Banner added 10 Sep 2026.)
+
 **28 Aug 2026. Production untouched: no migration applied to it, no billing
 activated, no Paystack plan created, no customer communication sent, no
 production account modified.**

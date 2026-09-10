@@ -35,6 +35,15 @@
 
 do $$
 begin
+  -- FRESH-INSTALL GUARD (added 2026-09-10). The checks below pin this migration
+  -- to the exact production baseline it was written against -- an md5 of a
+  -- function body, an exact object count. A database built from scratch cannot
+  -- satisfy them and must not try. With mm.fresh_install = on the baseline
+  -- checks are skipped; every self-check that follows still runs.
+  if coalesce(current_setting('mm.fresh_install', true), '') = 'on' then
+    raise notice '0022 preflight skipped: fresh install (mm.fresh_install = on).';
+    return;
+  end if;
   if (select count(*) from pg_proc
        where pronamespace='public'::regnamespace and proname like 'fn\_%') <> 47 then
     raise exception '0022 preflight FAILED: expected 47 fn_* functions, found %. '

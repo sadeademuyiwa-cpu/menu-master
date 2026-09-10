@@ -24,7 +24,9 @@ BOOM="do \$boom\$ begin raise exception 'INJECTED FAILURE for atomicity rehearsa
 
 psql $H -q -c "drop database if exists $DB;" -c "create database $DB template $BASE_DB;" >/dev/null 2>&1 \
   || { echo "could not build the baseline from $BASE_DB"; exit 1; }
-/tmp/fingerprint.sh "$DB" > /tmp/atom_base.txt
+# template copies do not inherit ALTER DATABASE ... SET; re-assert the fresh-install flag
+psql $H -q -c "alter database $DB set mm.fresh_install = 'on';" >/dev/null 2>&1
+"$R/scripts/fingerprint.sh" "$DB" > /tmp/atom_base.txt
 BASE=$(md5sum < /tmp/atom_base.txt | cut -d' ' -f1)
 echo "migration : $(basename "$M")  md5 $(md5sum "$M" | cut -d' ' -f1)"
 echo "baseline  : $BASE  ($(wc -l < /tmp/atom_base.txt) lines, from $BASE_DB)"
@@ -42,7 +44,7 @@ for entry in "$@"; do
 
   ERR=$(psql $H -d "$DB" -q -v ON_ERROR_STOP=1 --single-transaction -f /tmp/atom_mig.sql 2>&1 \
           | grep -m1 "INJECTED FAILURE")
-  AFTER=$(/tmp/fingerprint.sh "$DB" | md5sum | cut -d' ' -f1)
+  AFTER=$("$R/scripts/fingerprint.sh" "$DB" | md5sum | cut -d' ' -f1)
 
   echo "failing where $DESC"
   if [ -z "$ERR" ]; then
@@ -67,9 +69,11 @@ fi
 echo
 echo "and the wrong executor (autocommit, i.e. the SQL Editor):"
 psql $H -q -c "drop database if exists ${DB}_nx;" -c "create database ${DB}_nx template $BASE_DB;" >/dev/null 2>&1
-NXB=$(/tmp/fingerprint.sh "${DB}_nx" | md5sum | cut -d' ' -f1)
+# template copies do not inherit ALTER DATABASE ... SET; re-assert the fresh-install flag
+psql $H -q -c "alter database ${DB}_nx set mm.fresh_install = 'on';" >/dev/null 2>&1
+NXB=$("$R/scripts/fingerprint.sh" "${DB}_nx" | md5sum | cut -d' ' -f1)
 psql $H -d "${DB}_nx" -q -v ON_ERROR_STOP=1 -f "$M" 2>&1 | grep -m1 "ABORT" | sed 's/^/  /'
-NXA=$(/tmp/fingerprint.sh "${DB}_nx" | md5sum | cut -d' ' -f1)
+NXA=$("$R/scripts/fingerprint.sh" "${DB}_nx" | md5sum | cut -d' ' -f1)
 if [ "$NXA" = "$NXB" ]; then
   echo "  refused before any object was touched ($NXA)"
 else

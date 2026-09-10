@@ -23,7 +23,7 @@ psql -h 127.0.0.1 -p 55432 -U postgres -tAc 'select 1' >/dev/null 2>&1 \
   || { echo "SKIP: no PostgreSQL on 127.0.0.1:55432"; exit 0; }
 
 echo "building a 0048 schema in $DB ..."
-bash /tmp/setup_db.sh "$DB" 0048 >/dev/null 2>&1 || { echo "FAIL: could not build $DB"; exit 1; }
+bash "$R/scripts/setup_db.sh" "$DB" 0048 >/dev/null 2>&1 || { echo "FAIL: could not build $DB"; exit 1; }
 
 psql -h 127.0.0.1 -p 55432 -U postgres -d "$DB" -q -c "
 do \$\$ begin

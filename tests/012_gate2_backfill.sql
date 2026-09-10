@@ -52,7 +52,7 @@ begin
 end
 $$;
 
-\i migrations/proposed/0022_backfill_default_variants.sql
+\i migrations/0022_backfill_default_variants.sql
 
 do $$
 declare n int;
@@ -101,7 +101,7 @@ end
 $$;
 
 -- idempotence: running the very same migration again must add nothing
-\i migrations/proposed/0022_backfill_default_variants.sql
+\i migrations/0022_backfill_default_variants.sql
 
 do $$
 declare v int; f int;
@@ -114,7 +114,7 @@ begin
 end
 $$;
 
-\i migrations/proposed/0022_rollback.sql
+\i migrations/rollbacks/0022_rollback.sql
 
 do $$
 declare v int; f int; r int;

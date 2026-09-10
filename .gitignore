@@ -1,3 +1,13 @@
 
 # Supabase CLI local link state -- machine-specific, never committed
 supabase/.temp/
+
+# Next.js build output must never be committed; a stray root-level .next/trace was
+# tracked until 2026-09-10.
+.next/
+web/.next/
+web/node_modules/
+web/.env.local
+web/.env*.local
+web/next-env.d.ts
+*.tsbuildinfo

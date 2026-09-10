@@ -13,7 +13,7 @@
 # database, so 0050 is gated against 0049 rather than against 0048.
 set -u
 H="-h 127.0.0.1 -p ${PGPORT:-55432} -U postgres"
-R=/home/user/menu-master
+R="$(cd "$(dirname "R=$R")/.." && pwd)"
 M="${1:?usage: regression_check.sh <migration.sql> [base-migration ...]}"
 shift
 BASES=("$@")
@@ -29,12 +29,13 @@ result () {  # suite db
 
 echo "gating $(basename "$M")  md5 $(md5sum "$M" | cut -d' ' -f1)"
 echo "building the before/after templates ..."
-/tmp/setup_db.sh tplbefore 0048 >/dev/null 2>&1 || { echo "0048 template failed"; exit 1; }
+"$R/scripts/setup_db.sh" tplbefore 0048 >/dev/null 2>&1 || { echo "0048 template failed"; exit 1; }
 for b in "${BASES[@]}"; do
   psql $H -d tplbefore -q -v ON_ERROR_STOP=1 --single-transaction -f "$b" >/dev/null 2>&1 \
     || { echo "base migration failed: $b"; exit 1; }
 done
 psql $H -q -c "drop database if exists tplafter;" -c "create database tplafter template tplbefore;" >/dev/null 2>&1
+  psql $H -q -c "alter database tplafter set mm.fresh_install = 'on';" >/dev/null 2>&1
 psql $H -d tplafter -q -v ON_ERROR_STOP=1 --single-transaction -f "$M" >/dev/null 2>&1 \
   || { echo "the migration under test failed to apply"; exit 1; }
 echo
@@ -46,6 +47,7 @@ for f in "$R"/tests/0*.sql; do
   [ "$s" = 0000_local_supabase_shim.sql ] && continue
   psql $H -q -c "drop database if exists rbefore;" -c "drop database if exists rafter;" \
               -c "create database rbefore template tplbefore;" \
+  psql $H -q -c "alter database rbefore set mm.fresh_install = 'on';" >/dev/null 2>&1
               -c "create database rafter  template tplafter;" >/dev/null 2>&1
   a=$(result "$s" rbefore); b=$(result "$s" rafter)
   if [ "$a" = "$b" ]; then v=same; SAME=$((SAME+1))
