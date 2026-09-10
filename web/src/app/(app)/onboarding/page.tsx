@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/button'
 
 // Exactly the values in the business_type enum (migrations/0001_init.sql:41).
 // Read from the schema, not assumed -- an invented label is a failed insert.
@@ -83,13 +84,7 @@ export default function OnboardingPage() {
 
         {error && <p className="text-sm" style={{ color: 'var(--mm-warn)' }}>{error}</p>}
 
-        <button
-          type="submit" disabled={busy}
-          className="w-full rounded px-3 py-2.5 text-base font-medium text-white disabled:opacity-60"
-          style={{ background: 'var(--mm-accent)' }}
-        >
-          {busy ? 'Setting up…' : 'Create business'}
-        </button>
+        <Button busy={busy} busyLabel="Setting up…" className="w-full">Create business</Button>
       </form>
 
       <p className="mt-6 text-xs" style={{ color: 'var(--mm-muted)' }}>

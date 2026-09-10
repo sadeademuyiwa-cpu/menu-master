@@ -34,12 +34,16 @@ async function text(page) { return page.locator('body').innerText() }
  */
 const has = (body, needle) => body.toLowerCase().includes(needle.toLowerCase())
 async function must(page, name, ...needles) {
+  await rendered(page)
   const body = await text(page)
   const missing = needles.filter((n) => !has(body, n))
   mark(name, missing.length === 0, missing.length ? `missing ${JSON.stringify(missing)}` : '')
+  // What the page actually said, so a failure can be read without a rerun.
+  if (missing.length) console.log('      page said: ' + body.replace(/\s+/g, ' ').slice(0, 600))
   return missing.length === 0
 }
 async function mustNot(page, name, ...needles) {
+  await rendered(page)
   const body = await text(page)
   const present = needles.filter((n) => has(body, n))
   // Report WHERE a forbidden value appeared. "unexpectedly present" alone sent
@@ -64,15 +68,39 @@ async function pick(scope, selector, needle) {
   await el.selectOption(value)
 }
 
+/**
+ * Every page streams its body behind an in-page Suspense boundary, so
+ * DOMContentLoaded can fire with the skeleton in the document and the real
+ * content following. "Rendered" therefore means the skeleton has left, not
+ * that the document has loaded. Resolves at once when no skeleton is present.
+ */
+const rendered = (page) =>
+  page.locator('[aria-label="Loading"]').first()
+    .waitFor({ state: 'detached', timeout: 20000 }).catch(() => {})
+
 const go = async (page, path) => {
   steps++
   const url = path.startsWith('http') ? path : BASE + path
   await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await rendered(page)
 }
+/**
+ * A submit is over when the button stops being busy, not when the network
+ * goes quiet. On a server-action redirect the router briefly aborts and
+ * re-fetches the new page's payload, so "quiet" can arrive a second before
+ * the new content does; the Button's aria-busy clears exactly when the
+ * transition commits. Resolves at once for a form that was never busy.
+ */
+const settledForm = (page) =>
+  page.locator('button[aria-busy="true"]').first()
+    .waitFor({ state: 'detached', timeout: 20000 }).catch(() => {})
+
 const submit = async (page, selector) => {
   steps++
   await Promise.all([page.waitForLoadState('domcontentloaded'), page.click(selector)])
   await page.waitForLoadState('networkidle').catch(() => {})
+  await settledForm(page)
+  await rendered(page)
   await page.waitForTimeout(400)
 }
 
@@ -113,6 +141,7 @@ async function onboard(page, account, business) {
   await inputs.nth(1).fill(business)
   await submit(page, 'button[type=submit]')
   await page.waitForTimeout(1500)   // the RPC clones ~180 catalogue items
+  await rendered(page)              // the client-side push to /dashboard streams too
 }
 
 const browser = await chromium.launch({ args: ['--no-proxy-server'] })
@@ -162,6 +191,7 @@ const stepsFirstIngredient = steps
 steps++
 await page.locator(`a:has-text("Ofada Rice ${stamp}")`).first().click()
 await page.waitForTimeout(600)
+await settledForm(page)
 await must(page, 'the ingredient page opens', `Ofada Rice ${stamp}`, 'Record a purchase', 'Local measurements')
 const ingUrl = page.url().split('?')[0]
 
@@ -173,6 +203,7 @@ await buyForm.locator('input[name=amount]').fill('9000')
 steps++
 await buyForm.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
+await settledForm(page)
 await must(page, 'a purchase in an unknown local unit is REFUSED with a plain explanation',
   'does not know how much of the base unit')
 await page.screenshot({ path: 'e2e/shots/rc-ingredient-unknown-unit.png', fullPage: true })
@@ -185,6 +216,7 @@ await convForm.locator('input[name=qty_in_base]').fill('4000')
 steps++
 await convForm.locator('button[type=submit]').click()
 await page.waitForTimeout(800)
+await settledForm(page)
 await must(page, 'the local measurement is saved', '1 paint =', '4000')
 
 const buyForm2 = page.locator('form:has(input[name=amount])')
@@ -194,6 +226,7 @@ await buyForm2.locator('input[name=amount]').fill('9000')
 steps++
 await buyForm2.locator('button[type=submit]').click()
 await page.waitForTimeout(1000)
+await settledForm(page)
 // Quantities are stored in the base unit but shown the way a person bought
 // them: 8,000 g is 8 kg. The derived unit cost is unchanged.
 await must(page, 'the purchase records and Postgres derives the unit cost', '₦1.13', '8 kg')
@@ -221,6 +254,7 @@ await pick(addLine, 'select[name=unit_id]', 'g — Gram')
 steps++
 await addLine.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
+await settledForm(page)
 await must(page, 'THE FIRST VALUE MOMENT: cost per portion, above the fold',
   'Cost per portion', '₦281.25')
 await page.screenshot({ path: 'e2e/shots/rc-desktop-costed.png', fullPage: true })
@@ -233,6 +267,7 @@ await priceForm.locator('input[name=price]').fill('500')
 steps++
 await priceForm.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
+await settledForm(page)
 await must(page, 'profit, margin and a plain-language verdict appear',
   '₦218.75', '43.75%', 'Healthy')
 const tFirstMargin = Date.now() - t0
@@ -252,6 +287,7 @@ await pick(addLine2, 'select[name=unit_id]', 'ml — Millilitre')
 steps++
 await addLine2.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
+await settledForm(page)
 await must(page, 'an unpriced ingredient blocks the cost and NAMES the item',
   'Cost incomplete', `Palm Oil ${stamp}`, 'has no purchase price')
 // The engine counts portion size as a required input, so a "priced of required"
@@ -277,6 +313,7 @@ const n = await removeForms.count()
 steps++
 await removeForms.nth(n - 1).locator('button[type=submit]').click()
 await page.waitForTimeout(900)
+await settledForm(page)
 await must(page, 'removing the unpriced line restores the cost', '₦2,250.00')
 
 // --- 4. edit a quantity, recompute ------------------------------------------
@@ -285,6 +322,7 @@ await qtyForm.locator('input[name=qty]').fill('4000')
 steps++
 await qtyForm.locator('button[type=submit]').first().click()
 await page.waitForTimeout(1000)
+await settledForm(page)
 await must(page, 'editing the quantity recomputes the authoritative cost', '₦4,500.00', '₦562.50')
 await mustNot(page, 'the stale cost is gone', '₦2,250.00')
 // The margin must follow the cost. At ₦500 a portion costing ₦562.50 now loses
@@ -320,6 +358,7 @@ await page.fill('input[name=name]', 'Cooking')
 await page.locator('form:has(input[name=rate_per_hour]) input[name=rate_per_hour]').fill('500')
 await page.locator('form:has(input[name=rate_per_hour]) button[type=submit]').click()
 await page.waitForTimeout(900)
+await settledForm(page)
 await must(page, 'a business can define what it pays per hour', 'Cooking', '₦500.00 an hour')
 
 await go(page, '/formats')
@@ -338,6 +377,7 @@ await mustNot(page, 'Menu Master ships no catalogue of container sizes',
 await page.locator(`a:has-text("Family Bowl ${stamp}")`).first().click()
 await page.waitForURL(/\/formats\/[0-9a-f-]{36}/, { timeout: 15000 })
 await page.waitForLoadState('networkidle').catch(() => {})
+await rendered(page)
 await must(page, 'the format explains that packaging is counted once per serving',
   'Packaging', 'once per serving')
 await page.screenshot({ path: 'e2e/shots/p4-format-detail.png', fullPage: true })
@@ -361,6 +401,7 @@ await pick(ohForm, 'select[name=basis_unit_id]', 'l — Litre')
 steps++
 await ohForm.locator('button[type=submit]').click()
 await page.waitForTimeout(1000)
+await settledForm(page)
 await must(page, 'a running cost states what it is spread across, in the owner\'s words',
   'Soup pot rent', 'spread across 600 l you make')
 
@@ -372,6 +413,7 @@ await pick(ohForm2, 'select[name=basis_unit_id]', 'kg — Kilogram')
 steps++
 await ohForm2.locator('button[type=submit]').click()
 await page.waitForTimeout(1000)
+await settledForm(page)
 await must(page, 'a second cost can be spread across a different kind of output',
   'Bakery rent', 'spread across 400 kg you make')
 await page.screenshot({ path: 'e2e/shots/p4-overhead-split.png', fullPage: true })
@@ -405,6 +447,7 @@ await pick(fLine, 'select[name=unit_id]', 'g — Gram')
 steps++
 await fLine.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
+await settledForm(page)
 
 // With no format yet this recipe is still MODEL 1, so the engine correctly
 // asks for a portion size. That is the point of the two models: the demand
@@ -417,6 +460,8 @@ await pick(vForm, 'select[name=format_id]', `Family Bowl ${stamp}`)
 steps++
 await vForm.locator('button[type=submit]').click()
 await page.waitForTimeout(1500)
+await settledForm(page)
+await rendered(page)
 await must(page, 'attaching a format switches the recipe to selling by size',
   `Family Bowl ${stamp}`, 'You sell this in your own sizes')
 await must(page, 'each size shows what it costs, from the same batch',
@@ -433,6 +478,8 @@ await fpForm.locator('input[name=price]').fill('7500')
 steps++
 await fpForm.locator('button[type=submit]').click()
 await page.waitForTimeout(1500)
+await settledForm(page)
+await rendered(page)
 await must(page, 'a size can be priced and reports its own profit and margin',
   '₦7,500.00', 'You keep')
 await go(page, fmtRecipeUrl)
@@ -464,10 +511,12 @@ await lineForm.locator('input[name=amount]').fill('42000')
 steps++
 await lineForm.locator('button[type=submit]').click()
 await page.waitForTimeout(1000)
+await settledForm(page)
 await must(page, 'the item is added with what was actually paid', '₦42,000.00', '25 kg')
 
 await page.locator('form:has-text("Record this purchase") button[type=submit]').first().click()
 await page.waitForTimeout(1200)
+await settledForm(page)
 await must(page, 'recording the purchase reports the prices it updated',
   'Recorded', 'ingredient price')
 await mustNot(page, 'a recorded purchase is never left as a draft', 'Not recorded yet')
@@ -478,6 +527,7 @@ await revForm.locator('input[name=reason]').fill('wrong amount')
 steps++
 await revForm.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
+await settledForm(page)
 await must(page, 'a purchase can be cancelled with a reason, and says so',
   'Cancelled', 'wrong amount')
 await go(page, purchaseUrl)
@@ -494,6 +544,7 @@ await pick(page, 'select[name=base_unit_id]', 'g — Gram')
 await submit(page, 'form button[type=submit]')
 await page.locator(`a:has-text("Garri ${stamp}")`).first().click()
 await page.waitForLoadState('domcontentloaded')
+await rendered(page)
 const garriBuy = page.locator('form:has(input[name=amount])')
 await garriBuy.locator('input[name=qty]').fill('1000')
 await pick(garriBuy, 'select[name=unit_id]', 'g — Gram')
@@ -501,6 +552,8 @@ await garriBuy.locator('input[name=amount]').fill('2000')
 steps++
 await garriBuy.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
+await settledForm(page)
+await rendered(page)
 
 await go(page, '/recipes')
 await page.fill('input[name=name]', 'Garri Test')
@@ -517,6 +570,8 @@ await pick(addConv, 'select[name=unit_id]', 'paint')
 steps++
 await addConv.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
+await settledForm(page)
+await rendered(page)
 await must(page, 'a recipe line in an unconvertible unit blocks and says what is needed',
   'Cost incomplete', `Garri ${stamp}`, 'paint')
 await mustNot(page, 'no cost is guessed for the unconvertible line', '₦0.00', 'NaN')
@@ -527,6 +582,7 @@ await go(page, recipeUrl)
 // --- 5. persistence after refresh -------------------------------------------
 steps++
 await page.reload({ waitUntil: 'domcontentloaded' })
+await rendered(page)
 await must(page, 'the recomputed cost survives a refresh', '₦4,500.00', '₦562.50')
 
 // --- 7. direct URL ----------------------------------------------------------
@@ -541,6 +597,7 @@ await addLine3.locator('input[name=qty]').fill('0')
 steps++
 await addLine3.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
+await settledForm(page)
 const afterZero = await text(page)
 mark('a zero quantity is refused with a readable message',
   /greater than zero/i.test(afterZero), afterZero.match(/.{0,60}greater than zero.{0,20}/i)?.[0] ?? 'no message')
@@ -593,6 +650,7 @@ await pick(upLine, 'select[name=unit_id]', 'g — Gram')
 steps++
 await upLine.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
+await settledForm(page)
 
 await go(page, '/dashboard')
 await must(page, 'the dashboard reports products that need attention',

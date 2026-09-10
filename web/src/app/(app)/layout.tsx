@@ -1,8 +1,10 @@
 import Link from 'next/link'
+import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { EntitlementBanner } from '@/components/entitlement-banner'
 import { PrimaryNav } from '@/components/primary-nav'
+import { Toaster } from '@/components/toaster'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -51,6 +53,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       >
         <PrimaryNav variant="bottom" />
       </div>
+
+      {/* The outcome of the last action, read from ?notice= and shown at the
+          bottom of the screen. Suspense because it reads the search params. */}
+      <Suspense fallback={null}><Toaster /></Suspense>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Button } from '@/components/button'
 
 export function PageHeader({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -39,16 +40,13 @@ export function Field({ label, children }: { label: string; children: React.Reac
 export const inputClass = 'mm-input mt-1'
 export const inputStyle = undefined
 
+/**
+ * The submit of every server-action form. It is the one Button, so it
+ * presses, spins while the action runs and refuses a second press -- the
+ * pages that render it were not changed to get that.
+ */
 export function Submit({ children }: { children: React.ReactNode }) {
-  return (
-    <button
-      type="submit"
-      className="rounded px-3 py-2.5 text-base font-medium text-white"
-      style={{ background: 'var(--mm-accent)' }}
-    >
-      {children}
-    </button>
-  )
+  return <Button>{children}</Button>
 }
 
 /**
@@ -133,11 +131,7 @@ export function StatRow({ children }: { children: React.ReactNode }) {
 
 /** Destructive-ish inline action inside a list row. */
 export function InlineSubmit({ children }: { children: React.ReactNode }) {
-  return (
-    <button type="submit" className="mm-tap text-sm underline" style={{ color: 'var(--mm-muted)' }}>
-      {children}
-    </button>
-  )
+  return <Button variant="quiet">{children}</Button>
 }
 
 export function SectionHeading({ children, sub }: {

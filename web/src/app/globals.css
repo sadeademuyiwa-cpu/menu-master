@@ -25,6 +25,17 @@
   /* the smallest comfortable tap target on a phone. Financial controls are
      pressed with a thumb, often in a market, often in a hurry. */
   --mm-touch: 44px;
+
+  /* motion. Two speeds: a press or a hover answers at once; a thing that
+     arrives or leaves takes long enough to be seen arriving. Everything that
+     moves reads these, so turning motion down is one media query below. */
+  --mm-motion-fast: 120ms;
+  --mm-motion: 220ms;
+  --mm-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* the accent one shade deeper, for hover and the pressed state */
+  --mm-accent-strong: #185a3c;
+  --mm-shadow: 0 6px 24px -8px rgb(20 17 15 / 0.35);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,7 +47,13 @@
     --mm-accent: #4bbd85;
     --mm-warn: #d9a441;
     --mm-surface: #1b1815;
+    --mm-accent-strong: #5fd39a;
+    --mm-shadow: 0 6px 24px -8px rgb(0 0 0 / 0.7);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --mm-motion-fast: 0ms; --mm-motion: 0ms; }
 }
 
 html, body { background: var(--mm-bg); color: var(--mm-fg); }
@@ -84,3 +101,133 @@ button:focus-visible {
 
 /* Money and quantities line up column to column so they can be compared. */
 .mm-num { font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------------------
+   BUTTONS
+   One definition, three weights. A button answers a press the moment it is
+   pressed (scale), shows that it is working (spinner, aria-busy) and refuses
+   a second press until the first has been answered. Before this every submit
+   was a flat green rectangle that did nothing visible until the page reloaded.
+   --------------------------------------------------------------------------- */
+.mm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: var(--mm-touch);
+  padding: 0.5rem 0.875rem;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.25;
+  border-radius: var(--mm-radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--mm-motion-fast) var(--mm-ease),
+    background-color var(--mm-motion-fast) var(--mm-ease),
+    border-color var(--mm-motion-fast) var(--mm-ease),
+    opacity var(--mm-motion-fast) var(--mm-ease);
+}
+.mm-btn:active:not(:disabled) { transform: scale(0.97); }
+.mm-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+.mm-btn[aria-busy="true"] { cursor: progress; opacity: 0.85; }
+
+.mm-btn-primary { background: var(--mm-accent); color: #fff; }
+.mm-btn-primary:hover:not(:disabled) { background: var(--mm-accent-strong); }
+
+.mm-btn-secondary { background: transparent; color: var(--mm-fg); border-color: var(--mm-line); }
+.mm-btn-secondary:hover:not(:disabled) { background: var(--mm-surface); border-color: var(--mm-muted); }
+
+/* Reads as a link -- Update, Remove, Hide -- and still takes a thumb. */
+.mm-btn-quiet {
+  padding: 0 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: var(--mm-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: transparent;
+}
+.mm-btn-quiet:hover:not(:disabled) { color: var(--mm-fg); }
+
+.mm-spinner {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: mm-spin 0.7s linear infinite;
+}
+@keyframes mm-spin { to { transform: rotate(360deg); } }
+
+/* ---------------------------------------------------------------------------
+   TOASTS
+   The outcome of an action, where the eye is after pressing a button: the
+   bottom of the screen, above the navigation bar on a phone. Slides in,
+   stays long enough to read, leaves. Refusals stay longer than confirmations.
+   --------------------------------------------------------------------------- */
+.mm-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: 28rem;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--mm-line);
+  border-left: 4px solid var(--mm-accent);
+  border-radius: var(--mm-radius);
+  background: var(--mm-bg);
+  color: var(--mm-fg);
+  box-shadow: var(--mm-shadow);
+  font-size: 0.875rem;
+  animation: mm-rise var(--mm-motion) var(--mm-ease) both;
+}
+.mm-toast[data-tone="warn"] { border-left-color: var(--mm-warn); }
+.mm-toast[data-leaving="true"] { animation: mm-sink var(--mm-motion) var(--mm-ease) both; }
+@keyframes mm-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes mm-sink { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(12px); } }
+
+/* ---------------------------------------------------------------------------
+   PROGRESS
+   A thin bar across the top while the next page is on its way. It moves to
+   about 85% quickly and waits there, so a slow page is visibly "still coming"
+   rather than frozen; it completes when the new URL arrives.
+   --------------------------------------------------------------------------- */
+.mm-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 50;
+  height: 3px;
+  background: var(--mm-accent);
+  transform-origin: left;
+  transition: transform 300ms var(--mm-ease), opacity 200ms var(--mm-ease);
+  pointer-events: none;
+}
+.mm-progress[data-state="idle"] { opacity: 0; transform: scaleX(0); transition: none; }
+.mm-progress[data-state="busy"] { opacity: 1; transform: scaleX(0.85); transition: transform 8s cubic-bezier(0.05, 0.6, 0.2, 1); }
+.mm-progress[data-state="done"] { opacity: 0; transform: scaleX(1); }
+
+/* ---------------------------------------------------------------------------
+   SKELETONS
+   The shape of a page before its data arrives: a grey block where the
+   heading will be, rows where the list will be. They stand in for layout,
+   never for a value -- a skeleton is never mistaken for ₦0.00.
+   --------------------------------------------------------------------------- */
+.mm-skeleton {
+  display: block;
+  border-radius: var(--mm-radius-sm);
+  background: linear-gradient(90deg, var(--mm-line) 0%, var(--mm-surface) 50%, var(--mm-line) 100%);
+  background-size: 200% 100%;
+  animation: mm-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes mm-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .mm-spinner, .mm-skeleton { animation-duration: 0s; }
+  .mm-skeleton { background: var(--mm-line); }
+  .mm-toast, .mm-toast[data-leaving="true"] { animation: none; }
+  .mm-progress[data-state="busy"] { transition: none; }
+}

@@ -1,6 +1,8 @@
+import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import { PageHeader, Card, Empty } from '@/components/ui'
 import { money, percent, NOT_AVAILABLE } from '@/lib/format'
+import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +25,7 @@ type PriceCheck = {
   commission_pct: number | null
 }
 
-export default async function PricingPage() {
+async function PricingPageBody() {
   const supabase = await createClient()
   const { data } = await supabase
     .from('v_price_check')
@@ -124,4 +126,10 @@ function Cell({ k, v }: { k: string; v: string }) {
       <dd className="tabular-nums">{v}</dd>
     </div>
   )
+}
+
+// The body streams behind an in-page boundary -- never a route-level
+// loading.tsx, which stalls server-action redirects (see components/skeleton.tsx).
+export default function PricingPage() {
+  return <Suspense fallback={<Loading />}><PricingPageBody /></Suspense>
 }

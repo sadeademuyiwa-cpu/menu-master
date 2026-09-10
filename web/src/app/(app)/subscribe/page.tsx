@@ -1,8 +1,10 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { PageHeader, Card, SectionHeading } from '@/components/ui'
 import { money } from '@/lib/format'
 import { PlanChooser } from '@/components/plan-chooser'
+import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +28,7 @@ type Plan = {
  * The founding price is shown only while slots actually remain. Advertising a
  * price we cannot honour is worse than not advertising it.
  */
-export default async function SubscribePage() {
+async function SubscribePageBody() {
   const supabase = await createClient()
 
   const [{ data: plans }, { count: slotsLeft }, { data: sub }] = await Promise.all([
@@ -107,4 +109,10 @@ export default async function SubscribePage() {
       </p>
     </div>
   )
+}
+
+// The body streams behind an in-page boundary -- never a route-level
+// loading.tsx, which stalls server-action redirects (see components/skeleton.tsx).
+export default function SubscribePage() {
+  return <Suspense fallback={<Loading />}><SubscribePageBody /></Suspense>
 }

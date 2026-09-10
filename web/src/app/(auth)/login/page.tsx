@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/button'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -47,13 +48,7 @@ export default function LoginPage() {
         />
       </label>
       {error && <p className="text-sm" style={{ color: 'var(--mm-warn)' }}>{error}</p>}
-      <button
-        type="submit" disabled={busy}
-        className="w-full rounded px-3 py-2.5 text-base font-medium text-white disabled:opacity-60"
-        style={{ background: 'var(--mm-accent)' }}
-      >
-        {busy ? 'Logging in…' : 'Log in'}
-      </button>
+      <Button busy={busy} busyLabel="Logging in…" className="w-full">Log in</Button>
       <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
         No account yet? <Link href="/signup" className="underline">Sign up</Link>
       </p>

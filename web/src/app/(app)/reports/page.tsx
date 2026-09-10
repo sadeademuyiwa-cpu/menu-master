@@ -1,8 +1,10 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { currentContext } from '@/lib/data/context'
 import { PageHeader, Card, Empty, DataList } from '@/components/ui'
 import { money, percent, coverageLabel, NOT_ENTERED } from '@/lib/format'
+import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,7 +43,7 @@ type Voided = {
   replaced_by: string | null
 }
 
-export default async function ReportsPage() {
+async function ReportsPageBody() {
   const supabase = await createClient()
   // Only to say "cancelled by you" rather than printing a raw user id, which
   // would mean nothing to an owner and expose an identifier for no benefit.
@@ -147,4 +149,10 @@ export default async function ReportsPage() {
       </section>
     </div>
   )
+}
+
+// The body streams behind an in-page boundary -- never a route-level
+// loading.tsx, which stalls server-action redirects (see components/skeleton.tsx).
+export default function ReportsPage() {
+  return <Suspense fallback={<Loading />}><ReportsPageBody /></Suspense>
 }

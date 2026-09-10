@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Card, SectionHeading } from '@/components/ui'
+import { Button } from '@/components/button'
 
 export type PlanRow = {
   tier: 'costing' | 'trading'
@@ -65,15 +66,16 @@ export function PlanChooser({ rows }: { rows: PlanRow[] }) {
               </p>
             )}
             <p className="mt-2 text-sm" style={{ color: 'var(--mm-muted)' }}>{r.blurb}</p>
-            <button
+            <Button
               type="button"
-              className="mm-tap mt-3 w-full rounded px-3 py-2.5 text-base font-medium text-white disabled:opacity-50"
-              style={{ background: 'var(--mm-accent)' }}
+              className="mt-3 w-full"
+              busy={busy === r.tier}
+              busyLabel="Taking you to Paystack…"
               disabled={!r.available || busy !== null}
               onClick={() => choose(r.tier)}
             >
-              {busy === r.tier ? 'Taking you to Paystack…' : `Choose ${r.name}`}
-            </button>
+              Choose {r.name}
+            </Button>
             {!r.available && (
               <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
                 Not available for online payment yet.

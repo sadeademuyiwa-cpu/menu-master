@@ -31,11 +31,7 @@ export function SalesLocked({ planName }: { planName?: string | null }) {
           entered stays exactly as it is.
         </p>
         <p className="mt-4 text-sm">
-          <Link
-            href="/subscribe"
-            className="mm-tap inline-block rounded px-3 py-2.5 text-base font-medium text-white"
-            style={{ background: 'var(--mm-accent)' }}
-          >
+          <Link href="/subscribe" className="mm-btn mm-btn-primary">
             See Costing + Sales
           </Link>
         </p>

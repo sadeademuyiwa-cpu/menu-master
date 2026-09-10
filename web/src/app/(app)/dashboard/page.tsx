@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { currentContext, contextRedirect } from '@/lib/data/context'
@@ -5,6 +6,7 @@ import {
   PageHeader, Card, Notice, Empty, SectionHeading, Badge, HeroStat, StatRow, Stat,
 } from '@/components/ui'
 import { money, percent, productState, priceState, NOT_ENTERED } from '@/lib/format'
+import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +30,7 @@ type PriceRow = {
   price_state: string; used_in_recipes: number; last_purchase_date: string | null
 }
 
-export default async function DashboardPage() {
+async function DashboardPageBody() {
   const ctx = await currentContext()
   const { supabase, accountId, businessName } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/dashboard'))
@@ -293,4 +295,10 @@ export default async function DashboardPage() {
       </section>
     </div>
   )
+}
+
+// The body streams behind an in-page boundary -- never a route-level
+// loading.tsx, which stalls server-action redirects (see components/skeleton.tsx).
+export default function DashboardPage() {
+  return <Suspense fallback={<Loading />}><DashboardPageBody /></Suspense>
 }

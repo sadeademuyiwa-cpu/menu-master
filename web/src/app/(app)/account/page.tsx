@@ -1,8 +1,10 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { currentContext, entitlementStatus } from '@/lib/data/context'
 import { PageHeader, Card, SectionHeading, Notice, Empty, BackLink } from '@/components/ui'
 import { NOT_ENTERED, money } from '@/lib/format'
+import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +22,7 @@ function fmtDate(iso: string | null): string {
     : d.toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-export default async function AccountPage() {
+async function AccountPageBody() {
   const supabase = await createClient()
   const { accountId, role, businessName } = await currentContext()
 
@@ -140,4 +142,10 @@ export default async function AccountPage() {
       </section>
     </div>
   )
+}
+
+// The body streams behind an in-page boundary -- never a route-level
+// loading.tsx, which stalls server-action redirects (see components/skeleton.tsx).
+export default function AccountPage() {
+  return <Suspense fallback={<Loading />}><AccountPageBody /></Suspense>
 }
