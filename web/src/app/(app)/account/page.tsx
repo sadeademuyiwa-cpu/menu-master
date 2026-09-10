@@ -133,7 +133,9 @@ export default async function AccountPage() {
         </p>
         <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
           Payments are handled by Paystack. Menu Master NG never sees or stores
-          your card details.
+          your card details.{' '}
+          <Link href="/terms" className="underline">Terms</Link> ·{' '}
+          <Link href="/refunds" className="underline">Refunds and cancellation</Link>
         </p>
       </section>
     </div>

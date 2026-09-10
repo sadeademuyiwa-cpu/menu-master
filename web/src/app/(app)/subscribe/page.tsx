@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { PageHeader, Card, SectionHeading } from '@/components/ui'
 import { money } from '@/lib/format'
@@ -101,7 +102,8 @@ export default async function SubscribePage() {
 
       <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
         Payments are handled by Paystack. Menu Master NG never sees or stores
-        your card details.
+        your card details. Monthly, cancel any time — see our{' '}
+        <Link href="/refunds" className="underline">refund and cancellation terms</Link>.
       </p>
     </div>
   )

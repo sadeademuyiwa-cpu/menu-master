@@ -72,6 +72,11 @@ export default function SignupPage() {
       >
         {busy ? 'Creating…' : 'Create account'}
       </button>
+          <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
+            By creating an account you accept our{' '}
+            <Link href="/terms" className="underline">terms</Link> and{' '}
+            <Link href="/refunds" className="underline">refund policy</Link>.
+          </p>
       <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
         Already have one? <Link href="/login" className="underline">Log in</Link>
       </p>
