@@ -66,7 +66,7 @@ alternatives to `0019c` and were never applied.
 | Web build | 28 routes, exit 0 | `cd web && npm run build` |
 | Edge function unit tests | 29 / 29 | `deno test supabase/functions/*/lib_test.ts` |
 | Ops script tests | 70 / 70 | `pwsh -File scripts/ops/PaystackOps.Tests.ps1` |
-| SQL suites (37) | proven on a production-faithful replica up to 0051 | `scripts/setup_db.ps1` then `scripts/run_suites.ps1` |
+| SQL suites (38) | 32 with results · **761 pass · 2 fail** (both 0025-era count assertions in 015) · 6 console-fixture suites no-result — on a repository-built replica at 0052 | `scripts/setup_db.ps1 -Database mm` then `scripts/run_suites.ps1 -Template mm` |
 | Render evidence | 142 screenshots in `web/e2e/shots/` (three generations) | `cd web && npm run e2e` |
 
 ## Supabase advisors (10 Sep, read-only)
@@ -81,6 +81,12 @@ intentional, service-context only); leaked-password protection is off (WARN).
 `purchases` 11, `order_lines` 9 …); 3 policies re-evaluate `auth.uid()` per row
 (`profiles`, `onboarding_requests`, `founder_slots`); `units` has overlapping
 permissive SELECT policies; 7 unused indexes.
+
+## Proposed, not yet applied
+
+| Migration | What | Gate |
+|---|---|---|
+| `0052_search_path_and_fk_indexes.sql` | pins `search_path` on 23 functions, indexes 138 foreign keys, revokes `anon` from `billing_config` | `deploy/runbook/DEPLOY_0052.md` |
 
 ## What is not done
 

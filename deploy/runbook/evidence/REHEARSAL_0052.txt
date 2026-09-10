@@ -1,0 +1,71 @@
+============================================================================
+0052 -- PRE-PRODUCTION REHEARSAL, raw evidence
+Captured 2026-09-10 13:22 on a repository-built PostgreSQL 17.6 replica
+that matches production to the object count (fn_*=77, policies=117, relations=66).
+0052 sha256 06deb7d6cebab6de041b2510109ebc3d219b08c851d381d177be9c803950415f
+rollback sha256 d26b662a29ad4b52d226635a0d2ea10af8903434339c4aa7682dc89fc2db23b9
+============================================================================
+
+#### 1. GATES ####
+PRE_DEPLOY_0052 against 0051 ............ 8/8 PASS
+apply under --single-transaction ......... 0052 OK: 23 functions pinned to public, 138 foreign keys indexed,
+                                           anon reads exactly the five reference tables, 117 policies and 77 functions unchanged.
+POST_VERIFY_0052 against 0052 ........... 8/8 PASS
+tests/038 ............................... 12/12 PASS
+
+#### 2. ATOMICITY ####
+baseline fingerprint (0051) ............. cc4599fc00edff26171e9f577b717d5e
+failure injected after the 23 pins ...... fired, schema after == baseline
+failure injected before COMMIT .......... fired, schema after == baseline
+autocommit executor ..................... refused ("0052 ABORT"), schema after == baseline
+clean file afterwards ................... applies
+
+#### 3. ROLLBACK ####
+apply then rollback ..................... fingerprint cc4599fc00edff26171e9f577b717d5e -> byte-faithful to 0051
+
+#### 4. EVERY SQL SUITE, 0051 vs 0052 ####
+at 0051: suites=30  pass=736  fail=5   (011:1  015:3  017:1 -- all pre-existing)
+at 0052: suites=32  pass=761  fail=2   (015:2 -- the two 0025-era count assertions)
+changed: 011 1->0, 017 1->0 (anon surface back to five), 015 3->2, 012 now runs 10/10, 038 new 12/12
+no other suite moved.
+
+#### 5. FULL TABLE AT 0052 ####
+001_correctness_and_isolation.sql      27    0 
+002_gate1_attack_and_regression.sql    56    0 
+003_real_client_role_escalation.sql            NO RESULT
+004_gate1_closure.sql                  23    0 
+005_role_write_matrix.sql              51    0 
+006_supabase_boundary_fixtures.sql             NO RESULT
+007_service_context.sql                        NO RESULT
+008_post_phase_b.sql                           NO RESULT
+009_evidence_0018.sql                          NO RESULT
+010_anon_reference_read.sql                    NO RESULT
+011_gate2_phase1.sql                   33    0 
+012_gate2_backfill.sql                 10    0 
+013_gate2_overhead_basis.sql           15    0 
+014_gate2_cutover.sql                  13    0 
+015_gate2_repoint.sql                  15    2 FAIL
+016_gate2_attack_matrix.sql            16    0 
+017_billing_events.sql                 20    0 
+018_entitlement.sql                    15    0 
+019_billing_lifecycle.sql              17    0 
+020_plan_code_mapping.sql              13    0 
+021_costing_mvp_journey.sql            22    0 
+022_entitlement_final.sql              26    0 
+023_recipe_costing_experience.sql      27    0 
+024_source_aware_costing.sql           23    0 
+025_purchase_ledger.sql                19    0 
+026_recipe_worksheet.sql               25    0 
+027_view_security.sql                  26    0 
+028_formats_labour_overhead.sql        26    0 
+029_costing_models.sql                 35    0 
+030_overhead_allocation.sql            26    0 
+031_dashboard.sql                      21    0 
+032_sales_and_frozen_cogs.sql          43    0 
+033_discounts.sql                      20    0 
+034_function_surface.sql                6    0 
+035_billing_tiers_and_founders.sql     34    0 
+036_checkout_and_founder_payment.sql   32    0 
+037_paid_period_and_sales_gate.sql     14    0 
+038_search_path_and_fk_indexes.sql     12    0 
+suites=32  pass=761  fail=2  no-result=6
