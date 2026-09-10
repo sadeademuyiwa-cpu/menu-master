@@ -62,14 +62,16 @@ alternatives to `0019c` and were never applied.
 | Check | Result (10 Sep) | How to run |
 |---|---|---|
 | Web typecheck | clean | `cd web && npm run typecheck` |
-| Web unit tests | 38 / 38 | `cd web && npm test` |
-| Web build | 28 routes, exit 0 | `cd web && npm run build` |
-| Edge function unit tests | 29 / 29 | `deno test supabase/functions/*/lib_test.ts` |
+| Web unit tests | 63 / 63 | `cd web && npm test` |
+| Web build | 34 routes, exit 0 | `cd web && npm run build` |
+| Edge function unit tests | 35 / 35 (webhook 15, checkout 14, alert mailer 6) | `deno test supabase/functions/*/lib_test.ts` |
 | Ops script tests | 70 / 70 | `pwsh -File scripts/ops/PaystackOps.Tests.ps1` |
-| SQL suites (38) | run as `tests/MANIFEST` directs: each at head on a virgin copy unless pinned to the migration it was written for (`era=`), gated on one still proposed (`requires=`), or sharing a copy in sequence (`seq=`). The three boundary users the 006→007→009 chain needs come from `tests/fixtures/` (local shim only). Totals in the latest CI run | `scripts/setup_db.ps1 -Database mm` then `scripts/run_suites.ps1 -Template mm` |
+| SQL suites (42) | run as `tests/MANIFEST` directs: each at head on a virgin copy unless pinned to the migration it was written for (`era=`, built through `proposed/` when the era is not yet shipped), gated on one still proposed (`requires=`), or sharing a copy in sequence (`seq=`). The three boundary users the 006→007→009 chain needs come from `tests/fixtures/` (local shim only). **Head + proposed (0001→0056): 40 suites, 874 pass, 0 fail.** Head only (0051) still reports the two `billing_config` rows that 0052 closes | `scripts/setup_db.ps1 -Database mmp -WithProposed` then `scripts/run_suites.ps1 -Template mmp` |
 | Render evidence | 142 screenshots in `web/e2e/shots/` (three generations) | `cd web && npm run e2e` |
 | Customer journey, real browser, local stack | **87 / 87** on 10 Sep against `mm` (0001→0051) through real PostgREST 12.2.3: signup → onboarding → first cost → margin → purchases → formats → overhead → isolation between accounts → phone widths | `pwsh -File scripts/dev_local.ps1 -Build -Run web/e2e/journey.mjs` |
 | Route walk, real browser, local stack | 16 routes × 2 widths, all 200, no overflow, no `NaN`/`undefined`, no page errors | same stack; see README "Running the app locally" |
+| Staff invitations, real browser, local stack | **14 / 14** on a 0001→0056 database: owner invites → invitee signs up and lands in the business → sees no costs → role changed → removed → back to onboarding | `pwsh -File scripts/dev_local.ps1 -Database <db-with-0056> -Run web/e2e/people.mjs` |
+| Feedback (D1) and loading (D2) | busy state on every submit, toast on every outcome (info / refusal), progress bar on link and submit, skeletons on read-only pages — probed in the production build; journey unchanged at 87 / 87 | `docs/PLAN_LAUNCH_PLUS_IMPLEMENTATION.md` §D1–D2 |
 
 ## Supabase advisors (10 Sep, read-only)
 
@@ -89,11 +91,19 @@ permissive SELECT policies; 7 unused indexes.
 | Migration | What | Gate |
 |---|---|---|
 | `0052_search_path_and_fk_indexes.sql` | pins `search_path` on 23 functions, indexes 138 foreign keys, revokes `anon` from `billing_config` | `deploy/runbook/DEPLOY_0052.md` |
+| `0053_platform_admins.sql` | `platform_admins` (service context only) + `fn_is_platform_admin`, `fn_require_platform_admin`; nobody granted by the migration | `deploy/runbook/DEPLOY_0053_0055.md` |
+| `0054_admin_reads.sql` | `fn_admin_billing_health`, `fn_admin_subscriptions`, `fn_admin_signups` — refuse a non-admin before reading; no payload, no provider codes, no customer data | same |
+| `0055_platform_alerts.sql` | `platform_alerts` + `fn_admin_scan` (hourly via `pg_cron` when enabled), `fn_admin_alerts`, `fn_admin_resolve_alert`; emailed by `supabase/functions/platform-alert-mailer` | same |
+| `0056_invitations.sql` | `invitations` (service context only) + seven member functions; owners invite, invitees are in on sign-in, owners are promoted never invited; 117 policies unchanged | `deploy/runbook/DEPLOY_0056.md` |
+
+Each has a rollback in `migrations/rollbacks/`, an acceptance suite (`tests/038`–`042`)
+and a rehearsal on a repository-built replica. The app pages that read them
+(`/admin/*`, `/settings/people`) say "not available yet" until the migration is live.
 
 ## What is not done
 
 - **Live Paystack cutover** — `deploy/runbook/LIVE_CUTOVER.md`. Nothing accepts real money.
 - **Tax** (E3), **closed-period immutability** (E4 — `period_closes` exists, nothing enforces it), **commission economics** (E1) — designed, not built.
-- **Business / location / member management screens** (C7).
-- **Production monitoring** (D8) and a **launch acceptance suite** (D11).
+- **Business / location management screens** (C7). Member management is built (0056 + `/settings/people`), awaiting its production gate.
+- **Production monitoring** (D8) is built as the admin panel (0053–0055 + `/admin/*` + the mailer), awaiting its production gate, the first admin grant, `pg_cron`, and a Resend key. A **launch acceptance suite** (D11) is not.
 - Advisor items above.

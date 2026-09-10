@@ -53,7 +53,7 @@ pwsh -File scripts/run_suites.ps1 -Template mm
 cd web && npm ci && npm run typecheck && npm test && npm run build
 
 # edge functions and ops scripts
-deno test supabase/functions/paystack-webhook/lib_test.ts supabase/functions/paystack-checkout/lib_test.ts
+deno test supabase/functions/paystack-webhook/lib_test.ts supabase/functions/paystack-checkout/lib_test.ts supabase/functions/platform-alert-mailer/lib_test.ts
 pwsh -File scripts/ops/PaystackOps.Tests.ps1
 ```
 

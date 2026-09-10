@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/button'
 
 export default function SignupPage() {
   const [email, setEmail] = useState('')
@@ -10,6 +11,14 @@ export default function SignupPage() {
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // An invitation link carries the invited address (0056). Filling it in is
+  // a convenience only: acceptance is decided by the database from the
+  // login's own email, so typing a different address simply is not invited.
+  useEffect(() => {
+    const given = new URLSearchParams(window.location.search).get('email')
+    if (given) setEmail(given)
+  }, [])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -65,18 +74,12 @@ export default function SignupPage() {
         />
       </label>
       {error && <p className="text-sm" style={{ color: 'var(--mm-warn)' }}>{error}</p>}
-      <button
-        type="submit" disabled={busy}
-        className="w-full rounded px-3 py-2.5 text-base font-medium text-white disabled:opacity-60"
-        style={{ background: 'var(--mm-accent)' }}
-      >
-        {busy ? 'Creating…' : 'Create account'}
-      </button>
-          <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
-            By creating an account you accept our{' '}
-            <Link href="/terms" className="underline">terms</Link> and{' '}
-            <Link href="/refunds" className="underline">refund policy</Link>.
-          </p>
+      <Button busy={busy} busyLabel="Creating…" className="w-full">Create account</Button>
+      <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
+        By creating an account you accept our{' '}
+        <Link href="/terms" className="underline">terms</Link> and{' '}
+        <Link href="/refunds" className="underline">refund policy</Link>.
+      </p>
       <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
         Already have one? <Link href="/login" className="underline">Log in</Link>
       </p>

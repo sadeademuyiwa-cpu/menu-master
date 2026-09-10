@@ -51,11 +51,17 @@ function Fresh-Copy([string]$name, [string]$tpl) {
     # ALTER DATABASE ... SET is not copied by CREATE DATABASE ... TEMPLATE
     & $psql @H -d postgres -q -c "alter database $name set mm.fresh_install = 'on';" | Out-Null
 }
+# The last number in migrations/. An era beyond it can only be built through
+# migrations/proposed/, which is exactly the case for the acceptance suite of
+# a migration that has not shipped yet (requires=NNNN keeps it out of the
+# head-only run; era=NNNN runs it at its own moment in the proposed run).
+$lastApplied = ((Get-ChildItem (Join-Path $repo 'migrations') -File -Filter '0*.sql' | Sort-Object Name | Select-Object -Last 1).Name -split '_')[0] -replace '[a-z]$', ''
 function Era-Db([string]$era) {
     $name = "${Template}_era_$era"
     $exists = (& $psql @H -d postgres -tAc "select 1 from pg_database where datname='$name'" | Out-String).Trim()
     if ($exists -ne '1') {
-        & pwsh -NoProfile -File (Join-Path $repo 'scripts\setup_db.ps1') -Database $name -UpTo $era -Port $Port -PgBin $PgBin | Out-Null
+        $extra = @(); if ($era -gt $lastApplied) { $extra = @('-WithProposed') }
+        & pwsh -NoProfile -File (Join-Path $repo 'scripts\setup_db.ps1') -Database $name -UpTo $era -Port $Port -PgBin $PgBin @extra | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-Host "could not build era database $name" -ForegroundColor Red; exit 2 }
     }
     $name

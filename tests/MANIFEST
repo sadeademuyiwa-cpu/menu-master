@@ -36,4 +36,8 @@
 012_gate2_backfill.sql                era=0022
 015_gate2_repoint.sql                 era=0025
 017_billing_events.sql                era=0027
-038_search_path_and_fk_indexes.sql    requires=0052
+038_search_path_and_fk_indexes.sql    requires=0052 era=0052
+039_platform_admins.sql               requires=0053
+040_admin_reads.sql                   requires=0054
+041_platform_alerts.sql               requires=0055
+042_invitations.sql                   requires=0056

@@ -32,10 +32,16 @@ fresh_copy () { # name template
   psql -d postgres -q -c "drop database if exists $1;" -c "create database $1 template $2;" >/dev/null
   psql -d postgres -q -c "alter database $1 set mm.fresh_install = 'on';" >/dev/null
 }
+# The last number in migrations/. An era beyond it can only be built through
+# migrations/proposed/, which is exactly the case for the acceptance suite of
+# a migration that has not shipped yet (requires=NNNN keeps it out of the
+# head-only run; era=NNNN runs it at its own moment in the proposed run).
+LAST_APPLIED=$(ls "$R"/migrations/0*.sql | tail -1 | xargs basename | cut -d_ -f1 | sed 's/[a-z]$//')
 era_db () { # NNNN -> ensures <HEAD>_era_NNNN exists, echoes its name
-  local name="${HEAD}_era_$1"
+  local name="${HEAD}_era_$1" extra=""
+  [ "$1" \> "$LAST_APPLIED" ] && extra="--with-proposed"
   if ! psql -d postgres -tAc "select 1 from pg_database where datname='$name'" | grep -q 1; then
-    "$R/scripts/setup_db.sh" "$name" "$1" >/dev/null || { echo "could not build era database $name"; exit 2; }
+    "$R/scripts/setup_db.sh" "$name" "$1" $extra >/dev/null || { echo "could not build era database $name"; exit 2; }
   fi
   echo "$name"
 }

@@ -37,8 +37,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
         with: { deno-version: v2.x }
-      - run: deno check supabase/functions/paystack-webhook/index.ts supabase/functions/paystack-checkout/index.ts
-      - run: deno test supabase/functions/paystack-webhook/lib_test.ts supabase/functions/paystack-checkout/lib_test.ts
+      - run: deno check supabase/functions/paystack-webhook/index.ts supabase/functions/paystack-checkout/index.ts supabase/functions/platform-alert-mailer/index.ts
+      - run: deno test supabase/functions/paystack-webhook/lib_test.ts supabase/functions/paystack-checkout/lib_test.ts supabase/functions/platform-alert-mailer/lib_test.ts
 
   ops-scripts:
     name: ops · PowerShell tests

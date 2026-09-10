@@ -1,7 +1,10 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { currentContext, contextRedirect } from '@/lib/data/context'
+import { isPlatformAdmin } from '@/lib/data/admin'
 import { PageHeader, Card, SectionHeading } from '@/components/ui'
+import Loading from '../skeleton'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,21 +37,32 @@ const GROUPS = [
     sub: 'Settings and records.',
     links: [
       { href: '/settings', label: 'Costs and targets', hint: 'Paid work, monthly bills, target margin.' },
+      { href: '/settings/people', label: 'People', hint: 'Who works here on Menu Master, and what they can see.' },
       { href: '/reports', label: 'Reports', hint: 'How the business is doing over time.' },
       { href: '/account', label: 'Account and plan', hint: 'Your login and subscription.' },
     ],
   },
 ]
 
-export default async function MorePage() {
+async function MorePageBody() {
   const ctx = await currentContext()
   const { accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/more'))
 
+  // Offered only to a platform administrator. The database refuses everyone
+  // else regardless; this keeps a dead link off a customer's screen.
+  const groups = (await isPlatformAdmin())
+    ? [...GROUPS, {
+        title: 'Platform',
+        sub: 'Only you see this.',
+        links: [{ href: '/admin', label: 'Platform administration', hint: 'Alerts, billing health, subscriptions, signups.' }],
+      }]
+    : GROUPS
+
   return (
     <div className="space-y-6">
       <PageHeader title="More" sub="Everything else, grouped by what it is for." />
-      {GROUPS.map((g) => (
+      {groups.map((g) => (
         <section key={g.title} className="space-y-3">
           <SectionHeading sub={g.sub}>{g.title}</SectionHeading>
           <ul className="space-y-2">
@@ -67,4 +81,10 @@ export default async function MorePage() {
       ))}
     </div>
   )
+}
+
+// The body streams behind an in-page boundary -- never a route-level
+// loading.tsx, which stalls server-action redirects (see components/skeleton.tsx).
+export default function MorePage() {
+  return <Suspense fallback={<Loading />}><MorePageBody /></Suspense>
 }

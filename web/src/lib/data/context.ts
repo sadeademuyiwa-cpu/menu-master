@@ -25,21 +25,42 @@ export async function currentContext(): Promise<
 > {
   const supabase = await createClient()
 
-  const resolved = await resolveContext({
+  // Set by getUserId, which resolveContext awaits before getMembership.
+  let userId: string | null = null
+  const port = {
     // Awaited first and alone: validates the token with the auth server, and
     // completes any refresh before the two lookups run.
     getUserId: async () => {
       const { data, error } = await supabase.auth.getUser()
-      return { userId: data?.user?.id ?? null, error }
+      userId = data?.user?.id ?? null
+      return { userId, error }
     },
+    // THE CALLER'S OWN membership. RLS lets every member of an account read
+    // every membership of it, so without the user filter a sales member on a
+    // two-person account was handed the owner's row -- and the page believed
+    // it was an owner. The database still refused everything an owner may do
+    // (0056 proved that in the browser); only the courtesy gating was wrong.
     // await, not returned directly: the PostgREST builder is a thenable, not a
     // Promise, so it does not satisfy the port's return type on its own.
     getMembership: async () =>
-      await supabase.from('memberships').select('account_id, role').limit(1).maybeSingle(),
+      await supabase.from('memberships').select('account_id, role')
+        .eq('user_id', userId ?? '').order('created_at').limit(1).maybeSingle(),
     getBusiness: async () =>
       await supabase.from('businesses').select('id, name').is('deleted_at', null)
         .order('created_at').limit(1).maybeSingle(),
-  })
+  }
+  let resolved = await resolveContext(port)
+
+  // A login on no account may have been INVITED to one (0056). Accepting is
+  // the database's decision -- it matches the login's own email to open
+  // invitations -- and happens here, once, so an invited person who signs up
+  // lands in the right business with no extra step. A genuinely new user
+  // gets 0 and goes to onboarding as before.
+  if (resolved.status === 'no_membership') {
+    const { data } = await supabase.rpc('fn_accept_invitations')
+    const accepted = (data as { accepted?: number } | null)?.accepted ?? 0
+    if (accepted > 0) resolved = await resolveContext(port)
+  }
 
   // The real reason stays on the server. contextRedirect() sends the browser a
   // fixed generic sentence, so nothing about the database travels in a URL.

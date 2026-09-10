@@ -7,6 +7,13 @@ keeps the two rules that hold across the codebase: the database is the
 authority and the screen only offers; and nothing numeric is invented on a
 business's behalf.**
 
+**Status (10 September, evening):** §0 done (local stack, journey 87/87).
+D1 + D2 built. A built — `0053`–`0055` in `migrations/proposed/`, suites
+039–041, `/admin/*`, `platform-alert-mailer`; awaiting the production gate,
+the first admin grant, `pg_cron` and a Resend key. B built — `0056`, suite
+042, `/settings/people`; awaiting its gate. C waits for the statutory facts
+with sources. D3–D5 not started.
+
 Numbering continues from the last proposed migration (`0052`). Each migration
 gets the standard kit — transaction guard, preflight, self-check, rollback,
 PRE/POST gate files, an acceptance suite, atomicity and fingerprint rehearsal
@@ -209,11 +216,25 @@ the `(app)` layout root renders them, using `describeWriteError` for
 refusals so the database's own reason reaches the screen in plain words.
 Optimistic updates only for rename/toggle actions.
 
-### D2. Loading — `loading.tsx` per route group + `components/skeleton.tsx`
+### D2. Loading — `skeleton.tsx` per route + `components/skeleton.tsx`
 
-Skeletons shaped like each page's cards and rows; a top progress bar
-(`components/progress.tsx`, ~40 lines, no library); `Suspense` around the
-dashboard and reports reads.
+A top progress bar (`components/progress.tsx`, ~50 lines, no library) on
+every navigation and submit. Skeletons shaped like each page's cards and
+rows, **only on read-only pages reached by a link** — dashboard, reports,
+pricing, account, subscribe, more, the admin views — each exporting a thin
+wrapper that renders its body inside an in-page `<Suspense>` with the
+route's `skeleton.tsx` as the fallback.
+
+**Not on pages with actions, and never `loading.tsx`.** The first build used
+route-level loading files and the customer journey regressed: a server
+action redirecting back to the same route — every Add, Save and Record —
+took 7–19 s to show its result instead of ~2 s, because the router aborted
+the redirect's payload and stalled the transition (Next 15.5, measured in
+the production build against the local stack). In-page boundaries on those
+pages stalled intermittently. Removing the boundary from every page with a
+same-route action restored HEAD's timing; React keeps the old page on screen
+until the new one is ready and the bar shows the wait. The rule is written
+into `components/skeleton.tsx`; `journey.mjs` is the proof.
 
 ### D3. Motion — `globals.css` + `lib/ui/motion.ts`
 

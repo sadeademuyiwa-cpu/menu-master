@@ -160,8 +160,9 @@ export default async function SettingsPage({
     <div className="space-y-6">
       <PageHeader title="Your business settings"
         sub="How Menu Master costs and prices for you." />
-      <p className="text-sm">
+      <p className="flex flex-wrap gap-x-4 text-sm">
         <Link href="/account" className="mm-tap underline">Your account and plan →</Link>
+        <Link href="/settings/people" className="mm-tap underline">People on this account →</Link>
       </p>
       {notice && <Notice tone={/could not|cannot|must be|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
