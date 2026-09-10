@@ -66,7 +66,7 @@ alternatives to `0019c` and were never applied.
 | Web build | 28 routes, exit 0 | `cd web && npm run build` |
 | Edge function unit tests | 29 / 29 | `deno test supabase/functions/*/lib_test.ts` |
 | Ops script tests | 70 / 70 | `pwsh -File scripts/ops/PaystackOps.Tests.ps1` |
-| SQL suites (38) | 32 with results · **761 pass · 2 fail** (both 0025-era count assertions in 015) · 6 console-fixture suites no-result — on a repository-built replica at 0052 | `scripts/setup_db.ps1 -Database mm` then `scripts/run_suites.ps1 -Template mm` |
+| SQL suites (38) | run as `tests/MANIFEST` directs: each at head on a virgin copy unless pinned to the migration it was written for (`era=`), gated on one still proposed (`requires=`), or sharing a copy in sequence (`seq=`). The three boundary users the 006→007→009 chain needs come from `tests/fixtures/` (local shim only). Totals in the latest CI run | `scripts/setup_db.ps1 -Database mm` then `scripts/run_suites.ps1 -Template mm` |
 | Render evidence | 142 screenshots in `web/e2e/shots/` (three generations) | `cd web && npm run e2e` |
 
 ## Supabase advisors (10 Sep, read-only)

@@ -2,6 +2,10 @@ name: ci
 
 # Every check the repository can run without a secret, on every push and pull
 # request. Nothing here touches Supabase, Paystack or Vercel.
+#
+# The two database jobs build from a completely virgin PostgreSQL: the shim,
+# the local-only fixtures in tests/fixtures/, then the migrations. Nothing is
+# created by hand anywhere.
 on:
   push:
   pull_request:
@@ -44,6 +48,8 @@ jobs:
       - run: pwsh -NoProfile -File scripts/ops/PaystackOps.Tests.ps1
 
   database:
+    # What production IS: migrations/ only. Suites gated on a migration still in
+    # proposed/ are skipped here with a printed reason, not failed.
     name: database · 0001→head · every SQL suite
     runs-on: ubuntu-latest
     services:
@@ -60,5 +66,27 @@ jobs:
       - run: sudo apt-get update -q && sudo apt-get install -y -q postgresql-client
       - name: build a fresh database from the repository alone
         run: bash scripts/setup_db.sh mm
-      - name: run every suite against a virgin copy
+      - name: run every suite as tests/MANIFEST directs
         run: bash scripts/run_suites.sh mm
+
+  database-proposed:
+    # What production is ABOUT TO BE: migrations/ plus migrations/proposed/.
+    # This is where a migration's acceptance suite runs before it ships.
+    name: database · head + proposed · every SQL suite
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: ['55433:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env: { PGHOST: 127.0.0.1, PGPORT: 55433, PGUSER: postgres, PGPASSWORD: postgres }
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q postgresql-client
+      - name: build a fresh database including proposed migrations
+        run: bash scripts/setup_db.sh mmp --with-proposed
+      - name: run every suite as tests/MANIFEST directs
+        run: bash scripts/run_suites.sh mmp

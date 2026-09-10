@@ -1,0 +1,39 @@
+# tests/MANIFEST -- how each SQL suite is run by scripts/run_suites.{sh,ps1}
+#
+# One line per suite that needs anything other than the default. The default
+# is: a virgin copy of the head database, the suite's own pass|fail summary
+# row decides, and a suite printing no summary row is NO RESULT (informational).
+#
+#   suite          key=value ...
+#
+# Keys
+#   era=NNNN       run against a database built only up to migration NNNN.
+#                  For acceptance suites written for one migration whose
+#                  assertions describe THAT moment ("policy count is 105",
+#                  "v_price_check has 20 columns") and are meaningless later.
+#                  This is not a relaxation: the suite still runs, at the level
+#                  it was written for, and must pass there.
+#   requires=NNNN  skip, with a printed reason, unless the database is at or
+#                  beyond NNNN. For acceptance suites of a migration that may
+#                  still be in proposed/.
+#   seq=NAME       part of an ordered group that shares ONE database copy, in
+#                  file order, because later members read what earlier ones
+#                  created.
+#   rows           the suite prints result rows without a summary; count any
+#                  row whose verdict column reads FAIL as a failure instead of
+#                  treating the suite as NO RESULT.
+#   skip=REASON    never run automatically.
+#
+# Anything not listed runs at head on a virgin copy.
+
+003_real_client_role_escalation.sql   skip=connects as the authenticator role with a password; exercised by scripts/supabase_boundary_test.sh
+006_supabase_boundary_fixtures.sql    seq=boundary rows
+007_service_context.sql               seq=boundary rows
+008_post_phase_b.sql                  skip=reads the result of the manual S1-S13 service-role matrix (tests/service_context_test.html), which has no automated driver
+009_evidence_0018.sql                 seq=boundary rows
+010_anon_reference_read.sql           rows
+011_gate2_phase1.sql                  era=0021
+012_gate2_backfill.sql                era=0022
+015_gate2_repoint.sql                 era=0025
+017_billing_events.sql                era=0027
+038_search_path_and_fk_indexes.sql    requires=0052
