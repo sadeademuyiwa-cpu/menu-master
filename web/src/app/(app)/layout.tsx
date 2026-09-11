@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { EntitlementBanner } from '@/components/entitlement-banner'
 import { PrimaryNav } from '@/components/primary-nav'
 import { Toaster } from '@/components/toaster'
+import { AppIcon } from '@/components/icons'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -13,49 +14,37 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-dvh flex flex-col">
-      <header
-        className="sticky top-0 z-10 border-b px-4 py-3"
-        style={{ borderColor: 'var(--mm-line)', background: 'var(--mm-bg)' }}
-      >
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-          <Link href="/dashboard" className="font-semibold tracking-tight">
-            Menu Master NG
+      <header className="mm-app-header">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">
+          <Link href="/dashboard" className="flex min-w-0 items-center gap-2.5 font-semibold tracking-tight">
+            <span className="mm-brand-mark" aria-hidden>MM</span>
+            <span className="hidden sm:inline">Menu Master NG</span>
+            <span className="sm:hidden">Menu Master</span>
           </Link>
 
-          {/* DESKTOP NAVIGATION, in the header where a desktop user looks for
-              it. Below `sm` it is display:none -- so it leaves the
-              accessibility tree too -- and the fixed bar at the bottom takes
-              over. Exactly one of the two is ever shown to a given viewport. */}
           <PrimaryNav variant="header" />
 
-          {/* One element, always rendered. It truncates rather than
-              disappearing at any width, so there is no band where the
-              signed-in address is silently absent. */}
-          <span className="min-w-0 truncate text-xs" style={{ color: 'var(--mm-muted)' }}>
-            {user.email}
-          </span>
+          <Link
+            href="/account"
+            className="mm-account-chip"
+            title={user.email ?? 'Account'}
+            aria-label={`Account${user.email ? `: ${user.email}` : ''}`}
+          >
+            <AppIcon name="account" size={19} />
+            <span className="hidden max-w-40 truncate text-xs lg:inline">{user.email}</span>
+          </Link>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 pb-24 sm:pb-6">
+      <main className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-5 pb-28 sm:py-7 md:pb-8">
         <EntitlementBanner />
         {children}
       </main>
 
-      {/* MOBILE NAVIGATION, thumb-reachable at the bottom. Hidden from `sm`
-          upward, where the header carries the same five destinations.
-          Previously this was `sm:static`, which did not move the bar into the
-          header on a desktop -- it simply left it below the page content, so a
-          desktop read as a stretched phone. */}
-      <div
-        className="fixed inset-x-0 bottom-0 border-t sm:hidden"
-        style={{ borderColor: 'var(--mm-line)', background: 'var(--mm-bg)' }}
-      >
+      <div className="mm-bottom-nav md:hidden">
         <PrimaryNav variant="bottom" />
       </div>
 
-      {/* The outcome of the last action, read from ?notice= and shown at the
-          bottom of the screen. Suspense because it reads the search params. */}
       <Suspense fallback={null}><Toaster /></Suspense>
     </div>
   )

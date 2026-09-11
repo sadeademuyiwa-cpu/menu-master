@@ -1,10 +1,10 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { PageHeader, Card, SectionHeading } from '@/components/ui'
+import { PageHeader, Card, Badge } from '@/components/ui'
 import { money } from '@/lib/format'
 import { PlanChooser } from '@/components/plan-chooser'
-import Loading from './skeleton'
+import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,17 +17,6 @@ type Plan = {
   provider_plan_code: string | null
 }
 
-/**
- * Plan selection.
- *
- * Every price shown here is read from the database. Nothing on this page
- * decides what anyone will be charged: the browser sends a TIER and the server
- * resolves the rest through fn_checkout_quote, so what is displayed and what is
- * charged come from the same row.
- *
- * The founding price is shown only while slots actually remain. Advertising a
- * price we cannot honour is worse than not advertising it.
- */
 async function SubscribePageBody() {
   const supabase = await createClient()
 
@@ -39,24 +28,19 @@ async function SubscribePageBody() {
     supabase.from('founder_slots')
       .select('seq', { count: 'exact', head: true })
       .is('account_id', null),
-    supabase.from('subscriptions').select('plan_id,status').maybeSingle<
-      { plan_id: string; status: string }
-    >(),
+    supabase.from('subscriptions').select('plan_id,status').maybeSingle<{ plan_id: string; status: string }>(),
   ])
 
   const by = (tier: string, priceTier: string) =>
     plans?.find((p) => p.tier === tier && p.price_tier === priceTier) ?? null
 
-  // Slots free RIGHT NOW. This is a display fact, never the authority: the
-  // quote re-checks it at the moment of checkout, under a lock.
   const founding = (slotsLeft ?? 0) > 0
-
   const rows = (['costing', 'trading'] as const).map((tier) => {
     const standard = by(tier, 'standard')
     const offered = founding ? (by(tier, 'founding') ?? standard) : standard
     return {
       tier,
-      name: standard?.name ?? tier,
+      name: tier === 'costing' ? 'Costing' : 'Costing + Sales',
       offeredKobo: offered?.price_kobo ?? null,
       standardKobo: standard?.price_kobo ?? null,
       isFounding: founding && offered?.price_tier === 'founding',
@@ -66,18 +50,16 @@ async function SubscribePageBody() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Choose your plan"
-        sub="Monthly, in naira. Cancel whenever you like."
-      />
+      <PageHeader title="Choose your plan" sub="Monthly billing in naira. Cancel whenever you like." />
 
       {founding && (
         <Card>
-          <SectionHeading>Founding pricing — {slotsLeft} of 100 left</SectionHeading>
-          <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-            The first hundred businesses keep the founding price for as long as
-            their subscription runs without a break. It is not a first-month
-            discount.
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="font-semibold">Founding offer</div>
+            <Badge tone="good">{slotsLeft} of 100 left</Badge>
+          </div>
+          <p className="mt-2 text-sm" style={{ color: 'var(--mm-muted)' }}>
+            Keep the founding price while your subscription stays active.
           </p>
         </Card>
       )}
@@ -86,33 +68,28 @@ async function SubscribePageBody() {
         tier: r.tier,
         name: r.name,
         price: money(r.offeredKobo === null ? null : r.offeredKobo / 100),
-        was: r.isFounding && r.standardKobo !== null
-          ? money(r.standardKobo / 100)
-          : null,
+        was: r.isFounding && r.standardKobo !== null ? money(r.standardKobo / 100) : null,
         isFounding: r.isFounding,
         available: r.offeredKobo !== null && r.mapped,
         blurb: r.tier === 'costing'
-          ? 'Recipe costing, ingredient prices, margins and menu pricing.'
-          : 'Everything in Costing, plus recording sales, customers and channels.',
+          ? 'Cost recipes, ingredients, prices and margins.'
+          : 'Everything in Costing, plus sales and customers.',
       }))} />
 
       {sub && (
-        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-          You are currently on <span className="font-medium">{sub.plan_id}</span> ({sub.status}).
+        <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
+          Current plan: <span className="font-medium">{sub.plan_id}</span> · {sub.status}
         </p>
       )}
 
       <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
-        Payments are handled by Paystack. Menu Master NG never sees or stores
-        your card details. Monthly, cancel any time — see our{' '}
-        <Link href="/refunds" className="underline">refund and cancellation terms</Link>.
+        Secure checkout by Paystack. Menu Master NG does not store your card details.{' '}
+        <Link href="/refunds" className="underline">Refunds & cancellation</Link>
       </p>
     </div>
   )
 }
 
-// The body streams behind an in-page boundary -- never a route-level
-// loading.tsx, which stalls server-action redirects (see components/skeleton.tsx).
 export default function SubscribePage() {
   return <Suspense fallback={<Loading />}><SubscribePageBody /></Suspense>
 }

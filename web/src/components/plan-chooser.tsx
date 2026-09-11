@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Card, SectionHeading } from '@/components/ui'
+import { Card } from '@/components/ui'
 import { Button } from '@/components/button'
+import { AppIcon } from '@/components/icons'
 
 export type PlanRow = {
   tier: 'costing' | 'trading'
@@ -14,15 +15,6 @@ export type PlanRow = {
   blurb: string
 }
 
-/**
- * The plan buttons.
- *
- * The ONLY thing this sends is the tier. It deliberately posts no amount, no
- * plan id and no price tier, because the server would ignore them anyway --
- * fn_checkout_quote resolves all of it. Keeping the request that small is what
- * makes "a hostile client gets the same quote as an honest one" true of the
- * wire and not only of the database.
- */
 export function PlanChooser({ rows }: { rows: PlanRow[] }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -53,64 +45,55 @@ export function PlanChooser({ rows }: { rows: PlanRow[] }) {
       <div className="grid gap-3 sm:grid-cols-2">
         {rows.map((r) => (
           <Card key={r.tier}>
-            <SectionHeading>{r.name}</SectionHeading>
-            <p className="text-2xl font-medium">
-              {r.price}
-              <span className="text-sm font-normal" style={{ color: 'var(--mm-muted)' }}>
-                {' '}/month
-              </span>
-            </p>
-            {r.was && (
-              <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-                Founding price — normally {r.was}
-              </p>
-            )}
-            <p className="mt-2 text-sm" style={{ color: 'var(--mm-muted)' }}>{r.blurb}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="mm-page-icon"><AppIcon name={r.tier === 'trading' ? 'sales' : 'recipes'} size={20} /></span>
+                <div>
+                  <div className="font-semibold">{r.name}</div>
+                  {r.isFounding && <div className="text-xs font-medium" style={{ color: 'var(--mm-accent)' }}>Founding price</div>}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-end gap-1">
+              <span className="text-3xl font-semibold tabular-nums">{r.price}</span>
+              <span className="pb-1 text-sm" style={{ color: 'var(--mm-muted)' }}>/month</span>
+            </div>
+            {r.was && <div className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>Normally {r.was}</div>}
+
+            <div className="mt-4 flex items-start gap-2 text-sm" style={{ color: 'var(--mm-muted)' }}>
+              <AppIcon name="check" size={17} className="mt-0.5 shrink-0" style={{ color: 'var(--mm-accent)' }} />
+              <span>{r.blurb}</span>
+            </div>
+
             <Button
               type="button"
-              className="mt-3 w-full"
+              className="mt-5 w-full"
               busy={busy === r.tier}
-              busyLabel="Taking you to Paystack…"
+              busyLabel="Opening Paystack…"
               disabled={!r.available || busy !== null}
               onClick={() => choose(r.tier)}
             >
-              Choose {r.name}
+              Choose plan
             </Button>
-            {!r.available && (
-              <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                Not available for online payment yet.
-              </p>
-            )}
+            {!r.available && <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>Online payment unavailable.</p>}
           </Card>
         ))}
       </div>
-      {error && (
-        <p role="alert" className="mt-3 text-sm" style={{ color: 'var(--mm-warn)' }}>
-          {error}
-        </p>
-      )}
+      {error && <p role="alert" className="mt-3 text-sm" style={{ color: 'var(--mm-warn)' }}>{error}</p>}
     </>
   )
 }
 
-/** Fixed server codes to sentences. The server never sends prose, so nothing a
- *  provider said can reach the screen. */
 function message(code: unknown): string {
   switch (code) {
-    case 'unauthenticated':
-      return 'Your session has expired. Please sign in again.'
-    case 'no_account':
-      return 'This login is not on a business account yet.'
-    case 'ambiguous_account':
-      return 'This login belongs to more than one business, so we cannot tell which one to bill. Please contact us and we will sort it out.'
-    case 'no_email':
-      return 'Your login has no email address on it, and Paystack needs one. Please contact us.'
+    case 'unauthenticated': return 'Your session has expired. Please sign in again.'
+    case 'no_account': return 'This login is not on a business account yet.'
+    case 'ambiguous_account': return 'This login belongs to more than one business. Please contact us.'
+    case 'no_email': return 'Your login needs an email address before checkout.'
     case 'no_price_available':
-    case 'plan_not_mapped':
-      return 'This plan is not open for online payment yet. Please contact us and we will set you up.'
-    case 'provider_unavailable':
-      return 'Paystack did not respond. Nothing has been charged — please try again in a moment.'
-    default:
-      return 'We could not start your checkout. Nothing has been charged.'
+    case 'plan_not_mapped': return 'This plan is not open for online payment yet.'
+    case 'provider_unavailable': return 'Paystack did not respond. Nothing has been charged — please try again.'
+    default: return 'We could not start checkout. Nothing has been charged.'
   }
 }

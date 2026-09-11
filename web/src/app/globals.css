@@ -1,54 +1,42 @@
 @import 'tailwindcss';
 
-/* ===========================================================================
-   MENU MASTER NG — DESIGN TOKENS
-   
-   One place for every decision that repeats. Pages compose these; they do not
-   invent their own spacing, radius or control heights, which is how the app
-   drifted into per-page inline styling.
-   =========================================================================== */
-
 :root {
-  /* colour */
-  --mm-bg: #ffffff;
-  --mm-fg: #14110f;
-  --mm-muted: #6b625b;
-  --mm-line: #e6e0da;
-  --mm-accent: #1f6f4a;
-  --mm-warn: #8a5a00;
-  --mm-surface: #fbfaf8;
-
-  /* shape */
-  --mm-radius: 10px;
-  --mm-radius-sm: 6px;
-
-  /* the smallest comfortable tap target on a phone. Financial controls are
-     pressed with a thumb, often in a market, often in a hurry. */
-  --mm-touch: 44px;
-
-  /* motion. Two speeds: a press or a hover answers at once; a thing that
-     arrives or leaves takes long enough to be seen arriving. Everything that
-     moves reads these, so turning motion down is one media query below. */
+  --mm-bg: #f7f8f6;
+  --mm-fg: #171b18;
+  --mm-muted: #66706a;
+  --mm-line: #dde3de;
+  --mm-accent: #1f7a52;
+  --mm-accent-strong: #17633f;
+  --mm-accent-soft: #e8f5ee;
+  --mm-warn: #a06300;
+  --mm-warn-soft: #fff6df;
+  --mm-surface: #ffffff;
+  --mm-surface-2: #f0f3f0;
+  --mm-radius: 16px;
+  --mm-radius-sm: 11px;
+  --mm-touch: 46px;
   --mm-motion-fast: 120ms;
   --mm-motion: 220ms;
   --mm-ease: cubic-bezier(0.2, 0, 0, 1);
-
-  /* the accent one shade deeper, for hover and the pressed state */
-  --mm-accent-strong: #185a3c;
-  --mm-shadow: 0 6px 24px -8px rgb(20 17 15 / 0.35);
+  --mm-shadow: 0 10px 30px -20px rgb(24 38 29 / 0.45);
+  --mm-shadow-soft: 0 2px 10px rgb(24 38 29 / 0.05);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --mm-bg: #14110f;
-    --mm-fg: #f5f1ec;
-    --mm-muted: #a79c93;
-    --mm-line: #2e2926;
-    --mm-accent: #4bbd85;
-    --mm-warn: #d9a441;
-    --mm-surface: #1b1815;
-    --mm-accent-strong: #5fd39a;
-    --mm-shadow: 0 6px 24px -8px rgb(0 0 0 / 0.7);
+    --mm-bg: #101411;
+    --mm-fg: #f2f6f3;
+    --mm-muted: #98a39d;
+    --mm-line: #29322c;
+    --mm-accent: #5ac58f;
+    --mm-accent-strong: #70d8a4;
+    --mm-accent-soft: #173426;
+    --mm-warn: #e3b14e;
+    --mm-warn-soft: #33290f;
+    --mm-surface: #171d19;
+    --mm-surface-2: #1d251f;
+    --mm-shadow: 0 10px 30px -20px rgb(0 0 0 / 0.9);
+    --mm-shadow-soft: 0 2px 10px rgb(0 0 0 / 0.25);
   }
 }
 
@@ -56,133 +44,296 @@
   :root { --mm-motion-fast: 0ms; --mm-motion: 0ms; }
 }
 
+* { box-sizing: border-box; }
 html, body { background: var(--mm-bg); color: var(--mm-fg); }
-
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+a { -webkit-tap-highlight-color: transparent; }
+
+.mm-absent { color: var(--mm-muted); font-style: italic; }
+.mm-num { font-variant-numeric: tabular-nums; }
+
+/* APP SHELL */
+.mm-app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid color-mix(in srgb, var(--mm-line) 88%, transparent);
+  background: color-mix(in srgb, var(--mm-bg) 92%, transparent);
+  backdrop-filter: blur(14px);
+}
+.mm-brand-mark {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  flex: none;
+  border-radius: 11px;
+  background: var(--mm-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.mm-account-chip {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: .5rem;
+  border: 1px solid var(--mm-line);
+  border-radius: 999px;
+  padding: .35rem .65rem;
+  background: var(--mm-surface);
+  color: var(--mm-muted);
+}
+.mm-account-chip:hover { color: var(--mm-fg); border-color: var(--mm-muted); }
+.mm-bottom-nav {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 30;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--mm-line);
+  background: color-mix(in srgb, var(--mm-surface) 96%, transparent);
+  box-shadow: 0 -12px 30px -26px rgb(20 30 24 / .7);
+  backdrop-filter: blur(14px);
 }
 
-/* Values the owner has not entered are never styled to look like data. */
-.mm-absent { color: var(--mm-muted); font-style: italic; }
+/* NAV */
+.mm-nav-desktop {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: .45rem;
+  border-radius: 999px;
+  padding: 0 .8rem;
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--mm-muted);
+  transition: background var(--mm-motion-fast) var(--mm-ease), color var(--mm-motion-fast) var(--mm-ease);
+}
+.mm-nav-desktop:hover { background: var(--mm-surface); color: var(--mm-fg); }
+.mm-nav-desktop[data-current="true"] { background: var(--mm-accent-soft); color: var(--mm-accent); }
+.mm-nav-mobile {
+  position: relative;
+  display: flex;
+  min-height: 66px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .25rem;
+  padding: .4rem .15rem;
+  color: var(--mm-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.mm-nav-mobile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 28px;
+  height: 3px;
+  border-radius: 0 0 999px 999px;
+  background: transparent;
+}
+.mm-nav-mobile[data-current="true"] { color: var(--mm-accent); }
+.mm-nav-mobile[data-current="true"]::before { background: var(--mm-accent); }
 
-/* ---------------------------------------------------------------------------
-   CONTROLS
-   Every input, select and button is at least one tap target tall. Before this
-   they were 39px -- just under the threshold -- and inline actions were 20px.
-   16px text on inputs also stops iOS zooming the page on focus.
-   --------------------------------------------------------------------------- */
+/* CARDS & PAGE CHROME */
+.mm-card {
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-radius);
+  padding: .95rem;
+  background: var(--mm-surface);
+  box-shadow: var(--mm-shadow-soft);
+}
+.mm-page-icon,
+.mm-action-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 12px;
+  background: var(--mm-accent-soft);
+  color: var(--mm-accent);
+}
+.mm-page-icon { width: 40px; height: 40px; }
+.mm-action-icon { width: 38px; height: 38px; }
+.mm-action-tile {
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  gap: .7rem;
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-radius);
+  padding: .8rem;
+  background: var(--mm-surface);
+  box-shadow: var(--mm-shadow-soft);
+  transition: transform var(--mm-motion-fast) var(--mm-ease), border-color var(--mm-motion-fast) var(--mm-ease), box-shadow var(--mm-motion-fast) var(--mm-ease);
+}
+.mm-action-tile:hover { border-color: color-mix(in srgb, var(--mm-accent) 45%, var(--mm-line)); box-shadow: var(--mm-shadow); }
+.mm-action-tile:active { transform: scale(.985); }
+.mm-stat,
+.mm-hero-stat {
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-radius);
+  background: var(--mm-surface);
+  box-shadow: var(--mm-shadow-soft);
+}
+.mm-stat { padding: .85rem; }
+.mm-hero-stat { padding: .8rem .9rem; }
+.mm-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  border: 1px dashed var(--mm-line);
+  border-radius: var(--mm-radius);
+  padding: .85rem;
+  color: var(--mm-muted);
+  background: color-mix(in srgb, var(--mm-surface) 62%, transparent);
+  font-size: .875rem;
+}
+.mm-empty-icon { color: var(--mm-muted); }
+.mm-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: .65rem;
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-radius);
+  padding: .8rem .9rem;
+  background: var(--mm-surface);
+  font-size: .875rem;
+}
+.mm-notice[data-tone="warn"] { border-color: color-mix(in srgb, var(--mm-warn) 45%, var(--mm-line)); background: var(--mm-warn-soft); color: var(--mm-warn); }
+.mm-notice[data-tone="info"] { border-color: color-mix(in srgb, var(--mm-accent) 35%, var(--mm-line)); background: var(--mm-accent-soft); }
+.mm-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  white-space: nowrap;
+  border: 1px solid var(--mm-line);
+  border-radius: 999px;
+  padding: 0 .5rem;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mm-fg);
+  background: var(--mm-surface);
+}
+.mm-badge[data-tone="good"] { border-color: color-mix(in srgb, var(--mm-accent) 45%, var(--mm-line)); color: var(--mm-accent); background: var(--mm-accent-soft); }
+.mm-badge[data-tone="warn"], .mm-badge[data-tone="bad"] { border-color: color-mix(in srgb, var(--mm-warn) 45%, var(--mm-line)); color: var(--mm-warn); background: var(--mm-warn-soft); }
+.mm-badge[data-tone="muted"] { color: var(--mm-muted); background: var(--mm-surface-2); }
+.mm-disclosure { overflow: hidden; border: 1px solid var(--mm-line); border-radius: var(--mm-radius); background: var(--mm-surface); }
+.mm-back-link {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: .35rem;
+  color: var(--mm-muted);
+  font-size: .875rem;
+  font-weight: 600;
+}
+.mm-back-link:hover { color: var(--mm-fg); }
+
+/* INFO POPOVERS: secondary copy is available, not permanently in the way. */
+.mm-info > summary { list-style: none; }
+.mm-info > summary::-webkit-details-marker { display: none; }
+.mm-icon-btn {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  cursor: pointer;
+  border: 1px solid var(--mm-line);
+  border-radius: 999px;
+  background: var(--mm-surface);
+  color: var(--mm-muted);
+}
+.mm-info[open] .mm-icon-btn { color: var(--mm-accent); border-color: var(--mm-accent); }
+.mm-info-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + .45rem);
+  z-index: 40;
+  width: min(18rem, calc(100vw - 2rem));
+  border: 1px solid var(--mm-line);
+  border-radius: 12px;
+  padding: .7rem .8rem;
+  background: var(--mm-surface);
+  color: var(--mm-muted);
+  box-shadow: var(--mm-shadow);
+  font-size: .8rem;
+  line-height: 1.4;
+}
+
+/* CONTROLS */
 .mm-input {
   width: 100%;
   min-height: var(--mm-touch);
-  padding: 0.5rem 0.75rem;
+  padding: .55rem .75rem;
   font-size: 16px;
   border: 1px solid var(--mm-line);
   border-radius: var(--mm-radius-sm);
-  background: transparent;
+  background: var(--mm-surface);
   color: inherit;
+  transition: border-color var(--mm-motion-fast) var(--mm-ease), box-shadow var(--mm-motion-fast) var(--mm-ease);
 }
+.mm-input:focus { border-color: var(--mm-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mm-accent) 15%, transparent); }
 .mm-input:focus-visible,
 .mm-tap:focus-visible,
 a:focus-visible,
-button:focus-visible {
+button:focus-visible,
+summary:focus-visible {
   outline: 2px solid var(--mm-accent);
   outline-offset: 2px;
 }
+.mm-tap { display: inline-flex; min-height: var(--mm-touch); align-items: center; padding: 0 .25rem; }
 
-/* An inline action -- Update, Remove, Hide -- still needs a thumb-sized
-   hit area even though it reads as a link. */
-.mm-tap {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--mm-touch);
-  padding: 0 0.25rem;
-}
-
-/* Money and quantities line up column to column so they can be compared. */
-.mm-num { font-variant-numeric: tabular-nums; }
-
-/* ---------------------------------------------------------------------------
-   BUTTONS
-   One definition, three weights. A button answers a press the moment it is
-   pressed (scale), shows that it is working (spinner, aria-busy) and refuses
-   a second press until the first has been answered. Before this every submit
-   was a flat green rectangle that did nothing visible until the page reloaded.
-   --------------------------------------------------------------------------- */
+/* BUTTONS */
 .mm-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: .5rem;
   min-height: var(--mm-touch);
-  padding: 0.5rem 0.875rem;
-  font-size: 1rem;
-  font-weight: 500;
-  line-height: 1.25;
-  border-radius: var(--mm-radius-sm);
+  padding: .55rem .95rem;
+  font-size: .95rem;
+  font-weight: 700;
+  line-height: 1.2;
+  border-radius: 11px;
   border: 1px solid transparent;
   cursor: pointer;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  transition:
-    transform var(--mm-motion-fast) var(--mm-ease),
-    background-color var(--mm-motion-fast) var(--mm-ease),
-    border-color var(--mm-motion-fast) var(--mm-ease),
-    opacity var(--mm-motion-fast) var(--mm-ease);
+  transition: transform var(--mm-motion-fast) var(--mm-ease), background-color var(--mm-motion-fast) var(--mm-ease), border-color var(--mm-motion-fast) var(--mm-ease), opacity var(--mm-motion-fast) var(--mm-ease);
 }
-.mm-btn:active:not(:disabled) { transform: scale(0.97); }
-.mm-btn:disabled { cursor: not-allowed; opacity: 0.55; }
-.mm-btn[aria-busy="true"] { cursor: progress; opacity: 0.85; }
-
-.mm-btn-primary { background: var(--mm-accent); color: #fff; }
+.mm-btn:active:not(:disabled) { transform: scale(.98); }
+.mm-btn:disabled { cursor: not-allowed; opacity: .55; }
+.mm-btn[aria-busy="true"] { cursor: progress; opacity: .85; }
+.mm-btn-primary { background: var(--mm-accent); color: #fff; box-shadow: 0 6px 16px -10px var(--mm-accent); }
 .mm-btn-primary:hover:not(:disabled) { background: var(--mm-accent-strong); }
-
-.mm-btn-secondary { background: transparent; color: var(--mm-fg); border-color: var(--mm-line); }
-.mm-btn-secondary:hover:not(:disabled) { background: var(--mm-surface); border-color: var(--mm-muted); }
-
-/* Reads as a link -- Update, Remove, Hide -- and still takes a thumb. */
-.mm-btn-quiet {
-  padding: 0 0.25rem;
-  font-size: 0.875rem;
-  font-weight: 400;
-  color: var(--mm-muted);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  background: transparent;
-}
+.mm-btn-secondary { background: var(--mm-surface); color: var(--mm-fg); border-color: var(--mm-line); }
+.mm-btn-secondary:hover:not(:disabled) { background: var(--mm-surface-2); }
+.mm-btn-quiet { min-height: 38px; padding: 0 .2rem; font-size: .875rem; font-weight: 600; color: var(--mm-muted); background: transparent; }
 .mm-btn-quiet:hover:not(:disabled) { color: var(--mm-fg); }
-
-.mm-spinner {
-  width: 1em;
-  height: 1em;
-  flex: none;
-  border-radius: 50%;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  animation: mm-spin 0.7s linear infinite;
-}
+.mm-spinner { width: 1em; height: 1em; flex: none; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: mm-spin .7s linear infinite; }
 @keyframes mm-spin { to { transform: rotate(360deg); } }
 
-/* ---------------------------------------------------------------------------
-   TOASTS
-   The outcome of an action, where the eye is after pressing a button: the
-   bottom of the screen, above the navigation bar on a phone. Slides in,
-   stays long enough to read, leaves. Refusals stay longer than confirmations.
-   --------------------------------------------------------------------------- */
+/* TOASTS */
 .mm-toast {
   pointer-events: auto;
   display: flex;
   align-items: flex-start;
-  gap: 0.75rem;
+  gap: .75rem;
   max-width: 28rem;
-  padding: 0.75rem 0.875rem;
+  padding: .75rem .875rem;
   border: 1px solid var(--mm-line);
   border-left: 4px solid var(--mm-accent);
   border-radius: var(--mm-radius);
-  background: var(--mm-bg);
+  background: var(--mm-surface);
   color: var(--mm-fg);
   box-shadow: var(--mm-shadow);
-  font-size: 0.875rem;
+  font-size: .875rem;
   animation: mm-rise var(--mm-motion) var(--mm-ease) both;
 }
 .mm-toast[data-tone="warn"] { border-left-color: var(--mm-warn); }
@@ -190,12 +341,7 @@ button:focus-visible {
 @keyframes mm-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @keyframes mm-sink { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(12px); } }
 
-/* ---------------------------------------------------------------------------
-   PROGRESS
-   A thin bar across the top while the next page is on its way. It moves to
-   about 85% quickly and waits there, so a slow page is visibly "still coming"
-   rather than frozen; it completes when the new URL arrives.
-   --------------------------------------------------------------------------- */
+/* PROGRESS */
 .mm-progress {
   position: fixed;
   inset: 0 0 auto 0;
@@ -207,23 +353,24 @@ button:focus-visible {
   pointer-events: none;
 }
 .mm-progress[data-state="idle"] { opacity: 0; transform: scaleX(0); transition: none; }
-.mm-progress[data-state="busy"] { opacity: 1; transform: scaleX(0.85); transition: transform 8s cubic-bezier(0.05, 0.6, 0.2, 1); }
+.mm-progress[data-state="busy"] { opacity: 1; transform: scaleX(.85); transition: transform 8s cubic-bezier(.05,.6,.2,1); }
 .mm-progress[data-state="done"] { opacity: 0; transform: scaleX(1); }
 
-/* ---------------------------------------------------------------------------
-   SKELETONS
-   The shape of a page before its data arrives: a grey block where the
-   heading will be, rows where the list will be. They stand in for layout,
-   never for a value -- a skeleton is never mistaken for ₦0.00.
-   --------------------------------------------------------------------------- */
+/* SKELETONS */
 .mm-skeleton {
   display: block;
   border-radius: var(--mm-radius-sm);
-  background: linear-gradient(90deg, var(--mm-line) 0%, var(--mm-surface) 50%, var(--mm-line) 100%);
+  background: linear-gradient(90deg, var(--mm-line) 0%, var(--mm-surface-2) 50%, var(--mm-line) 100%);
   background-size: 200% 100%;
   animation: mm-shimmer 1.4s ease-in-out infinite;
 }
 @keyframes mm-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+@media (max-width: 639px) {
+  .mm-card { padding: .85rem; }
+  .mm-action-tile { min-height: 70px; padding: .7rem; }
+  .mm-action-tile .mm-action-icon { width: 34px; height: 34px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .mm-spinner, .mm-skeleton { animation-duration: 0s; }

@@ -1,45 +1,39 @@
 import { Suspense } from 'react'
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { currentContext, contextRedirect } from '@/lib/data/context'
 import { isPlatformAdmin } from '@/lib/data/admin'
-import { PageHeader, Card, SectionHeading } from '@/components/ui'
-import Loading from '../skeleton'
+import { PageHeader, SectionHeading, ActionTile } from '@/components/ui'
+import type { IconName } from '@/components/icons'
+import Loading from '../skeleton'
 
 export const dynamic = 'force-dynamic'
 
-/**
- * Everything that is not a daily action. Five items fit a 360px bar at a
- * legible size; ten did not, and the labels ran into each other. These live
- * here rather than being dropped, and each is also linked from the screen it
- * belongs to.
- */
-const GROUPS = [
+type LinkItem = { href: string; label: string; icon: IconName; meta?: string }
+type Group = { title: string; links: LinkItem[] }
+
+const GROUPS: Group[] = [
   {
     title: 'Selling',
-    sub: 'How your food reaches a customer.',
     links: [
-      { href: '/customers', label: 'Customers', hint: 'Who you cook for, and what they are worth to you.' },
-      { href: '/formats', label: 'The sizes you sell in', hint: 'Bowls, tubs, packs, trays.' },
-      { href: '/pricing', label: 'Your prices', hint: 'What you charge, and what it earns you.' },
+      { href: '/customers', label: 'Customers', icon: 'customers' },
+      { href: '/formats', label: 'Selling sizes', icon: 'formats' },
+      { href: '/pricing', label: 'Prices', icon: 'pricing' },
     ],
   },
   {
     title: 'Buying',
-    sub: 'Where your costs come from.',
     links: [
-      { href: '/ingredients', label: 'Ingredients', hint: 'What you cook with, and what it costs.' },
-      { href: '/suppliers', label: 'Suppliers and markets', hint: 'Who you buy from.' },
+      { href: '/ingredients', label: 'Ingredients', icon: 'ingredients' },
+      { href: '/suppliers', label: 'Suppliers', icon: 'supplier' },
     ],
   },
   {
-    title: 'Your business',
-    sub: 'Settings and records.',
+    title: 'Business',
     links: [
-      { href: '/settings', label: 'Costs and targets', hint: 'Paid work, monthly bills, target margin.' },
-      { href: '/settings/people', label: 'People', hint: 'Who works here on Menu Master, and what they can see.' },
-      { href: '/reports', label: 'Reports', hint: 'How the business is doing over time.' },
-      { href: '/account', label: 'Account and plan', hint: 'Your login and subscription.' },
+      { href: '/settings', label: 'Costs & targets', icon: 'settings' },
+      { href: '/settings/people', label: 'People', icon: 'people' },
+      { href: '/reports', label: 'Reports', icon: 'reports' },
+      { href: '/account', label: 'Account & plan', icon: 'account' },
     ],
   },
 ]
@@ -49,42 +43,27 @@ async function MorePageBody() {
   const { accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/more'))
 
-  // Offered only to a platform administrator. The database refuses everyone
-  // else regardless; this keeps a dead link off a customer's screen.
-  const groups = (await isPlatformAdmin())
-    ? [...GROUPS, {
-        title: 'Platform',
-        sub: 'Only you see this.',
-        links: [{ href: '/admin', label: 'Platform administration', hint: 'Alerts, billing health, subscriptions, signups.' }],
-      }]
+  const groups: Group[] = (await isPlatformAdmin())
+    ? [...GROUPS, { title: 'Platform', links: [{ href: '/admin', label: 'Administration', icon: 'admin' }] }]
     : GROUPS
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="More" sub="Everything else, grouped by what it is for." />
+    <div className="space-y-5">
+      <PageHeader title="More" sub="Customers, ingredients, reports, settings and account tools." />
       {groups.map((g) => (
-        <section key={g.title} className="space-y-3">
-          <SectionHeading sub={g.sub}>{g.title}</SectionHeading>
-          <ul className="space-y-2">
+        <section key={g.title} className="space-y-2.5">
+          <SectionHeading>{g.title}</SectionHeading>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {g.links.map((l) => (
-              <li key={l.href}>
-                <Link href={l.href} className="block">
-                  <Card>
-                    <div className="font-medium">{l.label}</div>
-                    <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>{l.hint}</div>
-                  </Card>
-                </Link>
-              </li>
+              <ActionTile key={l.href} href={l.href} icon={l.icon} label={l.label} meta={l.meta} />
             ))}
-          </ul>
+          </div>
         </section>
       ))}
     </div>
   )
 }
 
-// The body streams behind an in-page boundary -- never a route-level
-// loading.tsx, which stalls server-action redirects (see components/skeleton.tsx).
 export default function MorePage() {
   return <Suspense fallback={<Loading />}><MorePageBody /></Suspense>
 }
