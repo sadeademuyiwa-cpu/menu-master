@@ -428,9 +428,20 @@ function Resolve-PaystackPlanMap {
         # N7,500 candidate and was accepted for founding_trading -- the wrong
         # product at the right price, which is the one failure nothing
         # downstream can detect. Caught by PaystackOps.Tests.ps1.
-        $match = @($sameAmount | Where-Object {
-            ($_.name -match '(?i)founding') -eq $want.Founding
+        # Prefer the exact current plan name first. Paystack may continue
+        # returning historical plans at the same price.
+        $exact = @($sameAmount | Where-Object {
+            $_.name -and $_.name.Trim() -ieq $want.Label
         })
+
+        if ($exact.Count -gt 0) {
+            $match = $exact
+        } else {
+            # Compatibility fallback for older plan naming.
+            $match = @($sameAmount | Where-Object {
+                ($_.name -match '(?i)founding') -eq $want.Founding
+            })
+        }
 
         if ($match.Count -eq 1) {
             $map[$want.PlanId] = [pscustomobject]@{

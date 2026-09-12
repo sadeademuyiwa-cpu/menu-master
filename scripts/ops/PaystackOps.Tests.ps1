@@ -46,6 +46,17 @@ It 'maps all four when Paystack is set up correctly' {
     Expect $r.Map['founding_trading'].Code 'PLN_ftrade'
 }
 
+It 'prefers exact Founding Costing over a historical same-price plan' {
+    $withLegacy = $good + @(
+        Plan 'MENU MASTER NG FOUNDING' 'PLN_old_history' 350000
+    )
+
+    $r = Resolve-PaystackPlanMap -RemotePlans $withLegacy
+
+    Expect $r.Ok $true 'Ok'
+    Expect $r.Map['founding_costing'].Code 'PLN_fcost'
+}
+
 It 'separates the two N7,500 plans by name, not by order' {
     # reversed order must give the identical answer
     $r = Resolve-PaystackPlanMap -RemotePlans ($good[3], $good[0], $good[2], $good[1])
@@ -75,7 +86,7 @@ It 'REFUSES when neither N7,500 plan says Founding' {
     )
     $r = Resolve-PaystackPlanMap -RemotePlans $bad
     Expect $r.Ok $false 'Ok'
-    ExpectMatch ($r.Problems -join ' ') 'matches more than one plan'
+    ExpectMatch ($r.Problems -join ' ') 'matches more than one plan|no monthly Paystack plan'
 }
 
 It 'REFUSES a missing plan rather than leaving it unmapped' {
