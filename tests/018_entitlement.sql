@@ -167,8 +167,9 @@ begin
   -- 0049 declares exactly one more: the read-only policy on founder_slots. It
   -- drops and recreates 13 Sales write policies but adds none of them, so the
   -- only legal value after 0049 is 117.
-  insert into t9 values (14,'the policy count moved only by what 0031/0032/0049 declare',
-    case when n in (105, 116, 117) then 'PASS' else 'FAIL' end, n::text);
+  -- 0057 declares one more: the public read policy on site_settings = 118.
+  insert into t9 values (14,'the policy count moved only by what 0031/0032/0049/0057 declare',
+    case when n in (105, 116, 117, 118) then 'PASS' else 'FAIL' end, n::text);
 
   select count(*) into n from pg_proc p where p.proname='fn_account_is_entitled'
     and has_function_privilege('anon', p.oid, 'EXECUTE');

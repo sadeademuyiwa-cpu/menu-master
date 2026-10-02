@@ -37,7 +37,11 @@
 015_gate2_repoint.sql                 era=0025
 017_billing_events.sql                era=0027
 038_search_path_and_fk_indexes.sql    requires=0052 era=0052
-039_platform_admins.sql               requires=0053
-040_admin_reads.sql                   requires=0054
-041_platform_alerts.sql               requires=0055
-042_invitations.sql                   requires=0056
+037_paid_period_and_sales_gate.sql    era=0051
+039_platform_admins.sql               requires=0053 era=0053
+040_admin_reads.sql                   requires=0054 era=0054
+041_platform_alerts.sql               requires=0055 era=0055
+042_invitations.sql                   requires=0056 era=0056
+043_site_settings.sql                 requires=0057
+044_trial_reminders.sql               requires=0058
+045_site_images.sql                   requires=0059
