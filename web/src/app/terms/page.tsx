@@ -27,7 +27,7 @@ export default async function TermsPage() {
       <p>
         These terms are the agreement between you and {legalEntityWords(company)} (“we”,
         “us”), who operate {L.productName} at {L.website}. By
-        creating an account you accept them. If you are using {L.productName}
+        creating an account you accept them. If you are using {L.productName}{' '}
         for a business, you confirm you may accept these terms for it.
       </p>
 

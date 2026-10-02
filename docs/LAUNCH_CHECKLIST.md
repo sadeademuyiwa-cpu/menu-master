@@ -6,13 +6,22 @@ code live first.
 
 Production facts this assumes (checked 2 October 2026): the database is at
 migration **0056**; Supabase project `mgbrrrjxbufstsjrdoug`; site
-`https://menumasterng.com`; Vercel builds branch
-`chatgpt/frontend-redesign-20260911-224439` on push, so **a push to that
-branch is a production deploy**.
+`https://menumasterng.com`. Vercel's **production branch is
+`claude/menu-master-ng-migrations-3faerm`** — every production deployment so
+far came from it (latest: 182ba18, "Redesign customer frontend…"). Pushes to
+any other branch, including `chatgpt/frontend-redesign-20260911-224439`,
+only make previews.
 
-This work lives on its own branch, `launch/2026-10-02`, branched from that
-one. Going live means merging it into the production branch; undoing means
-reverting that merge (or redeploying the previous deployment in Vercel).
+This work lives on its own branch, `launch/2026-10-02`, branched from
+`chatgpt/frontend-redesign-20260911-224439` at 9ac532e. That means it also
+carries **9ac532e "Handle historical Paystack plans safely"**, which is not
+live yet. Going live means merging `launch/2026-10-02` into the production
+branch (a fast-forward from 182ba18); undoing means Vercel → Deployments →
+the previous production deployment → **Promote to Production** (instant
+rollback), then reverting the merge.
+
+Preview of this branch (built and checked 2 October 2026; Vercel login
+needed): `https://menu-master-git-launch-2026-10-02-menu-master.vercel.app`
 
 ---
 
@@ -21,9 +30,9 @@ reverting that merge (or redeploying the previous deployment in Vercel).
 - [ ] **Vercel → Settings → Environment Variables (Production):**
       `NEXT_PUBLIC_SITE_URL` = `https://menumasterng.com`. Leave
       `NEXT_PUBLIC_SENTRY_DSN` unset for now.
-- [ ] Optional: open the Vercel **preview** of branch `launch/2026-10-02`
-      and click through it first. It uses the same Supabase project as
-      production if the preview environment has the same variables.
+- [ ] Optional: click through the **preview** (link above) first. It uses
+      the same Supabase project as production if the preview environment has
+      the same variables, so test with a throwaway account.
 
 ## 2. Merge into the production branch (deploys the app)
 
@@ -31,8 +40,9 @@ The app works on a 0056 database: with 0057–0059 not yet applied, it shows
 no pixels, the bundled privacy policy, the landing page without pictures, and
 Admin → Website says the settings are not available yet.
 
-- [ ] Merge `launch/2026-10-02` into `chatgpt/frontend-redesign-20260911-224439`
-      and push. Wait for the Vercel deployment to finish.
+- [ ] On GitHub: open a pull request from `launch/2026-10-02` into
+      `claude/menu-master-ng-migrations-3faerm`, read it, merge it. Wait
+      for the Vercel **production** deployment to finish.
 - [ ] Open `https://menumasterng.com` signed out: the landing page shows.
       Signed in: it goes to the dashboard.
 
