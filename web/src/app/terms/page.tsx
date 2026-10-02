@@ -1,9 +1,14 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { LegalPage, H2 } from '@/components/legal-page'
+import { LegalPage, H2, SupportContact } from '@/components/legal-page'
 import { LEGAL } from '@/lib/legal'
+import { loadSiteSettings } from '@/lib/data/site'
+import { legalEntityWords } from '@/lib/site/settings'
 
 export const metadata: Metadata = { title: 'Terms of service — Menu Master NG' }
+
+// The company details come from Admin -> Website; refreshed within a minute.
+export const revalidate = 60
 
 /**
  * Plain-language terms. Written to be read by a food-business owner on a
@@ -14,13 +19,14 @@ export const metadata: Metadata = { title: 'Terms of service — Menu Master NG'
  *
  * This is the owner's draft to review, not legal advice.
  */
-export default function TermsPage() {
+export default async function TermsPage() {
   const L = LEGAL
+  const { company } = await loadSiteSettings()
   return (
     <LegalPage title="Terms of service">
       <p>
-        These terms are the agreement between you and {L.legalEntity} (“we”,
-        “us”), the business that operates {L.productName} at {L.website}. By
+        These terms are the agreement between you and {legalEntityWords(company)} (“we”,
+        “us”), who operate {L.productName} at {L.website}. By
         creating an account you accept them. If you are using {L.productName}
         for a business, you confirm you may accept these terms for it.
       </p>
@@ -38,7 +44,7 @@ export default function TermsPage() {
       <p>
         You need an email address to create an account, and you are responsible
         for keeping your password private and for everything done under your
-        login. Tell us at {L.supportEmail} straight away if you think someone
+        login. Write to <SupportContact /> straight away if you think someone
         else has used it. One person may hold an owner role on an account;
         other people you add are limited to the role you give them.
       </p>
@@ -106,8 +112,8 @@ export default function TermsPage() {
 
       <H2>9. Law and contact</H2>
       <p>
-        These terms are governed by the laws of {L.governingLaw}. Questions
-        about them go to {L.supportEmail}. If we change these terms we will
+        These terms are governed by the laws of {L.governingLaw}. Send
+        questions about them to <SupportContact />. If we change these terms we will
         update the date at the top of this page, and for a change that affects
         what you pay or what you get we will tell you before it takes effect.
       </p>

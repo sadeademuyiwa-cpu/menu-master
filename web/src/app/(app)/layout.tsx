@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="min-h-dvh flex flex-col">
       <header className="mm-app-header">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">
-          <Link href="/dashboard" className="flex min-w-0 items-center gap-2.5 font-semibold tracking-tight">
+          <Link href="/dashboard" className="flex min-h-[44px] min-w-0 items-center gap-2.5 font-semibold tracking-tight">
             <span className="mm-brand-mark" aria-hidden>MM</span>
             <span className="hidden sm:inline">Menu Master NG</span>
             <span className="sm:hidden">Menu Master</span>

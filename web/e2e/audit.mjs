@@ -5,6 +5,7 @@
  * 12px, horizontal overflow, and controls hidden behind fixed furniture.
  */
 import { chromium } from 'playwright'
+import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
 import { mkdirSync } from 'node:fs'
 
 const BASE = 'http://127.0.0.1:3100'
@@ -36,19 +37,14 @@ await page.fill('input[type=email]', `audit-${stamp}@t.ng`)
 await page.fill('input[type=password]', 'correct-horse-battery')
 await Promise.all([page.waitForLoadState('domcontentloaded'), page.click('button[type=submit]')])
 await page.waitForLoadState('networkidle').catch(() => {})
-// the auth cookie is written by a server action; poll rather than sleep
-for (let i = 0; i < 15; i++) {
-  await go(page, '/onboarding')
-  if ((await page.locator('body').innerText()).includes('Set up your business')) break
-  await page.waitForTimeout(400)
-}
-const oi = page.locator('form input[type=text], form input:not([type])')
-await oi.nth(0).fill('Ada Foods'); await oi.nth(1).fill('Ada Kitchen')
-await page.click('form button[type=submit]'); await page.waitForTimeout(2500)
+// onboardBusiness polls /onboarding until the auth cookie has landed
+await onboardBusiness(page, BASE, { business: 'Ada Kitchen' })
+await finishSetup(page, BASE)
 
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', 'Ofada Rice')
-await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await page.click('form button[type=submit]'); await page.waitForTimeout(1200)
 await page.locator('a:has-text("Ofada Rice")').first().click()
 await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(600)
@@ -58,14 +54,9 @@ await pick(buy, 'select[name=unit_id]', 'kg — Kilogram')
 await buy.locator('input[name=amount]').fill('85000')
 await buy.locator('button[type=submit]').click(); await page.waitForTimeout(1200)
 
-await go(page, '/recipes')
-await page.fill('input[name=name]', 'Party Jollof Rice with Chicken')
-await page.fill('input[name=batch_yield_qty]', '4500')
-await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
-await page.fill('input[name=portion_qty]', '500')
-await page.click('form button[type=submit]'); await page.waitForTimeout(1500)
+await newDish(page, BASE, { name: 'Party Jollof Rice with Chicken', batch: '4500', unit: 'g — Gram', portion: '500' })
 const recipeUrl = page.url().split('?')[0]
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await openDetails(page, 'Add an ingredient')
 const line = page.locator('form:has(select[name=ingredient_id])')
 await pick(line, 'select[name=ingredient_id]', 'Ofada Rice')
 await line.locator('input[name=qty]').fill('4500')

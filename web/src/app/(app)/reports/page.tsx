@@ -119,7 +119,7 @@ async function ReportsPageBody() {
                 <li key={v.record_id}>
                   <Card>
                       <p>
-                        <Link href={`/sales/${v.record_id}`} className="underline">
+                        <Link href={`/sales/${v.record_id}`} className="mm-inline-tap">
                           {v.reference ?? v.record_id}
                         </Link>
                       </p>
@@ -137,7 +137,7 @@ async function ReportsPageBody() {
                           : 'no record of who cancelled it'}
                         {' · '}
                         {v.replaced_by
-                          ? <Link href={`/sales/${v.replaced_by}`} className="underline">see the sale that replaced it</Link>
+                          ? <Link href={`/sales/${v.replaced_by}`} className="mm-inline-tap">see the sale that replaced it</Link>
                           : 'not replaced'}
                       </p>
                   </Card>

@@ -1,141 +1,95 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
-import {
-  PageHeader, Field, Submit, inputClass, inputStyle, Notice, SectionHeading, Empty, Card,
-} from '@/components/ui'
-import { money, NOT_ENTERED } from '@/lib/format'
+import { currentContext, contextRedirect } from '@/lib/data/context'
+import { PageHeader, Notice, SectionHeading, Empty, Card, Badge } from '@/components/ui'
+import { AppIcon } from '@/components/icons'
+import { money, productState } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
 
-type Unit = { id: string; code: string; name: string; kind: string }
-type Recipe = {
-  id: string; name: string; batch_yield_qty: string; yield_unit_id: string
-  portion_qty: string | null; status: string
-}
-type Cost = { recipe_id: string; is_complete: boolean; cost_per_portion: string | null }
-
-async function createRecipe(formData: FormData) {
-  'use server'
-  const here = '/recipes'
-  const ctx = await currentContext()
-  const { supabase, accountId, businessId } = ctx
-  if (!accountId || !businessId) redirect(contextRedirect(ctx, here))
-
-  const batchYield = Number(formData.get('batch_yield_qty'))
-  const portionRaw = String(formData.get('portion_qty') ?? '').trim()
-  const portion = portionRaw === '' ? null : Number(portionRaw)
-
-  if (!Number.isFinite(batchYield) || batchYield <= 0) {
-    redirect(withNotice(here, 'A batch has to produce something. Enter a yield greater than zero.'))
-  }
-  if (portion !== null && (!Number.isFinite(portion) || portion <= 0)) {
-    redirect(withNotice(here, 'A portion has to be greater than zero, or left empty.'))
-  }
-
-  const { data, error } = await supabase.from('recipes').insert({
-    account_id: accountId,
-    business_id: businessId,
-    name: String(formData.get('name') ?? '').trim(),
-    batch_yield_qty: batchYield,
-    yield_unit_id: String(formData.get('yield_unit_id') ?? ''),
-    portion_qty: portion,
-    status: 'active',
-  }).select('id').maybeSingle()
-
-  if (error || !data) redirect(withNotice(here, describeWriteError(error) ?? 'Could not create that recipe.'))
-
-  revalidatePath(here)
-  redirect(`/recipes/${data.id}`)
+type Recipe = { id: string; name: string }
+type Product = {
+  recipe_id: string; variant_id: string | null; format_name: string | null
+  true_cost: string | null; selling_price: string | null; state: string; attention_rank: number
 }
 
+/**
+ * Every dish with what it costs, what it sells for and whether that is
+ * healthy -- the live menu costing, read from v_product_attention, the same
+ * view the dashboard uses. A new dish starts on its own screen (/recipes/new).
+ */
 export default async function RecipesPage(props: {
   searchParams: Promise<{ notice?: string }>
 }) {
   const { notice } = await props.searchParams
-  const supabase = await createClient()
+  const ctx = await currentContext()
+  if (!ctx.accountId) redirect(contextRedirect(ctx, '/recipes'))
+  const { supabase, role } = ctx
+  // Costs and prices are for the roles the database lets see them (fn_can_see_costs).
+  const seesCosts = role === 'owner' || role === 'manager' || role === 'accountant'
 
-  const [{ data: recipes }, { data: units }, { data: costs }] = await Promise.all([
-    supabase.from('recipes')
-      .select('id,name,batch_yield_qty,yield_unit_id,portion_qty,status')
-      .is('deleted_at', null).order('name').returns<Recipe[]>(),
-    supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<Unit[]>(),
-    supabase.from('v_recipe_cost_current')
-      .select('recipe_id,is_complete,cost_per_portion').returns<Cost[]>(),
+  const [{ data: recipes }, { data: products }] = await Promise.all([
+    supabase.from('recipes').select('id,name').is('deleted_at', null).order('name').returns<Recipe[]>(),
+    supabase.from('v_product_attention')
+      .select('recipe_id,variant_id,format_name,true_cost,selling_price,state,attention_rank')
+      .returns<Product[]>(),
   ])
 
-  const unitCode = new Map((units ?? []).map((u) => [u.id, u.code]))
-  const costOf = new Map((costs ?? []).map((c) => [c.recipe_id, c]))
+  const rowsOf = new Map<string, Product[]>()
+  for (const p of products ?? []) rowsOf.set(p.recipe_id, [...(rowsOf.get(p.recipe_id) ?? []), p])
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageHeader
         title="Recipes"
         sub="What a dish really costs to make, from the prices you entered yourself."
       />
-      <p className="text-sm">
-        <Link href="/formats" className="mm-tap underline">The sizes you sell in →</Link>
-      </p>
-
       {notice && <Notice>{notice}</Notice>}
 
-      <section className="space-y-3">
-        <SectionHeading sub="A batch is what one cooking produces. A portion is what you sell.">
-          New recipe
-        </SectionHeading>
-        <form action={createRecipe} className="grid gap-3 sm:grid-cols-5 sm:items-end">
-          <Field label="Name">
-            <input name="name" required className={inputClass} style={inputStyle} />
-          </Field>
-          <Field label="Batch makes">
-            <input name="batch_yield_qty" type="number" step="any" min="0" required
-              className={inputClass} style={inputStyle} />
-          </Field>
-          <Field label="Measured in">
-            <select name="yield_unit_id" required className={inputClass} style={inputStyle}>
-              {(units ?? []).map((u) => (
-                <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="One portion is (optional)">
-            <input name="portion_qty" type="number" step="any" min="0"
-              className={inputClass} style={inputStyle} />
-          </Field>
-          <Submit>Create</Submit>
-        </form>
-      </section>
+      {/* One obvious thing to do here. The dish screen takes it from there. */}
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <Link href="/recipes/new" className="mm-btn mm-btn-primary w-full text-base">
+          <AppIcon name="plus" size={20} /> New dish
+        </Link>
+        <Link href="/formats" className="mm-btn mm-btn-secondary w-full">
+          <AppIcon name="formats" size={18} /> Sizes you sell
+        </Link>
+      </div>
 
       <section className="space-y-3">
-        <SectionHeading>Your recipes {recipes ? `(${recipes.length})` : ''}</SectionHeading>
+        <SectionHeading sub="Cost and price per portion, or per size where you sell in sizes.">
+          Your dishes {recipes ? `(${recipes.length})` : ''}
+        </SectionHeading>
 
         {!recipes || recipes.length === 0 ? (
-          <Empty>You have not added anything you make yet. Add your first product to discover what it really costs you.</Empty>
+          <Empty>No dishes yet. Tap New dish to find out what your first one really costs you.</Empty>
         ) : (
-          <ul className="space-y-3">
+          <ul className="space-y-2">
             {recipes.map((r) => {
-              const c = costOf.get(r.id)
+              const rows = (rowsOf.get(r.id) ?? []).sort((a, b) => a.attention_rank - b.attention_rank)
+              const main = rows[0]
+              const st = main ? productState(main.state) : null
               return (
                 <li key={r.id}>
                   <Link href={`/recipes/${r.id}`} className="block">
                     <Card>
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <span className="font-medium">{r.name}</span>
-                        <span className="text-sm tabular-nums">
-                          {c?.is_complete
-                            ? `${money(c.cost_per_portion === null ? null : Number(c.cost_per_portion))} per portion`
-                            : <span className="mm-absent">
-                                {c ? 'costing incomplete' : 'not costed yet'}
-                              </span>}
-                        </span>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 truncate font-semibold">{r.name}</span>
+                        {seesCosts && (st ? <Badge tone={st.tone}>{st.label}</Badge> : <Badge tone="muted">No ingredients yet</Badge>)}
                       </div>
-                      <div className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                        Batch {Number(r.batch_yield_qty)} {unitCode.get(r.yield_unit_id) ?? NOT_ENTERED}
-                        {r.portion_qty !== null &&
-                          ` · portion ${Number(r.portion_qty)} ${unitCode.get(r.yield_unit_id) ?? ''}`}
-                      </div>
+                      {!seesCosts ? null : rows.length > 1 ? (
+                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                          Sold in {rows.length} sizes
+                          {rows.some((p) => p.selling_price === null) ? ' · some have no price yet' : ''}
+                        </div>
+                      ) : main ? (
+                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                          {main.true_cost !== null ? `Costs you ${money(main.true_cost)}` : 'Cost not complete yet'}
+                          {main.selling_price !== null ? ` · you sell it for ${money(main.selling_price)}` : ' · no selling price yet'}
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>Open it to add what goes into one batch.</div>
+                      )}
                     </Card>
                   </Link>
                 </li>

@@ -4,7 +4,11 @@ import { createClient } from '@/lib/supabase/server'
 import { currentContext, entitlementStatus } from '@/lib/data/context'
 import { PageHeader, Card, SectionHeading, Notice, Empty, BackLink } from '@/components/ui'
 import { NOT_ENTERED, money } from '@/lib/format'
-import Loading from './skeleton'
+import { planStatusLabel } from '@/lib/trial'
+import { signOut } from '@/lib/auth-actions'
+import { Button } from '@/components/button'
+
+import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,7 +49,7 @@ async function AccountPageBody() {
 
   return (
     <div className="space-y-8">
-      <BackLink href="/dashboard">← Dashboard</BackLink>
+      <BackLink href="/dashboard">Dashboard</BackLink>
 
       <PageHeader title="Account" sub="Your business, your plan and your access." />
 
@@ -98,7 +102,7 @@ async function AccountPageBody() {
                 {sub.founding_price_active ? ' (founding price)' : ''}
               </dd>
               <dt style={{ color: 'var(--mm-muted)' }}>Status</dt>
-              <dd>{sub.status}</dd>
+              <dd>{planStatusLabel(sub.status)}</dd>
 
               {/* The trial date is shown only while there IS a trial. A paid
                   subscriber was being shown "Trial ends" beside a live
@@ -128,17 +132,25 @@ async function AccountPageBody() {
             </dl>
           </Card>
         )}
-        <p className="text-sm">
-          <Link href="/subscribe" className="mm-tap underline">
-            {sub && sub.status === 'active' ? 'Change your plan' : 'Choose a plan'}
-          </Link>
-        </p>
+        <Link href="/subscribe" className="mm-btn mm-btn-primary w-full sm:w-auto">
+          {sub && sub.status === 'active' ? 'Change your plan' : 'Choose a plan'}
+        </Link>
         <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
           Payments are handled by Paystack. Menu Master NG never sees or stores
           your card details.{' '}
           <Link href="/terms" className="underline">Terms</Link> ·{' '}
           <Link href="/refunds" className="underline">Refunds and cancellation</Link>
         </p>
+      </section>
+
+      <section className="space-y-3">
+        <SectionHeading>Sign-in</SectionHeading>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/reset-password" className="mm-btn mm-btn-secondary">Change password</Link>
+          <form action={signOut}>
+            <Button variant="secondary" busyLabel="Signing out…">Sign out</Button>
+          </form>
+        </div>
       </section>
     </div>
   )

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
-  PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading,
+  PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading, Disclosure,
 } from '@/components/ui'
 import { money, NOT_ENTERED } from '@/lib/format'
 
@@ -171,22 +171,7 @@ export default async function SettingsPage({
         <SectionHeading sub="What you pay per hour for the work that goes into a batch. Add it to a recipe to include it in the cost.">
           Kinds of work
         </SectionHeading>
-        <Card>
-          <form action={addRate} className="grid gap-3 sm:grid-cols-3">
-            <Field label="What kind of work?">
-              <input name="name" required placeholder="Cooking" className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Paid per hour (₦)">
-              <input name="rate_per_hour" type="number" step="0.01" min="0"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <div className="flex items-end"><Submit>Add</Submit></div>
-          </form>
-          <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
-            Leave the rate blank if you do not know it yet. Recipes using it will
-            be reported as incomplete — never as if the work were free.
-          </p>
-        </Card>
+
         {!rates?.length ? (
           <Empty>No paid work added yet. If you pay someone to cook or prep, add it here and it will be counted in your costs.</Empty>
         ) : (
@@ -215,6 +200,22 @@ export default async function SettingsPage({
             ))}
           </ul>
         )}
+        <Disclosure summary="Add a kind of work" open={!rates?.length}>
+          <form action={addRate} className="grid gap-3 sm:grid-cols-3">
+            <Field label="What kind of work?">
+              <input name="name" required placeholder="Cooking" className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Paid per hour (₦)">
+              <input name="rate_per_hour" type="number" step="0.01" min="0"
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <div className="flex items-end"><Submit>Add</Submit></div>
+          </form>
+          <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
+            Leave the rate blank if you do not know it yet. Recipes using it will
+            be reported as incomplete — never as if the work were free.
+          </p>
+        </Disclosure>
       </section>
 
       {/* OVERHEAD ----------------------------------------------------- */}
@@ -251,34 +252,7 @@ export default async function SettingsPage({
             </p>
           </form>
         </Card>
-        <Card>
-          <form action={addOverhead} className="grid gap-3 sm:grid-cols-4">
-            <Field label="What is it?">
-              <input name="name" required placeholder="Gas" className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Cost each month (₦)">
-              <input name="monthly_cost" type="number" step="0.01" min="0"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Spread across how much?">
-              <input name="basis_qty" type="number" step="any" min="0" placeholder="600"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Of what?">
-              <select name="basis_unit_id" className={inputClass} style={inputStyle}>
-                <option value="">— use my usual amount —</option>
-                {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
-              </select>
-            </Field>
-            <div className="sm:col-span-4"><Submit>Add running cost</Submit></div>
-            <p className="sm:col-span-4 text-xs" style={{ color: 'var(--mm-muted)' }}>
-              If you make more than one kind of thing, say what each bill is
-              spread across — for example rent for the soup pots over 600
-              litres, and the bakery bill over 400 kg. Split the money between
-              the lines; do not enter the same bill twice.
-            </p>
-          </form>
-        </Card>
+
         {!overheads?.length ? (
           <Empty>No monthly bills added yet. Rent, gas and electricity are real costs — add them to see what a plate truly costs you.</Empty>
         ) : (
@@ -312,6 +286,34 @@ export default async function SettingsPage({
             ))}
           </ul>
         )}
+        <Disclosure summary="Add a monthly bill" open={!overheads?.length}>
+          <form action={addOverhead} className="grid gap-3 sm:grid-cols-4">
+            <Field label="What is it?">
+              <input name="name" required placeholder="Gas" className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Cost each month (₦)">
+              <input name="monthly_cost" type="number" step="0.01" min="0"
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Spread across how much?">
+              <input name="basis_qty" type="number" step="any" min="0" placeholder="600"
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Of what?">
+              <select name="basis_unit_id" className={inputClass} style={inputStyle}>
+                <option value="">— use my usual amount —</option>
+                {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+              </select>
+            </Field>
+            <div className="sm:col-span-4"><Submit>Add running cost</Submit></div>
+            <p className="sm:col-span-4 text-xs" style={{ color: 'var(--mm-muted)' }}>
+              If you make more than one kind of thing, say what each bill is
+              spread across — for example rent for the soup pots over 600
+              litres, and the bakery bill over 400 kg. Split the money between
+              the lines; do not enter the same bill twice.
+            </p>
+          </form>
+        </Disclosure>
       </section>
 
       <Card>

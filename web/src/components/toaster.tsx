@@ -36,6 +36,17 @@ export function Toaster() {
     if (pathname !== firstPath.current) navigatedSoftly.current = true
   }, [pathname])
 
+  // Each toast owns its timers until it has left. They used to be cleared by
+  // the effect's cleanup, which runs whenever the NEXT notice arrives: two
+  // actions in a row on one page left the first toast on screen for good,
+  // covering the buttons at the bottom of a phone. Only unmounting stops them.
+  const nextId = useRef(0)
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>())
+  useEffect(() => {
+    const pending = timers.current
+    return () => { pending.forEach(clearTimeout) }
+  }, [])
+
   useEffect(() => {
     if (!notice) return
     // The document itself arrived by reload or history traversal: the inline
@@ -43,17 +54,23 @@ export function Toaster() {
     const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
     if (nav && nav.type !== 'navigate' && !navigatedSoftly.current) return
 
-    const id = Date.now()
+    const id = ++nextId.current
     const tone = noticeTone(notice)
-    setToasts((t) => [...t, { id, text: notice, tone, leaving: false }])
+    // The same sentence already showing is not shown twice.
+    setToasts((t) => (t.some((x) => x.text === notice && !x.leaving)
+      ? t
+      : [...t, { id, text: notice, tone, leaving: false }]))
 
     const leave = setTimeout(() => {
+      timers.current.delete(leave)
       setToasts((t) => t.map((x) => (x.id === id ? { ...x, leaving: true } : x)))
     }, noticeDuration(tone))
     const gone = setTimeout(() => {
+      timers.current.delete(gone)
       setToasts((t) => t.filter((x) => x.id !== id))
     }, noticeDuration(tone) + 300)
-    return () => { clearTimeout(leave); clearTimeout(gone) }
+    timers.current.add(leave)
+    timers.current.add(gone)
   }, [notice, pathname])
 
   if (toasts.length === 0) return null

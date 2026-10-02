@@ -4,15 +4,23 @@ import { useState } from 'react'
 import { Card } from '@/components/ui'
 import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
+import { track } from '@/lib/analytics/client'
+import { rememberCheckout } from '@/components/activation-reporter'
 
 export type PlanRow = {
   tier: 'costing' | 'trading'
   name: string
   price: string
+  /** The same price as a number of naira, for advert measurement. */
+  monthly?: number | null
   was: string | null
   isFounding: boolean
   available: boolean
   blurb: string
+  /** What the plan includes, one line each. */
+  features?: string[]
+  /** The plan this account is paying for now. */
+  current?: boolean
 }
 
 export function PlanChooser({ rows }: { rows: PlanRow[] }) {
@@ -30,6 +38,11 @@ export function PlanChooser({ rows }: { rows: PlanRow[] }) {
       })
       const body = await res.json().catch(() => ({}))
       if (res.ok && body?.authorization_url) {
+        const monthly = rows.find((r) => r.tier === tier)?.monthly ?? undefined
+        track('checkout_started', { plan: tier, value: monthly ?? undefined })
+        rememberCheckout(tier, monthly ?? null)
+        // A moment for the advert tags to send before the page is left.
+        await new Promise((r) => setTimeout(r, 300))
         window.location.href = body.authorization_url
         return
       }
@@ -61,20 +74,25 @@ export function PlanChooser({ rows }: { rows: PlanRow[] }) {
             </div>
             {r.was && <div className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>Normally {r.was}</div>}
 
-            <div className="mt-4 flex items-start gap-2 text-sm" style={{ color: 'var(--mm-muted)' }}>
-              <AppIcon name="check" size={17} className="mt-0.5 shrink-0" style={{ color: 'var(--mm-accent)' }} />
-              <span>{r.blurb}</span>
-            </div>
+            <p className="mt-3 text-sm" style={{ color: 'var(--mm-muted)' }}>{r.blurb}</p>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              {(r.features ?? []).map((f) => (
+                <li key={f} className="flex items-start gap-2">
+                  <AppIcon name="check" size={17} className="mt-0.5 shrink-0" style={{ color: 'var(--mm-accent)' }} />
+                  <span>{f}</span>
+                </li>
+              ))}
+            </ul>
 
             <Button
               type="button"
               className="mt-5 w-full"
               busy={busy === r.tier}
               busyLabel="Opening Paystack…"
-              disabled={!r.available || busy !== null}
+              disabled={!r.available || busy !== null || r.current}
               onClick={() => choose(r.tier)}
             >
-              Choose plan
+              {r.current ? 'Your current plan' : 'Choose plan'}
             </Button>
             {!r.available && <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>Online payment unavailable.</p>}
           </Card>

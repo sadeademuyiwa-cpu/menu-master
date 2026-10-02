@@ -76,7 +76,7 @@ export default async function PeoplePage(props: { searchParams: Promise<{ notice
 
   return (
     <div className="space-y-8">
-      <BackLink href="/settings">← Settings</BackLink>
+      <BackLink href="/settings">Settings</BackLink>
       <PageHeader title="People" sub="Who works in this business on Menu Master, and what each of them can see." />
       {notice && <Notice tone={/could not|cannot|only an owner|give |choose |already|not an email/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 

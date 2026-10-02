@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
-import { PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading } from '@/components/ui'
+import { PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading, Disclosure } from '@/components/ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,17 +60,15 @@ export default async function SuppliersPage({
         sub="Who you buy from. Optional — you can record a purchase without one." />
       {notice && <Notice tone={/could not|give the/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
-      <Card>
-        <SectionHeading sub="A market name is fine. You do not need a formal supplier.">
-          Add a supplier or market
-        </SectionHeading>
+      <Disclosure summary="Add a supplier or market" open={!suppliers?.length}>
+        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>A market name is fine. You do not need a formal supplier.</p>
         <form action={addSupplier} className="mt-3 grid gap-3 sm:grid-cols-4">
           <Field label="Name"><input name="name" required className={inputClass} style={inputStyle} /></Field>
           <Field label="Phone (optional)"><input name="phone" className={inputClass} style={inputStyle} /></Field>
           <Field label="Where (optional)"><input name="location" className={inputClass} style={inputStyle} /></Field>
           <div className="flex items-end"><Submit>Add</Submit></div>
         </form>
-      </Card>
+      </Disclosure>
 
       {!suppliers?.length ? (
         <Empty>No suppliers yet. Add one above, or record purchases without one.</Empty>

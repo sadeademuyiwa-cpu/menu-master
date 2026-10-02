@@ -136,7 +136,7 @@ export function Stat({ label, value, sub }: {
     <div className="mm-stat">
       <div className="text-xs font-medium" style={{ color: 'var(--mm-muted)' }}>{label}</div>
       <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
-      {sub && <div className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>{sub}</div>}
+      {sub && <div className="mt-1 text-[13px]" style={{ color: 'var(--mm-muted)' }}>{sub}</div>}
     </div>
   )
 }
@@ -177,7 +177,7 @@ export function HeroStat({ label, value, sub, tone = 'plain' }: {
         {label}
       </div>
       <div className="mm-num mt-1 text-xl font-semibold sm:text-2xl" style={{ color: colour }}>{value}</div>
-      {sub && <div className="mt-1 line-clamp-2 text-xs" style={{ color: 'var(--mm-muted)' }}>{sub}</div>}
+      {sub && <div className="mt-1 line-clamp-2 text-[13px]" style={{ color: 'var(--mm-muted)' }}>{sub}</div>}
     </div>
   )
 }

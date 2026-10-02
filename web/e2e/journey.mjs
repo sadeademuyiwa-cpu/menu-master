@@ -10,6 +10,7 @@
  * customer would actually read.
  */
 import { chromium } from 'playwright'
+import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
 
 const BASE = 'http://127.0.0.1:3100'
 const stamp = Date.now()
@@ -33,10 +34,29 @@ async function text(page) { return page.locator('body').innerText() }
  * compared character for character.
  */
 const has = (body, needle) => body.toLowerCase().includes(needle.toLowerCase())
+/**
+ * A page that a save re-renders can be read before the new render lands: a
+ * fixed pause after the click raced under load. So a check waits up to 5 s
+ * for what it expects -- a real failure still fails, five seconds later --
+ * and every wait is recorded, so a slowdown shows up in the summary instead
+ * of hiding behind the retry.
+ */
+const waits = []
+async function readUntil(page, needles, ms = 5000) {
+  const start = Date.now()
+  let body = await text(page)
+  let missing = needles.filter((n) => !has(body, n))
+  while (missing.length && Date.now() - start < ms) {
+    await page.waitForTimeout(250)
+    body = await text(page)
+    missing = needles.filter((n) => !has(body, n))
+  }
+  if (!missing.length) waits.push(Date.now() - start)
+  return { body, missing }
+}
 async function must(page, name, ...needles) {
   await rendered(page)
-  const body = await text(page)
-  const missing = needles.filter((n) => !has(body, n))
+  const { body, missing } = await readUntil(page, needles)
   mark(name, missing.length === 0, missing.length ? `missing ${JSON.stringify(missing)}` : '')
   // What the page actually said, so a failure can be read without a rerun.
   if (missing.length) console.log('      page said: ' + body.replace(/\s+/g, ' ').slice(0, 600))
@@ -112,7 +132,7 @@ async function signUp(page, who) {
   // The auth cookie is written by a server action. Poll a protected route
   // until it actually renders for this user rather than sleeping and hoping:
   // a fixed delay passed locally and raced under load.
-  await settled(page, '/onboarding', 'Set up your business')
+  await settled(page, '/onboarding', 'Tell us about your business')
 }
 /** Navigate until the page proves the session is live, or fail loudly.
  *  25 tries, not 15: the first run against a cold database took longer than
@@ -132,16 +152,15 @@ async function logIn(page, who) {
   await page.fill('input[type=email]', who.email)
   await page.fill('input[type=password]', who.pass)
   await submit(page, 'button[type=submit]')
-  await settled(page, '/dashboard', 'Menu Master NG')
+  await settled(page, '/dashboard', 'Menu Master')
 }
-async function onboard(page, account, business) {
-  await go(page, '/onboarding')
-  const inputs = page.locator('form input[type=text], form input:not([type])')
-  await inputs.nth(0).fill(account)
-  await inputs.nth(1).fill(business)
-  await submit(page, 'button[type=submit]')
-  await page.waitForTimeout(1500)   // the RPC clones ~180 catalogue items
-  await rendered(page)              // the client-side push to /dashboard streams too
+/** The account takes the business's name now; `account` is kept for call sites. */
+async function onboard(page, _account, business) {
+  await onboardBusiness(page, BASE, { business })
+  // Setup is compulsory: one priced dish before the rest of the app opens.
+  await finishSetup(page, BASE)
+  await go(page, '/dashboard')
+  await rendered(page)
 }
 
 const browser = await chromium.launch({ args: ['--no-proxy-server'] })
@@ -163,14 +182,14 @@ page.on('requestfailed', (r) => {
 })
 
 await signUp(page, A)
-mark('signup completes and lands inside the app', (await text(page)).includes('Set up your business'), page.url())
+mark('signup completes and lands inside the app', (await text(page)).includes('Tell us about your business'), page.url())
 
 await onboard(page, 'Ada Foods', 'Ada Kitchen')
 await must(page, 'onboarding reaches the dashboard', 'Ada Kitchen')
 
 // PHASE 5: a first-time owner is told what to do, not shown a wall of zeros.
 await must(page, 'a brand new business gets a guided next step, not an empty dashboard',
-  'Getting started', 'Next:', 'Do this now')
+  'Getting started', 'Next', 'Record your first sale')
 await mustNot(page, 'and is not greeted by zero naira everywhere', '₦0.00')
 await mustNot(page, 'no database words reach the owner',
   'allocation basis', 'basis dimension', 'snapshot', 'provenance',
@@ -180,8 +199,9 @@ const tFirstStep = Date.now() - t0
 
 // --- ingredient -------------------------------------------------------------
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', `Ofada Rice ${stamp}`)
-await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
 await must(page, 'the new ingredient appears in the list', `Ofada Rice ${stamp}`)
 const tFirstIngredient = Date.now() - t0
@@ -210,6 +230,7 @@ await page.screenshot({ path: 'e2e/shots/rc-ingredient-unknown-unit.png', fullPa
 await mustNot(page, 'no cost is invented for the refused purchase', '₦0.00', 'NaN')
 
 // --- 2. conversion, then the purchase ---------------------------------------
+await openDetails(page, 'Add a local measure')
 const convForm = page.locator('form:has(input[name=qty_in_base])')
 await pick(convForm, 'select[name=unit_id]', 'paint')
 await convForm.locator('input[name=qty_in_base]').fill('4000')
@@ -234,19 +255,14 @@ const tFirstPricedIngredient = Date.now() - t0
 const stepsFirstPriced = steps
 
 // --- recipe -----------------------------------------------------------------
-await go(page, '/recipes')
-await page.fill('input[name=name]', 'Ofada Special')
-await page.fill('input[name=batch_yield_qty]', '4000')
-await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
-await page.fill('input[name=portion_qty]', '500')
-await submit(page, 'form button[type=submit]')
+await newDish(page, BASE, { name: 'Ofada Special', batch: '4000', unit: 'g — Gram', portion: '500' })
 await must(page, 'the recipe is created and opens', 'Ofada Special', 'Ingredients')
 const recipeUrl = page.url().split('?')[0]
 const tFirstRecipe = Date.now() - t0
 const stepsFirstRecipe = steps
 
 // --- 1. a complete, costed recipe -------------------------------------------
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await openDetails(page, 'Add an ingredient')
 const addLine = page.locator('form:has(select[name=ingredient_id])')
 await pick(addLine, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
 await addLine.locator('input[name=qty]').fill('2000')
@@ -262,7 +278,9 @@ const tFirstCost = Date.now() - t0
 const stepsFirstCost = steps
 
 // --- 5/6. selling price and margin ------------------------------------------
-const priceForm = page.locator('form').last()
+// Found by its field, not its position: a costed dish with no price now asks
+// for the price straight under the numbers, as its next step.
+const priceForm = page.locator('form:has(input[name=price])').first()
 await priceForm.locator('input[name=price]').fill('500')
 steps++
 await priceForm.locator('button[type=submit]').click()
@@ -275,11 +293,12 @@ const stepsFirstMargin = steps
 
 // --- 2. a missing price blocks, and NAMES the item ---------------------------
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', `Palm Oil ${stamp}`)
-await pick(page, 'select[name=base_unit_id]', 'ml — Millilitre')
+await pick(page, 'select[name=base_unit_id]', 'Volume — millilitres')
 await submit(page, 'form button[type=submit]')
 await go(page, recipeUrl)
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await openDetails(page, 'Add an ingredient')
 const addLine2 = page.locator('form:has(select[name=ingredient_id])')
 await pick(addLine2, 'select[name=ingredient_id]', `Palm Oil ${stamp}`)
 await addLine2.locator('input[name=qty]').fill('100')
@@ -354,6 +373,7 @@ await page.screenshot({ path: 'e2e/shots/rc-desktop-pro.png', fullPage: true })
 // Nothing here is a Menu Master constant: the business names its own format
 // and states its own size, and the engine blocks rather than guesses.
 await go(page, '/settings')
+await openDetails(page, 'Add a kind of work')
 await page.fill('input[name=name]', 'Cooking')
 await page.locator('form:has(input[name=rate_per_hour]) input[name=rate_per_hour]').fill('500')
 await page.locator('form:has(input[name=rate_per_hour]) button[type=submit]').click()
@@ -362,6 +382,7 @@ await settledForm(page)
 await must(page, 'a business can define what it pays per hour', 'Cooking', '₦500.00 an hour')
 
 await go(page, '/formats')
+await openDetails(page, 'Add a size')
 await page.fill('input[name=name]', `Family Bowl ${stamp}`)
 await page.fill('input[name=capacity_qty]', '2.5')
 await pick(page, 'select[name=capacity_unit_id]', 'l — Litre')
@@ -378,6 +399,7 @@ await page.locator(`a:has-text("Family Bowl ${stamp}")`).first().click()
 await page.waitForURL(/\/formats\/[0-9a-f-]{36}/, { timeout: 15000 })
 await page.waitForLoadState('networkidle').catch(() => {})
 await rendered(page)
+await page.evaluate(() => document.querySelectorAll('details.mm-info').forEach((d) => { d.open = true }))
 await must(page, 'the format explains that packaging is counted once per serving',
   'Packaging', 'once per serving')
 await page.screenshot({ path: 'e2e/shots/p4-format-detail.png', fullPage: true })
@@ -388,6 +410,7 @@ await must(page, 'overhead is spread over what the business produces, not a fixe
 
 // A non-accountant must be able to split bills across two kinds of output
 // without meeting the words "dimension", "basis" or "allocation".
+await openDetails(page, 'Add a monthly bill')
 await must(page, 'running costs are explained in plain business language',
   'Spread across how much?', 'rent for the soup pots over 600')
 await mustNot(page, 'no dimensional-analysis jargon reaches the owner',
@@ -405,6 +428,7 @@ await settledForm(page)
 await must(page, 'a running cost states what it is spread across, in the owner\'s words',
   'Soup pot rent', 'spread across 600 l you make')
 
+await openDetails(page, 'Add a monthly bill')
 const ohForm2 = page.locator('form:has(input[name=basis_qty])')
 await ohForm2.locator('input[name=name]').fill('Bakery rent')
 await ohForm2.locator('input[name=monthly_cost]').fill('200000')
@@ -432,14 +456,10 @@ await go(page, recipeUrl)
 await must(page, 'a recipe with no format is sold by the portion',
   'How you sell this', 'Sold by the portion')
 
-await go(page, '/recipes')
-await page.fill('input[name=name]', `Format Soup ${stamp}`)
-await page.fill('input[name=batch_yield_qty]', '10000')
-await pick(page, 'select[name=yield_unit_id]', 'ml — Millilitre')
-await submit(page, 'form button[type=submit]')
+await newDish(page, BASE, { name: `Format Soup ${stamp}`, batch: '10000', unit: 'ml — Millilitre' })
 const fmtRecipeUrl = page.url().split('?')[0]
 
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await openDetails(page, 'Add an ingredient')
 const fLine = page.locator('form:has(select[name=ingredient_id])')
 await pick(fLine, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
 await fLine.locator('input[name=qty]').fill('10000')
@@ -462,6 +482,7 @@ await vForm.locator('button[type=submit]').click()
 await page.waitForTimeout(1500)
 await settledForm(page)
 await rendered(page)
+await page.evaluate(() => document.querySelectorAll('details.mm-info').forEach((d) => { d.open = true }))
 await must(page, 'attaching a format switches the recipe to selling by size',
   `Family Bowl ${stamp}`, 'You sell this in your own sizes')
 await must(page, 'each size shows what it costs, from the same batch',
@@ -493,35 +514,36 @@ await must(page, 'the purchase the ingredient page recorded appears in the ledge
 
 // A full multi-line purchase, entered the way a market run actually happens.
 await go(page, '/suppliers')
+await openDetails(page, 'Add a supplier or market')
 await page.fill('input[name=name]', `Mile 12 ${stamp}`)
 await submit(page, 'form button[type=submit]')
 await must(page, 'a market can be added as a supplier', `Mile 12 ${stamp}`)
 
-await go(page, '/purchases')
-await pick(page, 'select[name=supplier_id]', `Mile 12 ${stamp}`)
-await submit(page, 'form button[type=submit]')
-await must(page, 'starting a purchase opens it for items', 'Add an item', 'Not recorded')
-const purchaseUrl = page.url().split('?')[0]
-
-const lineForm = page.locator('form:has(select[name=ingredient_id])')
-await pick(lineForm, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
-await lineForm.locator('input[name=qty]').fill('25')
-await pick(lineForm, 'select[name=unit_id]', 'kg — Kilogram')
-await lineForm.locator('input[name=amount]').fill('42000')
+// The whole trip on the purchase screen: item, quantity, unit, what was paid,
+// and the market it came from.
+await go(page, '/purchases/new')
+await must(page, 'a purchase opens on its own screen, ready for items', 'Record a purchase', 'What did you buy?')
+await page.waitForTimeout(500)
+await page.selectOption('select[aria-label="Item 1"]', { label: `Ofada Rice ${stamp}` })
+await page.fill('input[aria-label="How much, item 1"]', '25')
+await page.selectOption('select[aria-label="Unit, item 1"]', { label: 'kg' })
+await page.fill('input[aria-label="Paid, item 1"]', '42000')
+await openDetails(page, 'Date, supplier and reference')
+await pick(page, 'details select:not([aria-label])', `Mile 12 ${stamp}`)
 steps++
-await lineForm.locator('button[type=submit]').click()
-await page.waitForTimeout(1000)
+await page.click('button:has-text("Record purchase")')
+await page.waitForURL(/\/purchases\/[0-9a-f-]{36}/, { timeout: 60000 })
+await rendered(page)
 await settledForm(page)
-await must(page, 'the item is added with what was actually paid', '₦42,000.00', '25 kg')
-
-await page.locator('form:has-text("Record this purchase") button[type=submit]').first().click()
-await page.waitForTimeout(1200)
-await settledForm(page)
+const purchaseUrl = page.url().split('?')[0]
+await must(page, 'the item is recorded with what was actually paid', '₦42,000.00', '25 kg')
 await must(page, 'recording the purchase reports the prices it updated',
-  'Recorded', 'ingredient price')
+  'Recorded', 'price updated')
+await must(page, 'and shows the dishes it re-costed', 'What this changed', 'Ofada Special')
 await mustNot(page, 'a recorded purchase is never left as a draft', 'Not recorded yet')
 
 // Reversal: the cost is undone, the record is kept.
+await openDetails(page, 'Something is wrong with this purchase')
 const revForm = page.locator('form:has(input[name=reason])')
 await revForm.locator('input[name=reason]').fill('wrong amount')
 steps++
@@ -539,8 +561,9 @@ await must(page, 'the cancelled purchase is kept as evidence, not deleted', '₦
 // conversion for this item, so the engine cannot resolve the quantity. The
 // recipe must name that, and must not fall back to a guess.
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', `Garri ${stamp}`)
-await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
 await page.locator(`a:has-text("Garri ${stamp}")`).first().click()
 await page.waitForLoadState('domcontentloaded')
@@ -555,14 +578,9 @@ await page.waitForTimeout(900)
 await settledForm(page)
 await rendered(page)
 
-await go(page, '/recipes')
-await page.fill('input[name=name]', 'Garri Test')
-await page.fill('input[name=batch_yield_qty]', '1000')
-await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
-await page.fill('input[name=portion_qty]', '250')
-await submit(page, 'form button[type=submit]')
+await newDish(page, BASE, { name: 'Garri Test', batch: '1000', unit: 'g — Gram', portion: '250' })
 const convRecipeUrl = page.url().split('?')[0]
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await openDetails(page, 'Add an ingredient')
 const addConv = page.locator('form:has(select[name=ingredient_id])')
 await pick(addConv, 'select[name=ingredient_id]', `Garri ${stamp}`)
 await addConv.locator('input[name=qty]').fill('2')
@@ -590,7 +608,7 @@ await go(page, recipeUrl)
 await must(page, 'the recipe opens from a direct URL', 'Ofada Special', '₦4,500.00')
 
 // --- 8. validation ----------------------------------------------------------
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await openDetails(page, 'Add an ingredient')
 const addLine3 = page.locator('form:has(select[name=ingredient_id])')
 await pick(addLine3, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
 await addLine3.locator('input[name=qty]').fill('0')
@@ -604,8 +622,10 @@ mark('a zero quantity is refused with a readable message',
 
 // --- 6. persistence across logout / login -----------------------------------
 await go(page, '/account')
+// The status reads as words now ("Free trial"), never the raw value "trialing".
 await must(page, 'the account page reports the live trial from the database',
-  'free trial', 'Free Trial', 'trialing')
+  'free trial', 'days left')
+await mustNot(page, 'the account page shows no raw database status', 'trialing')
 await ctx.clearCookies()
 await go(page, recipeUrl)
 mark('a logged-out visitor is sent to the login page', page.url().includes('/login'), page.url())
@@ -638,11 +658,12 @@ await ctxB.close()
 // has priced. Only ingredients actually IN a recipe should appear -- the
 // starter catalogue must not fill the list with food never bought.
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', `Unpriced Pepper ${stamp}`)
-await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
 await go(page, fmtRecipeUrl)
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await openDetails(page, 'Add an ingredient')
 const upLine = page.locator('form:has(select[name=ingredient_id])')
 await pick(upLine, 'select[name=ingredient_id]', `Unpriced Pepper ${stamp}`)
 await upLine.locator('input[name=qty]').fill('50')
@@ -654,18 +675,18 @@ await settledForm(page)
 
 await go(page, '/dashboard')
 await must(page, 'the dashboard reports products that need attention',
-  'Needs your attention')
+  'Needs attention')
 await must(page, 'and states them in plain business language',
   'You may be undercharging')
 await mustNot(page, 'the dashboard still uses no database words',
   'allocation basis', 'snapshot', 'provenance', 'variant', 'NULL', 'is_complete')
 await must(page, 'an ingredient a recipe uses but nobody priced is surfaced',
-  'Ingredient prices to check', `Unpriced Pepper ${stamp}`, 'Price needed')
+  'Prices to check', `Unpriced Pepper ${stamp}`, 'Price needed')
 // The starter catalogue is ~180 items. None of them belongs in a task list
 // until the business actually uses it.
 await mustNot(page, 'and the starter catalogue does not fill the list with noise',
   'Semovita', 'Poundo yam flour', 'Rice (imported)')
-await must(page, 'and quick actions are offered', 'Quick actions', 'Record a purchase')
+await must(page, 'and quick actions are offered', 'New purchase', 'Record what you paid')
 await page.screenshot({ path: 'e2e/shots/p5-dashboard-live.png', fullPage: true })
 
 // ===========================================================================
@@ -729,7 +750,7 @@ for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'ta
     await go(pageM, '/ingredients')
     await must(pageM, 'mobile ingredient list renders', `Ofada Rice ${stamp}`)
     await go(pageM, '/dashboard')
-    await must(pageM, 'the dashboard is usable on a phone', 'Needs your attention')
+    await must(pageM, 'the dashboard is usable on a phone', 'Needs attention')
     await pageM.screenshot({ path: 'e2e/shots/p5-dashboard-mobile.png', fullPage: true })
   }
   await ctxM.close()
@@ -751,6 +772,8 @@ mark('no failed network requests during the journey',
 await browser.close()
 
 const pass = results.filter((r) => r.ok).length
+const slow = waits.filter((w) => w >= 250).sort((a, b) => b - a)
+console.log(`checks that had to wait for the page to update: ${slow.length}; longest ${slow[0] ?? 0} ms`)
 console.log(`\n${pass}/${results.length} checks passed`)
 console.log(JSON.stringify({
   msToOnboarded: tFirstStep,

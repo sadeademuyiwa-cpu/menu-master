@@ -18,7 +18,7 @@ const jwt = [
 ].join('.')
 
 const shots = [
-  ['recipes', '/recipes', ['Recipes', 'New recipe', 'Jollof Rice']],
+  ['recipes', '/recipes', ['Recipes', 'New dish', 'Jollof Rice']],
   ['recipe-detail', '/recipes/00000000-0000-0000-0000-000000000020',
     ['Jollof Rice', 'Ingredients used', 'Selling price', 'Rice', 'Salt']],
   ['ingredient-detail', '/ingredients/00000000-0000-0000-0000-000000000010',

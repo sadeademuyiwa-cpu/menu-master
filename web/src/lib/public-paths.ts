@@ -9,14 +9,20 @@
  * decision, not a convenience.
  */
 export const PUBLIC_PATHS = [
+  '/',
   '/login',
   '/signup',
   '/verify-email',
+  '/forgot-password',
   '/auth/callback',
+  '/auth/confirm',
   '/terms',
   '/refunds',
+  '/privacy',
 ] as const
 
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))
+  // '/' is the landing page only: every path starts with it, so it never
+  // counts as a prefix.
+  return PUBLIC_PATHS.some((p) => pathname === p || (p !== '/' && pathname.startsWith(p + '/')))
 }

@@ -80,7 +80,7 @@ a { -webkit-tap-highlight-color: transparent; }
 }
 .mm-account-chip {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 44px;
   align-items: center;
   gap: .5rem;
   border: 1px solid var(--mm-line);
@@ -104,7 +104,7 @@ a { -webkit-tap-highlight-color: transparent; }
 /* NAV */
 .mm-nav-desktop {
   display: inline-flex;
-  min-height: 42px;
+  min-height: 44px;
   align-items: center;
   gap: .45rem;
   border-radius: 999px;
@@ -226,7 +226,7 @@ a { -webkit-tap-highlight-color: transparent; }
 .mm-disclosure { overflow: hidden; border: 1px solid var(--mm-line); border-radius: var(--mm-radius); background: var(--mm-surface); }
 .mm-back-link {
   display: inline-flex;
-  min-height: 38px;
+  min-height: 44px;
   align-items: center;
   gap: .35rem;
   color: var(--mm-muted);
@@ -240,8 +240,8 @@ a { -webkit-tap-highlight-color: transparent; }
 .mm-info > summary::-webkit-details-marker { display: none; }
 .mm-icon-btn {
   display: inline-grid;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   cursor: pointer;
   border: 1px solid var(--mm-line);
@@ -314,7 +314,7 @@ summary:focus-visible {
 .mm-btn-primary:hover:not(:disabled) { background: var(--mm-accent-strong); }
 .mm-btn-secondary { background: var(--mm-surface); color: var(--mm-fg); border-color: var(--mm-line); }
 .mm-btn-secondary:hover:not(:disabled) { background: var(--mm-surface-2); }
-.mm-btn-quiet { min-height: 38px; padding: 0 .2rem; font-size: .875rem; font-weight: 600; color: var(--mm-muted); background: transparent; }
+.mm-btn-quiet { min-height: 44px; padding: 0 .2rem; font-size: .875rem; font-weight: 600; color: var(--mm-muted); background: transparent; }
 .mm-btn-quiet:hover:not(:disabled) { color: var(--mm-fg); }
 .mm-spinner { width: 1em; height: 1em; flex: none; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: mm-spin .7s linear infinite; }
 @keyframes mm-spin { to { transform: rotate(360deg); } }
@@ -377,4 +377,120 @@ summary:focus-visible {
   .mm-skeleton { background: var(--mm-line); }
   .mm-toast, .mm-toast[data-leaving="true"] { animation: none; }
   .mm-progress[data-state="busy"] { transition: none; }
+}
+
+/* ===========================================================================
+   SHEET -- a short, occasional form in a pop-up (components/sheet.tsx).
+   Bottom sheet on a phone, centred card from sm up.
+   =========================================================================== */
+.mm-sheet {
+  margin: auto auto 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 88dvh;
+  padding: 0;
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-radius) var(--mm-radius) 0 0;
+  background: var(--mm-surface);
+  color: var(--mm-fg);
+  box-shadow: var(--mm-shadow);
+}
+.mm-sheet[open] { animation: mm-sheet-in var(--mm-motion) var(--mm-ease); }
+.mm-sheet::backdrop { background: rgb(10 15 12 / 0.45); }
+.mm-sheet-body { padding: 1.1rem 1rem calc(1.1rem + env(safe-area-inset-bottom)); }
+@media (min-width: 640px) {
+  .mm-sheet { margin: auto; max-width: 28rem; border-radius: var(--mm-radius); }
+  .mm-sheet-body { padding: 1.25rem; }
+}
+@keyframes mm-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ===========================================================================
+   TAKE ORDER -- menu tiles with big steppers and a running-total bar.
+   =========================================================================== */
+.mm-menu-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: .6rem;
+  min-height: 112px;
+  padding: .8rem;
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-radius-sm);
+  background: var(--mm-surface);
+  box-shadow: var(--mm-shadow-soft);
+  text-align: left;
+}
+.mm-menu-tile[data-in-cart="true"] { border-color: var(--mm-accent); box-shadow: 0 0 0 1px var(--mm-accent); }
+.mm-stepper { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.mm-step-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--mm-touch); height: var(--mm-touch);
+  border-radius: var(--mm-radius-sm);
+  border: 1px solid var(--mm-line);
+  background: var(--mm-surface-2);
+  font-size: 1.35rem; font-weight: 600; line-height: 1;
+  transition: transform var(--mm-motion-fast) var(--mm-ease);
+}
+.mm-step-btn[data-add="true"] { border-color: var(--mm-accent); background: var(--mm-accent-soft); color: var(--mm-accent-strong); }
+.mm-step-btn:active { transform: scale(.94); }
+.mm-cart-bar {
+  position: sticky;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+  padding: .7rem .8rem;
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-radius);
+  background: var(--mm-surface);
+  box-shadow: var(--mm-shadow);
+}
+@media (min-width: 768px) { .mm-cart-bar { bottom: 1rem; } }
+@media (prefers-reduced-motion: reduce) {
+  .mm-sheet[open] { animation: none; }
+  .mm-step-btn { transition: none; }
+}
+
+/* A link inside a sentence still needs a fingertip-sized target. */
+.mm-inline-tap { display: inline-flex; min-height: 44px; align-items: center; text-decoration: underline; }
+
+/* ===========================================================================
+   ACCESS BAR -- the trial and subscription, on every page (entitlement-banner.tsx)
+   =========================================================================== */
+.mm-access-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+  padding: .55rem .6rem .55rem .85rem;
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-radius-sm);
+  background: var(--mm-surface);
+  font-size: .9rem;
+}
+.mm-access-bar[data-tone="calm"] { border-color: color-mix(in srgb, var(--mm-accent) 35%, var(--mm-line)); background: var(--mm-accent-soft); color: var(--mm-accent-strong); }
+.mm-access-bar[data-tone="soon"] { border-color: color-mix(in srgb, var(--mm-warn) 45%, var(--mm-line)); background: var(--mm-warn-soft); color: var(--mm-warn); }
+.mm-access-bar[data-tone="last"] { border-color: #c2410c; background: #fff1e8; color: #9a3412; }
+.mm-access-bar[data-tone="ended"] { align-items: flex-start; border-color: #b91c1c; background: #fef2f2; color: #991b1b; padding: .8rem .8rem .8rem 1rem; }
+.mm-access-cta {
+  display: inline-flex; flex: none; align-items: center; min-height: 44px;
+  padding: 0 .95rem; border-radius: 999px;
+  background: var(--mm-accent); color: #fff; font-weight: 700; font-size: .875rem; white-space: nowrap;
+}
+.mm-access-bar[data-tone="last"] .mm-access-cta,
+.mm-access-bar[data-tone="ended"] .mm-access-cta { background: #b91c1c; }
+@media (prefers-color-scheme: dark) {
+  .mm-access-bar[data-tone="last"] { background: #3a1a0c; color: #fdba74; border-color: #9a3412; }
+  .mm-access-bar[data-tone="ended"] { background: #3b1111; color: #fca5a5; border-color: #991b1b; }
+}
+
+/* "or with email" under the Google button. */
+.mm-or { display: flex; align-items: center; gap: .75rem; font-size: .8125rem; color: var(--mm-muted); }
+.mm-or::before, .mm-or::after { content: ''; flex: 1; height: 1px; background: var(--mm-line, rgba(0,0,0,.12)); }
+
+/* The cookie notice: above everything, including the bottom navigation,
+   until the visitor answers. */
+.mm-consent {
+  position: fixed; z-index: 60; left: 12px; right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  max-width: 28rem; margin: 0 auto; padding: 16px;
+  background: var(--mm-surface); color: var(--mm-fg);
+  border: 1px solid var(--mm-line); border-radius: var(--mm-radius);
+  box-shadow: 0 12px 40px rgba(0,0,0,.18);
 }

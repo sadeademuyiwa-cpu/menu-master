@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { currentContext, contextRedirect } from '@/lib/data/context'
+import { currentContext, contextRedirect, hasSalesEntitlement } from '@/lib/data/context'
 import {
   PageHeader, Card, Notice, Empty, SectionHeading, Badge, ActionTile,
 } from '@/components/ui'
@@ -31,10 +31,7 @@ type PriceRow = {
   price_state: string; used_in_recipes: number; last_purchase_date: string | null
 }
 
-const STEP_ICONS: IconName[] = [
-  'store', 'ingredients', 'purchases', 'recipes', 'recipes', 'formats',
-  'package', 'people', 'settings', 'pricing', 'sales',
-]
+type Step = { done: boolean; label: string; href: string; hint: string; icon: IconName }
 
 async function DashboardPageBody() {
   const ctx = await currentContext()
@@ -58,37 +55,51 @@ async function DashboardPageBody() {
       .limit(8).returns<PriceRow[]>(),
   ])
 
-  const { count: tradingDays } = await supabase
-    .from('v_sales_summary').select('sale_date', { count: 'exact', head: true })
+  const [{ count: tradingDays }, canSell] = await Promise.all([
+    supabase.from('v_sales_summary').select('sale_date', { count: 'exact', head: true }),
+    hasSalesEntitlement(),
+  ])
 
   const setup = setupRows?.[0]
   const all = products ?? []
   const needsAttention = all.filter((p) => p.attention_rank <= 3)
   const ready = all.filter((p) => p.state === 'healthy')
 
-  const steps = [
-    { done: true, label: 'Business details', href: '/account', hint: businessName ?? 'Your business' },
-    { done: (setup?.ingredients ?? 0) > 0, label: 'Add ingredients', href: '/ingredients', hint: 'Add what you buy.' },
-    { done: (setup?.prices_entered ?? 0) > 0, label: 'Record a purchase', href: '/purchases', hint: 'Enter what you paid.' },
-    { done: (setup?.recipes ?? 0) > 0, label: 'Add a recipe', href: '/recipes', hint: 'Add what you make.' },
-    { done: (setup?.recipes_with_yield ?? 0) > 0, label: 'Set batch yield', href: '/recipes', hint: 'Say how much one batch makes.' },
-    { done: (setup?.serving_formats ?? 0) > 0 || (setup?.selling_prices_set ?? 0) > 0,
-      label: 'Add selling sizes', href: '/formats', hint: 'Plate, litre, pack or your own size.' },
-    { done: (setup?.packaging_lines ?? 0) > 0, label: 'Add packaging', href: '/formats', hint: 'Bowls, lids and labels.' },
-    { done: (setup?.labour_rates ?? 0) > 0, label: 'Add labour', href: '/settings', hint: 'Optional paid work.' },
-    { done: (setup?.overhead_items ?? 0) > 0, label: 'Add overheads', href: '/settings', hint: 'Optional monthly bills.' },
-    { done: (setup?.selling_prices_set ?? 0) > 0, label: 'Set selling price', href: '/recipes', hint: 'See real profit.' },
-    { done: (tradingDays ?? 0) > 0, label: 'Record a sale', href: '/sales', hint: 'Start tracking what you keep.' },
+  // The few things that make Menu Master useful, in the order they unlock each
+  // other. Each is ticked only by data the owner entered: the starter
+  // catalogue does not count as "adding what you buy".
+  const core: Step[] = [
+    { done: (setup?.prices_entered ?? 0) > 0, label: 'Enter what you paid', href: '/purchases/new',
+      hint: 'Record a market run or delivery.', icon: 'purchases' },
+    { done: (setup?.complete_costings ?? 0) > 0, label: 'Cost one dish', href: (setup?.recipes ?? 0) > 0 ? '/recipes' : '/recipes/new',
+      hint: 'See what one plate really costs you.', icon: 'recipes' },
+    { done: (setup?.selling_prices_set ?? 0) > 0, label: 'Set its selling price', href: '/recipes',
+      hint: 'See what you keep on every plate.', icon: 'pricing' },
+    // A Costing-only plan cannot record sales, so it is never asked to.
+    ...(canSell === false ? [] : [{ done: (tradingDays ?? 0) > 0, label: 'Record your first sale',
+      href: '/sales/new', hint: 'Start tracking what you actually make.', icon: 'sales' as IconName }]),
   ]
-  const nextStep = steps.find((s) => !s.done)
-  const doneCount = steps.filter((s) => s.done).length
-  const settingUp = (setup?.complete_costings ?? 0) === 0
-  const progress = Math.round((doneCount / steps.length) * 100)
+  // Optional detail that makes a cost more accurate. Never blocks anything.
+  const extras: Step[] = [
+    { done: (setup?.serving_formats ?? 0) > 0, label: 'Sizes you sell', href: '/formats',
+      hint: 'Plates, litres, packs or your own sizes.', icon: 'formats' },
+    { done: (setup?.packaging_lines ?? 0) > 0, label: 'Packaging', href: '/formats',
+      hint: 'Bowls, lids and labels.', icon: 'package' },
+    { done: (setup?.labour_rates ?? 0) > 0, label: 'Paid work', href: '/settings',
+      hint: 'What you pay someone to cook or prep.', icon: 'people' },
+    { done: (setup?.overhead_items ?? 0) > 0, label: 'Monthly bills', href: '/settings',
+      hint: 'Rent, gas, electricity.', icon: 'settings' },
+  ]
+  const nextStep = core.find((s) => !s.done)
+  const doneCount = core.filter((s) => s.done).length
+  const settingUp = doneCount < core.length
+  const progress = Math.round((doneCount / core.length) * 100)
+  const extrasLeft = extras.filter((s) => !s.done).length
 
   const quickActions: { href: string; icon: IconName; label: string; meta: string }[] = [
-    { href: '/sales', icon: 'sales', label: 'New sale', meta: 'Record what you sold' },
-    { href: '/purchases', icon: 'purchases', label: 'New purchase', meta: 'Record what you paid' },
-    { href: '/recipes', icon: 'recipes', label: 'New recipe', meta: 'Cost what you make' },
+    { href: '/sales/new', icon: 'sales', label: 'New sale', meta: 'Record what you sold' },
+    { href: '/purchases/new', icon: 'purchases', label: 'New purchase', meta: 'Record what you paid' },
+    { href: '/recipes/new', icon: 'recipes', label: 'New dish', meta: 'Cost what you make' },
     { href: '/ingredients', icon: 'ingredients', label: 'Ingredient', meta: 'Add or update an item' },
   ]
 
@@ -112,8 +123,8 @@ async function DashboardPageBody() {
           <Card>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold">Setup</div>
-                <div className="mt-0.5 text-xs" style={{ color: 'var(--mm-muted)' }}>{doneCount}/{steps.length} complete</div>
+                <div className="text-sm font-semibold">Getting started</div>
+                <div className="mt-0.5 text-xs" style={{ color: 'var(--mm-muted)' }}>{doneCount} of {core.length} done</div>
               </div>
               <div className="text-sm font-semibold tabular-nums">{progress}%</div>
             </div>
@@ -123,35 +134,22 @@ async function DashboardPageBody() {
 
             {nextStep && (
               <Link href={nextStep.href} className="mt-4 flex items-center gap-3 rounded-xl p-3" style={{ background: 'var(--mm-surface)' }}>
-                <span className="mm-action-icon"><AppIcon name={STEP_ICONS[steps.indexOf(nextStep)] ?? 'check'} size={20} /></span>
+                <span className="mm-action-icon"><AppIcon name={nextStep.icon} size={20} /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--mm-muted)' }}>Next</span>
                   <span className="block font-semibold">{nextStep.label}</span>
+                  <span className="block text-xs" style={{ color: 'var(--mm-muted)' }}>{nextStep.hint}</span>
                 </span>
                 <AppIcon name="chevron-right" size={18} style={{ color: 'var(--mm-muted)' }} />
               </Link>
             )}
 
-            <details className="mt-3">
-              <summary className="cursor-pointer text-sm font-medium" style={{ color: 'var(--mm-accent)' }}>View setup steps</summary>
-              <ol className="mt-3 space-y-1">
-                {steps.map((s, i) => (
-                  <li key={s.label}>
-                    <Link href={s.href} className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-[var(--mm-surface)]">
-                      <span style={{ color: s.done ? 'var(--mm-accent)' : 'var(--mm-muted)' }}>
-                        <AppIcon name={s.done ? 'check' : STEP_ICONS[i]} size={17} />
-                      </span>
-                      <span className={s.done ? '' : 'font-medium'}>{s.label}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ol>
-            </details>
+            <StepList steps={core} />
           </Card>
         </section>
       )}
 
-      {!settingUp && (
+      {(!settingUp || needsAttention.length > 0) && (
         <section className="space-y-3">
           <SectionHeading sub="Items that need a price, conversion or margin decision.">Needs attention</SectionHeading>
           {!needsAttention.length ? (
@@ -197,7 +195,7 @@ async function DashboardPageBody() {
                     <span className="truncate font-semibold">{p.product_name}{p.format_name ? ` · ${p.format_name}` : ''}</span>
                     <Badge tone="good">{productState(p.state).label}</Badge>
                   </div>
-                  <dl className="mt-3 grid grid-cols-4 gap-2 text-xs">
+                  <dl className="mt-3 grid grid-cols-4 gap-2 text-[13px]">
                     <div><dt style={{ color: 'var(--mm-muted)' }}>Cost</dt><dd className="mt-0.5 font-semibold tabular-nums">{money(Number(p.true_cost))}</dd></div>
                     <div><dt style={{ color: 'var(--mm-muted)' }}>Price</dt><dd className="mt-0.5 font-semibold tabular-nums">{money(Number(p.selling_price))}</dd></div>
                     <div><dt style={{ color: 'var(--mm-muted)' }}>Profit</dt><dd className="mt-0.5 font-semibold tabular-nums">{money(Number(p.profit))}</dd></div>
@@ -216,7 +214,7 @@ async function DashboardPageBody() {
           <ul className="space-y-2">
             {(prices ?? []).map((r) => (
               <li key={r.ingredient_id}>
-                <Link href={`/ingredients/${r.ingredient_id}`} className="block">
+                <Link href={`/purchases/new?ingredient=${r.ingredient_id}`} className="block">
                   <Card>
                     <div className="flex items-center justify-between gap-3">
                       <span className="min-w-0 truncate font-semibold">{r.ingredient_name}</span>
@@ -233,6 +231,28 @@ async function DashboardPageBody() {
         </section>
       )}
 
+      {extrasLeft > 0 && (
+        <section>
+          <Card>
+            <details>
+              <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold">Make your costs more accurate</span>
+                  <span className="block text-xs" style={{ color: 'var(--mm-muted)' }}>
+                    Optional · {extras.length - extrasLeft} of {extras.length} added
+                  </span>
+                </span>
+                <AppIcon name="chevron-right" size={18} style={{ color: 'var(--mm-muted)' }} />
+              </summary>
+              <p className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                Your costs already work without these. Add them when you have the figures.
+              </p>
+              <StepList steps={extras} />
+            </details>
+          </Card>
+        </section>
+      )}
+
       <section className="space-y-3">
         <SectionHeading>More shortcuts</SectionHeading>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -242,6 +262,24 @@ async function DashboardPageBody() {
         </div>
       </section>
     </div>
+  )
+}
+
+function StepList({ steps }: { steps: Step[] }) {
+  return (
+    <ol className="mt-3 space-y-1">
+      {steps.map((s) => (
+        <li key={s.label}>
+          <Link href={s.href} className="flex min-h-[44px] items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-[var(--mm-surface)]">
+            <span style={{ color: s.done ? 'var(--mm-accent)' : 'var(--mm-muted)' }}>
+              <AppIcon name={s.done ? 'check' : s.icon} size={17} />
+            </span>
+            <span className={s.done ? '' : 'font-medium'}>{s.label}</span>
+            {!s.done && <span className="ml-auto hidden truncate pl-2 text-xs sm:block" style={{ color: 'var(--mm-muted)' }}>{s.hint}</span>}
+          </Link>
+        </li>
+      ))}
+    </ol>
   )
 }
 

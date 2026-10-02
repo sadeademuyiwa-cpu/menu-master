@@ -17,6 +17,7 @@
  * Nothing here accepts HTTP 200 as evidence.
  */
 import { chromium } from 'playwright'
+import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
 
 const BASE = 'http://127.0.0.1:3100'
 const stamp = Date.now()
@@ -32,9 +33,24 @@ async function text(page) { return page.locator('body').innerText() }
 /* innerText returns text AFTER css text-transform, so an uppercase label reads
    back uppercased. Case is presentational; amounts are compared exactly. */
 const has = (body, needle) => body.toLowerCase().includes(needle.toLowerCase())
+/**
+ * A page that a save re-renders can be read before the new render lands: a
+ * fixed pause after the click raced under load. So a check waits up to 5 s
+ * for what it expects -- a real failure still fails, five seconds later --
+ * and every wait is recorded, so a slowdown shows up in the summary instead
+ * of hiding behind the retry.
+ */
+const waits = []
 async function must(page, name, ...needles) {
-  const body = await text(page)
-  const missing = needles.filter((n) => !has(body, n))
+  const start = Date.now()
+  let missing = needles
+  for (;;) {
+    const body = await text(page)
+    missing = needles.filter((n) => !has(body, n))
+    if (!missing.length || Date.now() - start > 5000) break
+    await page.waitForTimeout(250)
+  }
+  if (!missing.length) waits.push(Date.now() - start)
   mark(name, missing.length === 0, missing.length ? `missing ${JSON.stringify(missing)}` : '')
 }
 async function mustNot(page, name, ...needles) {
@@ -54,8 +70,15 @@ async function pick(scope, selector, needle) {
   if (!value) throw new Error(`no option containing ${JSON.stringify(needle)} in ${selector}`)
   await el.selectOption(value)
 }
-const go = async (page, path) =>
-  page.goto(path.startsWith('http') ? path : BASE + path, { waitUntil: 'domcontentloaded' })
+/** Pages that stream behind a skeleton (Reports, Home) are read only once it has
+ *  gone, exactly as journey.mjs does; reading at domcontentloaded raced it. */
+const rendered = (page) =>
+  page.locator('[aria-label="Loading"]').first()
+    .waitFor({ state: 'detached', timeout: 20000 }).catch(() => {})
+const go = async (page, path) => {
+  await page.goto(path.startsWith('http') ? path : BASE + path, { waitUntil: 'domcontentloaded' })
+  await rendered(page)
+}
 const submit = async (page, sel) => {
   await Promise.all([page.waitForLoadState('domcontentloaded'), page.click(sel)])
   await page.waitForLoadState('networkidle').catch(() => {})
@@ -68,6 +91,38 @@ const press = async (scope, page, sel) => {
 }
 /** Poll a protected route until the session cookie is actually live. A fixed
  *  sleep passed locally and raced under load. */
+/**
+ * Record a sale through the order screen (/sales/new): tap the dish, type the
+ * quantity, price and any discount on it, choose the customer and reference,
+ * then Confirm or Save for later. Lands on the sale's own page.
+ */
+async function takeOrder(page, o) {
+  await go(page, '/sales/new')
+  await page.waitForTimeout(600)                          // let the screen hydrate
+  await page.click(`button[aria-label="Add ${o.item}"]`)
+  if (!(await page.locator('dialog[open]').count())) {
+    await page.click(`button[aria-label^="How many ${o.item}"]`)
+  }
+  await page.fill('dialog[open] input[name=item_qty]', String(o.qty))
+  await page.fill('dialog[open] input[name=item_price]', String(o.price))
+  if (o.itemDiscount) await page.fill('dialog[open] input[name=item_discount]', String(o.itemDiscount))
+  await page.click('dialog[open] button:has-text("Done")')
+  await page.click('button:has-text("Next")')
+  if (o.customer) {
+    await page.click('button[aria-label="Add customer"]')
+    await page.fill('dialog[open] input[aria-label="Find a customer"]', o.customer)
+    await page.click(`dialog[open] button:has-text("${o.customer}")`)
+  }
+  if (o.reference) {
+    await page.click('summary:has-text("Date and reference")')
+    await page.fill('input[name=reference_input]', o.reference)
+  }
+  await page.click(o.mode === 'draft' ? 'button:has-text("Save for later")' : 'button:has-text("Confirm sale")')
+  await page.waitForURL(/\/sales\/[0-9a-f-]{36}/, { timeout: 60000 })
+  await page.waitForLoadState('networkidle').catch(() => {})
+  await rendered(page)
+  await page.waitForTimeout(500)
+}
 async function settled(page, path, needle, tries = 25) {
   for (let i = 0; i < tries; i++) {
     await go(page, path)
@@ -93,18 +148,15 @@ await go(page, '/signup')
 await page.fill('input[type=email]', A.email)
 await page.fill('input[type=password]', A.pass)
 await submit(page, 'button[type=submit]')
-await settled(page, '/onboarding', 'Set up your business')
+await settled(page, '/onboarding', 'Tell us about your business')
 
-await go(page, '/onboarding')
-const inputs = page.locator('form input[type=text], form input:not([type])')
-await inputs.nth(0).fill('Sade Foods')
-await inputs.nth(1).fill('Sade Kitchen')
-await submit(page, 'button[type=submit]')
-await page.waitForTimeout(1800)
+await onboardBusiness(page, BASE, { business: 'Sade Kitchen' })
+await finishSetup(page, BASE)
 
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', `Rice ${stamp}`)
-await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
 await page.locator(`a:has-text("Rice ${stamp}")`).first().click()
 await page.waitForTimeout(700)
@@ -117,14 +169,9 @@ await buy.locator('input[name=amount]').fill('17000')
 await press(buy, page, 'button[type=submit]')
 await must(page, 'the ingredient is priced from what was actually paid', '₦1.70')
 
-await go(page, '/recipes')
-await page.fill('input[name=name]', 'Party Jollof')
-await page.fill('input[name=batch_yield_qty]', '4500')
-await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
-await page.fill('input[name=portion_qty]', '500')
-await submit(page, 'form button[type=submit]')
+await newDish(page, BASE, { name: 'Party Jollof', batch: '4500', unit: 'g — Gram', portion: '500' })
 const jollofUrl = page.url().split('?')[0]
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await openDetails(page, 'Add an ingredient')
 const addLine = page.locator('form:has(select[name=ingredient_id])')
 await pick(addLine, 'select[name=ingredient_id]', `Rice ${stamp}`)
 await addLine.locator('input[name=qty]').fill('4500')
@@ -135,16 +182,12 @@ await must(page, 'the dish is costed at N850 a portion', '₦850.00')
 // A second dish whose only ingredient has never been priced. Its cost is
 // unknown, and must stay unknown all the way to the sale.
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', `Mystery Spice ${stamp}`)
-await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
-await go(page, '/recipes')
-await page.fill('input[name=name]', 'Mystery Stew')
-await page.fill('input[name=batch_yield_qty]', '4000')
-await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
-await page.fill('input[name=portion_qty]', '400')
-await submit(page, 'form button[type=submit]')
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await newDish(page, BASE, { name: 'Mystery Stew', batch: '4000', unit: 'g — Gram', portion: '400' })
+await openDetails(page, 'Add an ingredient')
 const addLine2 = page.locator('form:has(select[name=ingredient_id])')
 await pick(addLine2, 'select[name=ingredient_id]', `Mystery Spice ${stamp}`)
 await addLine2.locator('input[name=qty]').fill('4000')
@@ -170,22 +213,15 @@ await page.screenshot({ path: 'e2e/shots/p6-customers.png', fullPage: true })
 // ===========================================================================
 await go(page, '/sales')
 await must(page, 'a business with no sales is invited to record one, not shown zeros',
-  'Record a sale', 'No sales recorded yet')
+  'New sale', 'No sales recorded yet')
 await mustNot(page, 'and is not greeted by naira zero', '₦0.00')
 
-const start = page.locator('form:has(select[name=customer_id])')
-await pick(start, 'select[name=customer_id]', 'Mrs Adeyemi')
-await start.locator('input[name=order_no]').fill('Saturday party')
-await press(start, page, 'button[type=submit]')
+// An order taken now and served later: saved for later, it stays a draft.
+await takeOrder(page, { item: 'Party Jollof', qty: 10, price: 1500,
+  customer: 'Mrs Adeyemi', reference: 'Saturday party', mode: 'draft' })
 const saleUrl = page.url().split('?')[0]
 await must(page, 'the sale opens as a draft and says what that means',
   'Saturday party', 'still a draft', 'not from when you typed it')
-
-const addItem = page.locator('form:has(select[name=product])')
-await pick(addItem, 'select[name=product]', 'Party Jollof')
-await addItem.locator('input[name=qty]').fill('10')
-await addItem.locator('input[name=unit_price]').fill('1500')
-await press(addItem, page, 'button[type=submit]')
 await must(page, 'the item is on the draft at the price charged', '₦15,000.00')
 await must(page, 'and its cost is honestly described as not yet locked in',
   'Not locked in yet')
@@ -236,22 +272,14 @@ await mustNot(page, 'and offers no way to edit it', 'Add an item')
 // N1,275 portion the sale above did and the arithmetic below is checkable by
 // hand: 20 x N1,275 = N25,500 of cost against N25,000 kept.
 // ===========================================================================
-await go(page, '/sales')
-const start3 = page.locator('form:has(select[name=customer_id])')
-await pick(start3, 'select[name=customer_id]', 'Mrs Adeyemi')
-await start3.locator('input[name=order_no]').fill('Discounted party')
-await press(start3, page, 'button[type=submit]')
+await takeOrder(page, { item: 'Party Jollof', qty: 20, price: 1500, itemDiscount: 2000,
+  customer: 'Mrs Adeyemi', reference: 'Discounted party', mode: 'draft' })
 const discUrl = page.url().split('?')[0]
-
-const addItem3 = page.locator('form:has(select[name=product])')
-await pick(addItem3, 'select[name=product]', 'Party Jollof')
-await addItem3.locator('input[name=qty]').fill('20')
-await addItem3.locator('input[name=unit_price]').fill('1500')
-await addItem3.locator('input[name=discount_amount]').fill('2000')
-await press(addItem3, page, 'button[type=submit]')
 await must(page, 'a line discount is shown as a discount, not a lower price',
   '₦30,000.00', 'less ₦2,000.00 off', '₦28,000.00')
 
+// The whole-sale discount is folded away on a draft until it is wanted.
+await page.locator('summary:has-text("Discount on the whole sale")').first().click()
 const discForm = page.locator('form:has(input[name=order_discount])')
 await discForm.locator('input[name=order_discount]').fill('3000')
 await press(discForm, page, 'button[type=submit]')
@@ -292,18 +320,9 @@ await mustNot(page, 'while the dish itself is repriced -- it is the SALE that is
 // ===========================================================================
 // SOLD WITHOUT A KNOWN COST -- NEVER RENDERED AS ZERO
 // ===========================================================================
-await go(page, '/sales')
-const start2 = page.locator('form:has(select[name=customer_id])')
-await start2.locator('input[name=order_no]').fill('Cost unknown case')
-await press(start2, page, 'button[type=submit]')
-const unknownUrl = page.url().split('?')[0]
-const addItem2 = page.locator('form:has(select[name=product])')
-await pick(addItem2, 'select[name=product]', 'Mystery Stew')
-await addItem2.locator('input[name=qty]').fill('4')
-await addItem2.locator('input[name=unit_price]').fill('2000')
-await press(addItem2, page, 'button[type=submit]')
-const confirm2 = page.locator('form:has(button:has-text("Confirm sale"))')
-await press(confirm2, page, 'button[type=submit]')
+// Sold and confirmed in one go, straight from the order screen.
+await takeOrder(page, { item: 'Mystery Stew', qty: 4, price: 2000,
+  reference: 'Cost unknown case', mode: 'confirm' })
 
 await must(page, 'a sale of an uncosted dish still confirms, and says what is missing',
   'no known cost', 'Cost not known')
@@ -356,7 +375,7 @@ for (const [tag, width] of [['360', 360], ['390', 390]]) {
   await pageM.fill('input[type=email]', A.email)
   await pageM.fill('input[type=password]', A.pass)
   await submit(pageM, 'button[type=submit]')
-  await settled(pageM, '/sales', 'Record a sale')
+  await settled(pageM, '/sales', 'New sale')
 
   const overflow = await pageM.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth)
@@ -392,5 +411,7 @@ mark('no failed network requests during the journey',
 
 await browser.close()
 const pass = results.filter((r) => r.ok).length
+const slow = waits.filter((w) => w >= 250).sort((a, b) => b - a)
+console.log(`checks that had to wait for the page to update: ${slow.length}; longest ${slow[0] ?? 0} ms`)
 console.log(`\n${pass}/${results.length} checks passed`)
 process.exit(pass === results.length ? 0 : 1)

@@ -9,6 +9,10 @@ import {
   SectionHeading, BackLink, Stat, StatRow, Badge, Disclosure,
 } from '@/components/ui'
 import { money, percent } from '@/lib/format'
+import { buildReceipt, whatsappLink, whatsappNumber } from '@/lib/receipt'
+import { ReceiptActions } from '@/components/receipt-actions'
+import { Button } from '@/components/button'
+import { AppIcon } from '@/components/icons'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +34,7 @@ type SaleLine = {
 }
 type Recipe = { id: string; name: string }
 type Variant = { id: string; recipe_id: string; format: { name: string } | null }
-type Customer = { id: string; name: string }
+type Customer = { id: string; name: string; phone: string | null }
 type ProductPrice = { recipe_id: string; variant_id: string | null; selling_price: string | null }
 
 /** A line of a CANCELLED sale, read straight from order_lines.
@@ -239,7 +243,7 @@ export default async function SaleDetail({
       supabase.from('recipe_variants')
         .select('id,recipe_id,format:serving_formats(name)')
         .eq('is_active', true).returns<Variant[]>(),
-      supabase.from('customers').select('id,name').order('name').returns<Customer[]>(),
+      supabase.from('customers').select('id,name,phone').order('name').returns<Customer[]>(),
       // The same view the dashboard reads "You charge" from, so the price
       // offered here is the price shown there -- not a second opinion.
       supabase.from('v_product_attention')
@@ -298,7 +302,8 @@ export default async function SaleDetail({
   const histProfit = histCosted.length ? histCostedRevenue - histCogs : null
   const histMargin = histProfit !== null && histCostedRevenue !== 0
     ? (100 * histProfit) / histCostedRevenue : null
-  const customerName = (customers ?? []).find((c) => c.id === order.customer_id)?.name ?? null
+  const customer = (customers ?? []).find((c) => c.id === order.customer_id) ?? null
+  const customerName = customer?.name ?? null
 
   // Totals are summed from the view, which is the same arithmetic the reports
   // use. Nothing is recomputed differently here.
@@ -316,6 +321,24 @@ export default async function SaleDetail({
   const margin = profit !== null && costedRevenue !== 0
     ? (100 * profit) / costedRevenue : null
   const uncosted = rows.filter((r) => r.cost_status === 'sold_without_cost')
+
+  // The receipt, from the confirmed figures in v_sale_lines.
+  const receipt = confirmed && !voided && rows.length > 0
+    ? buildReceipt({
+        businessName: ctx.businessName ?? 'Menu Master NG',
+        date: order.order_date,
+        reference: order.order_no,
+        customerName,
+        lines: rows.map((r) => ({
+          name: r.product_name
+            ? `${r.product_name}${r.format_name ? ` (${r.format_name})` : ''}`
+            : (r.description ?? 'Item'),
+          qty: Number(r.qty), unitPrice: Number(r.unit_price), gross: Number(r.gross_revenue),
+        })),
+        discount: discounts,
+        total: net,
+      })
+    : null
 
   const byRecipe = new Map<string, Variant[]>()
   for (const v of variants ?? []) {
@@ -349,7 +372,7 @@ export default async function SaleDetail({
 
   return (
     <div className="space-y-6">
-      <BackLink href="/sales">← All sales</BackLink>
+      <BackLink href="/sales">All sales</BackLink>
       <PageHeader
         title={order.order_no ?? `Sale of ${order.order_date}`}
         sub={[
@@ -367,7 +390,7 @@ export default async function SaleDetail({
           disappears without a trace.
           {replacement && (
             <> It was replaced by{' '}
-              <Link href={`/sales/${replacement.id}`} className="underline">
+              <Link href={`/sales/${replacement.id}`} className="mm-inline-tap">
                 {replacement.order_no ?? 'a later sale'}
               </Link>.</>
           )}
@@ -379,6 +402,31 @@ export default async function SaleDetail({
           will be worked out from your prices at the moment you confirm — not from when you
           typed it.
         </Notice>
+      )}
+      {receipt && (
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-semibold">Receipt</div>
+              <div className="text-sm" style={{ color: 'var(--mm-muted)' }}>{money(net)} · {rows.length} item{rows.length === 1 ? '' : 's'}</div>
+            </div>
+            <Link href="/sales/new" className="mm-btn mm-btn-primary">
+              <AppIcon name="plus" size={18} /> New sale
+            </Link>
+          </div>
+          <div className="mt-3">
+            <ReceiptActions
+              text={receipt}
+              whatsappHref={whatsappLink(customer?.phone, receipt)}
+              toName={whatsappNumber(customer?.phone) ? customerName : null}
+            />
+          </div>
+          <div className="mt-3">
+            <Disclosure summary="See the receipt">
+              <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed">{receipt}</pre>
+            </Disclosure>
+          </div>
+        </Card>
       )}
       {confirmed && !voided && uncosted.length > 0 && (
         <Notice>
@@ -455,6 +503,8 @@ export default async function SaleDetail({
         </>
       ) : (
       <>
+      {/* An empty draft has no figures yet; three ₦0.00 boxes only got in the way. */}
+      {(confirmed || rows.length > 0) && (
       <StatRow>
         <Stat label="Charged" value={money(gross)}
               sub={discounts > 0 ? `less ${money(discounts)} in discounts` : undefined} />
@@ -468,6 +518,7 @@ export default async function SaleDetail({
                 costedRows.length < rows.length ? ' — the part with a known cost' : ''}`}
         />
       </StatRow>
+      )}
 
       <section className="space-y-3">
         <SectionHeading sub={confirmed
@@ -528,11 +579,25 @@ export default async function SaleDetail({
 
       {!confirmed && !voided && (
         <>
-          <Card>
-            <SectionHeading sub="Choose the dish and, where you sell it in sizes, the size.">
-              Add an item
-            </SectionHeading>
-            <form action={addLine} className="mt-3 grid gap-3 sm:grid-cols-5">
+          {/* The next step comes first. Adding to the order and a discount
+              are there when needed, folded away when they are not. */}
+          {rows.length > 0 && (
+            <Card>
+              <SectionHeading sub="Confirming locks in what this sale cost you, using today's prices. After that it cannot be edited — only cancelled and re-issued.">
+                Ready? Confirm the sale
+              </SectionHeading>
+              <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                Confirm when the order is served or paid for. Until then it does not count as a sale.
+              </p>
+              <form action={confirm} className="mt-3">
+                <input type="hidden" name="order_id" value={id} />
+                <Button className="w-full sm:w-auto" busyLabel="Confirming…">Confirm sale · {money(net)}</Button>
+              </form>
+            </Card>
+          )}
+
+          <Disclosure summary={rows.length === 0 ? 'Add what they bought' : 'Add another item'} open={rows.length === 0}>
+            <form action={addLine} className="grid gap-3 sm:grid-cols-5">
               <input type="hidden" name="order_id" value={id} />
               <ProductAndPriceFields products={productOptions} />
               <Field label="Discount (₦, optional)">
@@ -547,42 +612,37 @@ export default async function SaleDetail({
               </div>
               <div className="flex items-end"><Submit>Add</Submit></div>
             </form>
-          </Card>
+          </Disclosure>
 
-          <Card>
-            <SectionHeading sub="Taken off the whole sale and shared across the items, so each dish still shows a true margin.">
-              Discount on the whole sale
-            </SectionHeading>
-            <form action={setOrderDiscount} className="mt-3 flex flex-wrap items-end gap-3">
-              <input type="hidden" name="order_id" value={id} />
-              <Field label="Amount (₦)">
-                <input name="order_discount" type="number" step="0.01" min="0"
-                       inputMode="decimal" defaultValue={order.order_discount}
-                       className="mm-input mt-1" />
-              </Field>
-              <Submit>Save discount</Submit>
-            </form>
-          </Card>
-
-          <Card>
-            <SectionHeading sub="Confirming locks in what this sale cost you, using today's prices. After that it cannot be edited — only cancelled and re-issued.">
-              Confirm this sale
-            </SectionHeading>
-            <form action={confirm} className="mt-3">
-              <input type="hidden" name="order_id" value={id} />
-              <Submit>Confirm sale</Submit>
-            </form>
-            <Disclosure summary="Discard this draft instead">
+          {rows.length > 0 && (
+            <Disclosure summary={Number(order.order_discount) > 0
+              ? `Discount on the whole sale · ${money(order.order_discount)}`
+              : 'Discount on the whole sale'}>
               <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-                A draft has never counted as a sale, so discarding one changes none of your
-                figures.
+                Taken off the whole sale and shared across the items, so each dish still shows a true margin.
               </p>
-              <form action={deleteDraft} className="mt-2">
+              <form action={setOrderDiscount} className="mt-3 flex flex-wrap items-end gap-3">
                 <input type="hidden" name="order_id" value={id} />
-                <InlineSubmit>Discard this draft</InlineSubmit>
+                <Field label="Amount (₦)">
+                  <input name="order_discount" type="number" step="0.01" min="0"
+                         inputMode="decimal" defaultValue={order.order_discount}
+                         className="mm-input mt-1" />
+                </Field>
+                <Submit>Save discount</Submit>
               </form>
             </Disclosure>
-          </Card>
+          )}
+
+          <Disclosure summary="Discard this draft">
+            <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+              A draft has never counted as a sale, so discarding one changes none of your
+              figures.
+            </p>
+            <form action={deleteDraft} className="mt-2">
+              <input type="hidden" name="order_id" value={id} />
+              <InlineSubmit>Discard this draft</InlineSubmit>
+            </form>
+          </Disclosure>
         </>
       )}
 
@@ -592,6 +652,34 @@ export default async function SaleDetail({
             <SectionHeading sub="Money can still come in after the sale. Recording it changes nothing about what was sold.">
               Payment
             </SectionHeading>
+            {/* A sale paid in full needs no form, only the fact. */}
+            {order.payment_status === 'paid' ? (
+              <>
+                <p className="mt-2 text-sm">
+                  <span className="font-semibold">Paid in full</span>
+                  <span style={{ color: 'var(--mm-muted)' }}> · {money(order.amount_paid)}</span>
+                </p>
+                <div className="mt-3">
+                  <Disclosure summary="Change the payment">
+                      <form action={markPaid} className="mt-3 flex flex-wrap items-end gap-3">
+                        <input type="hidden" name="order_id" value={id} />
+                        <Field label="Paid so far (₦)">
+                          <input name="amount_paid" type="number" step="0.01" min="0" inputMode="decimal"
+                                 defaultValue={order.amount_paid} className="mm-input mt-1" />
+                        </Field>
+                        <Field label="Status">
+                          <select name="payment_status" defaultValue={order.payment_status} className="mm-input mt-1">
+                            <option value="unpaid">Not paid</option>
+                            <option value="part_paid">Part paid</option>
+                            <option value="paid">Paid in full</option>
+                          </select>
+                        </Field>
+                        <Submit>Save payment</Submit>
+                      </form>
+                  </Disclosure>
+                </div>
+              </>
+            ) : (
             <form action={markPaid} className="mt-3 flex flex-wrap items-end gap-3">
               <input type="hidden" name="order_id" value={id} />
               <Field label="Paid so far (₦)">
@@ -607,6 +695,7 @@ export default async function SaleDetail({
               </Field>
               <Submit>Save payment</Submit>
             </form>
+            )}
           </Card>
 
           <Disclosure summary="Something is wrong with this sale">

@@ -5,9 +5,11 @@ import { createClient } from '@/lib/supabase/server'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, inputClass, inputStyle,
-  DataList, Notice, SectionHeading, BackLink, Empty,
+  DataList, Notice, SectionHeading, BackLink, Empty, Disclosure,
 } from '@/components/ui'
+import Link from 'next/link'
 import { money, quantity, NOT_ENTERED } from '@/lib/format'
+import { localToday } from '@/lib/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -76,7 +78,7 @@ async function addPrice(formData: FormData) {
   // links the line, and it carries the checks this screen must not duplicate:
   // role enforcement, draft-only posting (so a double submit cannot post
   // twice), zero-value refusal, and conversion blockers.
-  const date = effective || new Date().toISOString().slice(0, 10)
+  const date = effective || localToday()
 
   const { data: purchase, error: pErr } = await supabase.from('purchases')
     .insert({ account_id: accountId, business_id: businessId, purchase_date: date })
@@ -166,7 +168,9 @@ export default async function IngredientDetail(props: {
       supabase.from('ingredient_unit_conversions').select('id,unit_id,qty_in_base')
         .eq('ingredient_id', id).returns<Conversion[]>(),
       supabase.from('v_missing_unit_conversions')
-        .select('ingredient_id,unit_code,reason').eq('ingredient_id', id)
+        // Only measures something actually uses. 'suggested' rows are the starter
+        // list's ideas (a crate of eggs), not a blocker, and must not read as one.
+        .select('ingredient_id,unit_code,reason').eq('ingredient_id', id).neq('reason', 'suggested')
         .returns<{ ingredient_id: string; unit_code: string; reason: string }[]>(),
     ])
 
@@ -190,11 +194,12 @@ export default async function IngredientDetail(props: {
 
   return (
     <div className="space-y-8">
-      <BackLink href="/ingredients">← All ingredients</BackLink>
+      <BackLink href="/ingredients">All ingredients</BackLink>
 
       <PageHeader
         title={ingredient.name}
-        sub={`${ingredient.kind} · base unit ${baseCode} · purchase yield ${ingredient.purchase_yield_pct}%`}
+        sub={`${ingredient.kind === 'packaging' ? 'Packaging' : 'Ingredient'}, measured in ${base?.name.toLowerCase() ?? baseCode}.` +
+          (ingredient.purchase_yield_pct !== null ? ` Usable after cleaning: ${ingredient.purchase_yield_pct}%.` : '')}
       />
 
       {notice && <Notice tone={notice.includes('could not') || notice.includes('not know') ? 'warn' : 'info'}>{notice}</Notice>}
@@ -243,13 +248,21 @@ export default async function IngredientDetail(props: {
           </Field>
           <Submit>Record</Submit>
         </form>
+        <p className="text-sm">
+          <Link href={`/purchases/new?ingredient=${ingredient.id}`} className="mm-tap underline">
+            Bought several things on one trip? Record them together →
+          </Link>
+        </p>
 
         {latest && (
           <Card>
             <div className="text-sm">
-              Latest unit cost:{' '}
+              Latest price:{' '}
               <span className="font-medium tabular-nums">
-                {money(Number(latest.unit_cost))} per {baseCode}
+                {baseCode === 'g' ? `${money(Number(latest.unit_cost) * 1000)} per kg`
+                  : baseCode === 'ml' ? `${money(Number(latest.unit_cost) * 1000)} per litre`
+                  : baseCode === 'unit' ? `${money(Number(latest.unit_cost))} each`
+                  : `${money(Number(latest.unit_cost))} per ${baseCode}`}
               </span>
             </div>
           </Card>
@@ -274,23 +287,25 @@ export default async function IngredientDetail(props: {
           Local measurements
         </SectionHeading>
 
-        <form action={addConversion} className="grid gap-3 sm:grid-cols-4 sm:items-end">
-          <input type="hidden" name="ingredient_id" value={ingredient.id} />
-          <Field label="One of this unit…">
-            <select name="unit_id" required className={inputClass} style={inputStyle}>
-              {(units ?? [])
-                .filter((u) => u.id !== ingredient.base_unit_id && !converted.has(u.id))
-                .map((u) => (
-                  <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-                ))}
-            </select>
-          </Field>
-          <Field label={`…holds this much ${baseCode}`}>
-            <input name="qty_in_base" type="number" step="any" min="0" required
-              className={inputClass} style={inputStyle} />
-          </Field>
-          <Submit>Save conversion</Submit>
-        </form>
+        <Disclosure summary="Add a local measure (paint, derica, bag…)" open={(conversions ?? []).length === 0}>
+          <form action={addConversion} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <input type="hidden" name="ingredient_id" value={ingredient.id} />
+            <Field label="One of this unit…">
+              <select name="unit_id" required className={inputClass} style={inputStyle}>
+                {(units ?? [])
+                  .filter((u) => u.id !== ingredient.base_unit_id && !converted.has(u.id))
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                  ))}
+              </select>
+            </Field>
+            <Field label={`…holds this much ${baseCode}`}>
+              <input name="qty_in_base" type="number" step="any" min="0" required
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <Submit>Save conversion</Submit>
+          </form>
+        </Disclosure>
 
         {conversions && conversions.length > 0 ? (
           <ul className="space-y-2 text-sm">

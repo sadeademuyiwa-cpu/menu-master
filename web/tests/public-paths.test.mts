@@ -7,16 +7,24 @@ test('the legal pages are readable without an account', () => {
   // which is the one moment it matters.
   assert.equal(isPublicPath('/terms'), true)
   assert.equal(isPublicPath('/refunds'), true)
+  assert.equal(isPublicPath('/privacy'), true)
+})
+
+test('the landing page is public, and opens nothing else', () => {
+  // Ads send people to "/". Listing it must not make every path public.
+  assert.equal(isPublicPath('/'), true)
+  assert.equal(isPublicPath('//dashboard'), false)
 })
 
 test('the auth flow stays public', () => {
-  for (const p of ['/login', '/signup', '/verify-email', '/auth/callback']) {
+  for (const p of ['/login', '/signup', '/verify-email', '/forgot-password', '/auth/callback', '/auth/confirm']) {
     assert.equal(isPublicPath(p), true, p)
   }
 })
 
 test('the product is not', () => {
-  for (const p of ['/', '/dashboard', '/sales', '/subscribe', '/account', '/checkout/callback', '/api/checkout']) {
+  // /reset-password needs the session the reset link signs in with.
+  for (const p of ['/dashboard', '/sales', '/subscribe', '/account', '/reset-password', '/checkout/callback', '/api/checkout']) {
     assert.equal(isPublicPath(p), false, p)
   }
 })
@@ -30,5 +38,6 @@ test('a prefix does not leak: /termsandconditions is not /terms', () => {
 
 test('the list is exactly what the product decided', () => {
   assert.deepEqual([...PUBLIC_PATHS],
-    ['/login', '/signup', '/verify-email', '/auth/callback', '/terms', '/refunds'])
+    ['/', '/login', '/signup', '/verify-email', '/forgot-password', '/auth/callback', '/auth/confirm',
+     '/terms', '/refunds', '/privacy'])
 })

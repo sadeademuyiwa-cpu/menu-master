@@ -10,6 +10,7 @@
  * 44px, no overlapping navigation.
  */
 import { chromium } from 'playwright'
+import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
 import { mkdirSync } from 'fs'
 
 const BASE = 'http://127.0.0.1:3100'
@@ -124,17 +125,14 @@ await go(page, '/signup')
 await page.fill('input[type=email]', A.email)
 await page.fill('input[type=password]', A.pass)
 await submit(page, 'button[type=submit]')
-await settled(page, '/onboarding', 'Set up your business')
-await go(page, '/onboarding')
-const ins = page.locator('form input[type=text], form input:not([type])')
-await ins.nth(0).fill('Adaeze Catering')
-await ins.nth(1).fill('Adaeze Kitchen')
-await submit(page, 'button[type=submit]')
-await page.waitForTimeout(1800)
+await settled(page, '/onboarding', 'Tell us about your business')
+await onboardBusiness(page, BASE, { business: 'Adaeze Kitchen' })
+await finishSetup(page, BASE)
 
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', `Rice ${stamp}`)
-await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
 await page.locator(`a:has-text("Rice ${stamp}")`).first().click()
 await page.waitForTimeout(700)
@@ -144,13 +142,8 @@ await pick(buy, 'select[name=unit_id]', 'kg')
 await buy.locator('input[name=amount]').fill('85000')
 await press(buy, page, 'button[type=submit]')
 
-await go(page, '/recipes')
-await page.fill('input[name=name]', 'Party Jollof')
-await page.fill('input[name=batch_yield_qty]', '4500')
-await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
-await page.fill('input[name=portion_qty]', '500')
-await submit(page, 'form button[type=submit]')
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await newDish(page, BASE, { name: 'Party Jollof', batch: '4500', unit: 'g — Gram', portion: '500' })
+await openDetails(page, 'Add an ingredient')
 const al = page.locator('form:has(select[name=ingredient_id])')
 await pick(al, 'select[name=ingredient_id]', `Rice ${stamp}`)
 await al.locator('input[name=qty]').fill('4500')
@@ -159,16 +152,12 @@ await press(al, page, 'button[type=submit]')
 
 // a dish nobody has costed
 await go(page, '/ingredients')
+await openDetails(page, 'Add your own item')
 await page.fill('input[name=name]', `Unpriced spice ${stamp}`)
-await pick(page, 'select[name=base_unit_id]', 'g — Gram')
+await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
-await go(page, '/recipes')
-await page.fill('input[name=name]', 'Mystery Stew')
-await page.fill('input[name=batch_yield_qty]', '4000')
-await pick(page, 'select[name=yield_unit_id]', 'g — Gram')
-await page.fill('input[name=portion_qty]', '400')
-await submit(page, 'form button[type=submit]')
-await page.locator('summary:has-text("Add an ingredient")').first().click()
+await newDish(page, BASE, { name: 'Mystery Stew', batch: '4000', unit: 'g — Gram', portion: '400' })
+await openDetails(page, 'Add an ingredient')
 const al2 = page.locator('form:has(select[name=ingredient_id])')
 await pick(al2, 'select[name=ingredient_id]', `Unpriced spice ${stamp}`)
 await al2.locator('input[name=qty]').fill('4000')
@@ -177,32 +166,36 @@ await press(al2, page, 'button[type=submit]')
 
 // a customer
 await go(page, '/customers')
+await openDetails(page, 'Add a customer')
 await page.fill('input[name=name]', 'Mrs Adeyemi')
 await page.fill('input[name=company]', 'Adeyemi Events')
 await page.fill('input[name=notes]', 'No pepper for the children')
 await submit(page, 'form button[type=submit]')
 
 // a draft sale with a discount and an uncosted line
-await go(page, '/sales')
-const start = page.locator('form:has(select[name=customer_id])')
-await pick(start, 'select[name=customer_id]', 'Mrs Adeyemi')
-await start.locator('input[name=order_no]').fill('Saturday party')
-await press(start, page, 'button[type=submit]')
+// Built through the order screen (/sales/new) and saved for later.
+await go(page, '/sales/new')
+await page.waitForTimeout(600)
+for (const [item, qty, price, disc] of [['Party Jollof', 20, 1500, 2000], ['Mystery Stew', 5, 2000, 0]]) {
+  await page.click(`button[aria-label="Add ${item}"]`)
+  if (!(await page.locator('dialog[open]').count())) await page.click(`button[aria-label^="How many ${item}"]`)
+  await page.fill('dialog[open] input[name=item_qty]', String(qty))
+  await page.fill('dialog[open] input[name=item_price]', String(price))
+  if (disc) await page.fill('dialog[open] input[name=item_discount]', String(disc))
+  await page.click('dialog[open] button:has-text("Done")')
+}
+await page.click('button:has-text("Next")')
+await page.click('button[aria-label="Add customer"]')
+await page.fill('dialog[open] input[aria-label="Find a customer"]', 'Mrs Adeyemi')
+await page.click('dialog[open] button:has-text("Mrs Adeyemi")')
+await page.click('button[aria-label="Add discount on the whole sale"]')
+await page.fill('dialog[open] input[name=order_discount_input]', '5000')
+await page.click('dialog[open] button:has-text("Save discount")')
+await page.click('summary:has-text("Date and reference")')
+await page.fill('input[name=reference_input]', 'Saturday party')
+await page.click('button:has-text("Save for later")')
+await page.waitForURL(/\/sales\/[0-9a-f-]{36}/, { timeout: 60000 })
 const saleUrl = page.url().split('?')[0]
-const add = page.locator('form:has(select[name=product])')
-await pick(add, 'select[name=product]', 'Party Jollof')
-await add.locator('input[name=qty]').fill('20')
-await add.locator('input[name=unit_price]').fill('1500')
-await add.locator('input[name=discount_amount]').fill('2000')
-await press(add, page, 'button[type=submit]')
-const add2 = page.locator('form:has(select[name=product])')
-await pick(add2, 'select[name=product]', 'Mystery Stew')
-await add2.locator('input[name=qty]').fill('5')
-await add2.locator('input[name=unit_price]').fill('2000')
-await press(add2, page, 'button[type=submit]')
-const dsc = page.locator('form:has(input[name=order_discount])')
-await dsc.locator('input[name=order_discount]').fill('5000')
-await press(dsc, page, 'button[type=submit]')
 
 // ------------------------------------------------------------------ capture
 const SHOTS = [
@@ -265,7 +258,7 @@ await go(pageM, '/login')
 await pageM.fill('input[type=email]', A.email)
 await pageM.fill('input[type=password]', A.pass)
 await submit(pageM, 'button[type=submit]')
-await settled(pageM, '/sales', 'Record a sale')
+await settled(pageM, '/sales', 'New sale')
 
 await shoot(pageM, 'mobile360', [
   ['01-sales-list', '/sales'],

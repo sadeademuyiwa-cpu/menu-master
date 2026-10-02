@@ -1,9 +1,12 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { LegalPage, H2 } from '@/components/legal-page'
+import { LegalPage, H2, SupportContact } from '@/components/legal-page'
 import { LEGAL } from '@/lib/legal'
 
 export const metadata: Metadata = { title: 'Refunds and cancellation — Menu Master NG' }
+
+// The support contact comes from Admin -> Website; refreshed within a minute.
+export const revalidate = 60
 
 /**
  * The money rules, stated the way the database already enforces them:
@@ -53,7 +56,7 @@ export default function RefundsPage() {
         <li>a fault on our side meant you could not use the product for most of the month you paid for.</li>
       </ul>
       <p>
-        Write to {L.supportEmail} within {L.billingDisputeDays} days of the
+        Write to <SupportContact /> within {L.billingDisputeDays} days of the
         charge with the email on your account and the date of the charge. We
         reply within two working days, and an agreed refund is returned to the
         card that paid, through Paystack, which can take a few days to show.
@@ -87,7 +90,7 @@ export default function RefundsPage() {
 
       <H2>Questions</H2>
       <p>
-        Anything about a charge, a refund or a cancellation: {L.supportEmail}.
+        Anything about a charge, a refund or a cancellation: write to <SupportContact />.
       </p>
     </LegalPage>
   )

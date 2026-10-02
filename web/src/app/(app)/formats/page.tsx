@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
-import { PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading } from '@/components/ui'
+import { PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading, Disclosure } from '@/components/ui'
 import { quantity } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
@@ -74,10 +74,8 @@ export default async function FormatsPage({
         sub="The sizes and containers your customers actually buy. You define these — Menu Master does not assume them." />
       {notice && <Notice tone={/could not|must be|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
-      <Card>
-        <SectionHeading sub="A 2.5 litre bowl, a 250 g pack, a tray of 12, one loaf — whatever you sell.">
-          Add a format
-        </SectionHeading>
+      <Disclosure summary="Add a size" open={!formats?.length}>
+        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>A 2.5 litre bowl, a 250 g pack, a tray of 12, one loaf — whatever you sell.</p>
         <form action={addFormat} className="mt-3 grid gap-3 sm:grid-cols-4">
           <Field label="What do you call it?">
             <input name="name" required placeholder="Family bowl" className={inputClass} style={inputStyle} />
@@ -92,17 +90,17 @@ export default async function FormatsPage({
               {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
             </select>
           </Field>
-          <div className="flex items-end"><Submit>Add format</Submit></div>
+          <div className="flex items-end"><Submit>Add size</Submit></div>
           <p className="sm:col-span-4 text-xs" style={{ color: 'var(--mm-muted)' }}>
             Leave the size blank if you sell it by the piece. If you do give a size,
             give its unit too — otherwise Menu Master cannot work out how many
             servings a batch makes, and it will not guess.
           </p>
         </form>
-      </Card>
+      </Disclosure>
 
       {!formats?.length ? (
-        <Empty>No formats yet. Add the sizes you actually sell, then attach them to a recipe.</Empty>
+        <Empty>No sizes yet. Add the sizes you actually sell, then attach them to a dish.</Empty>
       ) : (
         <ul className="space-y-2">
           {formats.map((f) => (

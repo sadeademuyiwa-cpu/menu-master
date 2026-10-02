@@ -10,7 +10,7 @@ import { PageHeader, Card, SectionHeading } from '@/components/ui'
  * record a sale. Presenting a button that is guaranteed to fail is not a
  * safety feature; it is a broken promise with a helpful error message.
  */
-export function SalesLocked({ planName }: { planName?: string | null }) {
+export function SalesLocked({ planName, price }: { planName?: string | null; price?: string | null }) {
   return (
     <div className="space-y-4">
       <PageHeader
@@ -27,8 +27,8 @@ export function SalesLocked({ planName }: { planName?: string | null }) {
           Costing + Sales.
         </p>
         <p className="mt-3 text-sm" style={{ color: 'var(--mm-muted)' }}>
-          Upgrading takes effect immediately, and everything you have already
-          entered stays exactly as it is.
+          {price ? `Costing + Sales is ${price} a month. ` : ''}Upgrading takes effect immediately, and
+          everything you have already entered stays exactly as it is.
         </p>
         <p className="mt-4 text-sm">
           <Link href="/subscribe" className="mm-btn mm-btn-primary">

@@ -4,9 +4,11 @@ import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
-  SectionHeading, BackLink, Stat, StatRow,
+  SectionHeading, BackLink, Stat, StatRow, Disclosure, Badge,
 } from '@/components/ui'
-import { money, quantity } from '@/lib/format'
+import { Button } from '@/components/button'
+import { AppIcon } from '@/components/icons'
+import { money, quantity, productState } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +23,11 @@ type Line = {
   unit: { code: string; name: string } | null
 }
 type Ingredient = { id: string; name: string }
+type Affected = {
+  recipe_id: string; variant_id: string | null
+  product_name: string; format_name: string | null
+  true_cost: string | null; selling_price: string | null; state: string
+}
 type Unit = { id: string; code: string; name: string; kind: string }
 
 /* ---------------------------------------------------------------- actions */
@@ -98,6 +105,18 @@ async function post(formData: FormData) {
     `Recorded. ${data?.price_rows_written ?? 0} ingredient price${data?.price_rows_written === 1 ? '' : 's'} updated.`))
 }
 
+/** A draft never set a price, so discarding one changes nothing. */
+async function discardDraft(formData: FormData) {
+  'use server'
+  const id = String(formData.get('purchase_id') ?? '')
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const { error } = await supabase.from('purchases').delete().eq('id', id).eq('status', 'draft')
+  if (error) redirect(withNotice(`/purchases/${id}`, describeWriteError(error) ?? 'Could not discard that draft.'))
+  revalidatePath('/purchases')
+  redirect(withNotice('/purchases', 'Draft discarded.'))
+}
+
 /** Reversal, never deletion. The original stays as evidence. */
 async function reverse(formData: FormData) {
   'use server'
@@ -163,6 +182,21 @@ export default async function PurchaseDetail({
     .maybeSingle<{ total_amount: string | null; line_count: number }>()
   const total = summary?.total_amount !== null && summary?.total_amount !== undefined
     ? Number(summary.total_amount) : null
+  // What this purchase changed: every dish using one of its items, with the
+  // cost the database now holds for it.
+  const boughtIds = [...new Set(rows.map((l) => l.ingredient?.id).filter((x): x is string => !!x))]
+  let affected: Affected[] = []
+  if (purchase.status === 'posted' && boughtIds.length) {
+    const { data: uses } = await supabase.from('recipe_lines').select('recipe_id')
+      .in('ingredient_id', boughtIds).returns<{ recipe_id: string }[]>()
+    const recipeIds = [...new Set((uses ?? []).map((u) => u.recipe_id))]
+    if (recipeIds.length) {
+      const { data } = await supabase.from('v_product_attention')
+        .select('recipe_id,variant_id,product_name,format_name,true_cost,selling_price,state')
+        .in('recipe_id', recipeIds).order('product_name').returns<Affected[]>()
+      affected = data ?? []
+    }
+  }
   const draft = purchase.status === 'draft'
   const posted = purchase.status === 'posted'
   const inputClass = 'mm-input mt-1'
@@ -197,12 +231,73 @@ export default async function PurchaseDetail({
         </Notice>
       )}
 
-      <StatRow>
-        <Stat label="Items" value={String(summary?.line_count ?? rows.length)} />
-        <Stat label="Total paid" value={total !== null ? money(total) : undefined} />
-        <Stat label="Status"
-          value={draft ? 'Not recorded' : posted ? 'Recorded' : 'Cancelled'} />
-      </StatRow>
+      {rows.length > 0 && (
+        <StatRow>
+          <Stat label="Items" value={String(summary?.line_count ?? rows.length)} />
+          <Stat label="Total paid" value={total !== null ? money(total) : undefined} />
+          <Stat label="Status"
+            value={draft ? 'Not recorded' : posted ? 'Recorded' : 'Cancelled'} />
+        </StatRow>
+      )}
+
+      {/* A draft's next step comes first. */}
+      {draft && rows.length > 0 && (
+        <Card>
+          <SectionHeading sub="This updates the cost of every recipe using these ingredients.">
+            Ready? Record this purchase
+          </SectionHeading>
+          <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+            Until you record it, none of these prices are used.
+          </p>
+          <form action={post} className="mt-3">
+            <input type="hidden" name="purchase_id" value={id} />
+            <Button className="w-full sm:w-auto" busyLabel="Recording…">
+              Record purchase{total !== null ? ` · ${money(total)}` : ''}
+            </Button>
+          </form>
+        </Card>
+      )}
+
+      {posted && (
+        <section className="space-y-3">
+          <SectionHeading sub="Dishes that use what you bought, costed with the prices you just paid.">
+            What this changed
+          </SectionHeading>
+          {affected.length === 0 ? (
+            <Empty>None of your dishes use these items yet. Add them to a dish and its cost will come from what you paid here.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {affected.map((p) => {
+                const st = productState(p.state)
+                return (
+                  <li key={`${p.recipe_id}-${p.variant_id ?? 'base'}`}>
+                    <Link href={`/recipes/${p.recipe_id}`} className="block">
+                      <Card>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="min-w-0 truncate font-semibold">
+                            {p.product_name}{p.format_name ? <span style={{ color: 'var(--mm-muted)' }}> · {p.format_name}</span> : null}
+                          </span>
+                          <Badge tone={st.tone}>{st.label}</Badge>
+                        </div>
+                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                          Costs you {money(p.true_cost, 'not known yet')}
+                          {p.selling_price !== null ? ` · you sell it for ${money(p.selling_price)}` : ' · no selling price yet'}
+                        </div>
+                      </Card>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Link href="/purchases/new" className="mm-btn mm-btn-primary w-full">
+              <AppIcon name="plus" size={18} /> New purchase
+            </Link>
+            <Link href="/recipes" className="mm-btn mm-btn-secondary w-full">See your dishes</Link>
+          </div>
+        </section>
+      )}
 
       <section className="space-y-3">
         <SectionHeading sub="What you bought, and what you paid for it.">Items</SectionHeading>
@@ -219,7 +314,6 @@ export default async function PurchaseDetail({
                   </div>
                   <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
                     {quantity(Number(l.qty), l.unit?.code ?? null)}
-                    {l.qty_base && <> · resolved to {Number(l.qty_base)} base units</>}
                   </div>
                   {draft && (
                     <form action={removeLine} className="mt-2">
@@ -235,10 +329,10 @@ export default async function PurchaseDetail({
         )}
 
         {draft && (
-          <Card>
-            <SectionHeading sub="Buy in bags, paint, derica or kilograms — whatever you actually bought in.">
-              Add an item
-            </SectionHeading>
+          <Disclosure summary={rows.length === 0 ? 'Add what you bought' : 'Add another item'} open={rows.length === 0}>
+            <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+              Buy in bags, paint, derica or kilograms — whatever you actually bought in.
+            </p>
             <form action={addLine} className="mt-3 grid gap-3 sm:grid-cols-5">
               <input type="hidden" name="purchase_id" value={id} />
               <div className="sm:col-span-2">
@@ -267,27 +361,27 @@ export default async function PurchaseDetail({
               </Field>
               <div className="sm:col-span-5"><Submit>Add item</Submit></div>
             </form>
-          </Card>
+          </Disclosure>
         )}
       </section>
 
-      {draft && rows.length > 0 && (
-        <Card>
-          <SectionHeading sub="This updates the cost of every recipe using these ingredients.">
-            Finish and record
-          </SectionHeading>
-          <form action={post} className="mt-3">
+      {draft && (
+        <Disclosure summary="Discard this draft">
+          <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+            A draft has never changed a price, so discarding it changes nothing.
+          </p>
+          <form action={discardDraft} className="mt-2">
             <input type="hidden" name="purchase_id" value={id} />
-            <Submit>Record this purchase</Submit>
+            <InlineSubmit>Discard this draft</InlineSubmit>
           </form>
-        </Card>
+        </Disclosure>
       )}
 
       {posted && (
-        <Card>
-          <SectionHeading sub="Cancels the prices this purchase set. The record itself is kept.">
-            Made a mistake?
-          </SectionHeading>
+        <Disclosure summary="Something is wrong with this purchase">
+          <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+            Cancelling undoes the prices this purchase set. The record itself is kept.
+          </p>
           <form action={reverse} className="mt-3 flex flex-wrap items-end gap-3">
             <input type="hidden" name="purchase_id" value={id} />
             <div className="min-w-56 flex-1">
@@ -298,7 +392,7 @@ export default async function PurchaseDetail({
             </div>
             <Submit>Cancel this purchase</Submit>
           </form>
-        </Card>
+        </Disclosure>
       )}
 
       <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>

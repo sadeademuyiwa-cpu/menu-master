@@ -2,7 +2,10 @@ import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { currentContext, contextRedirect } from '@/lib/data/context'
 import { isPlatformAdmin } from '@/lib/data/admin'
+import { loadSiteSettings } from '@/lib/data/site'
 import { PageHeader, SectionHeading, ActionTile } from '@/components/ui'
+import { Button } from '@/components/button'
+import { signOut } from '@/lib/auth-actions'
 import type { IconName } from '@/components/icons'
 import Loading from '../skeleton'
 
@@ -30,10 +33,11 @@ const GROUPS: Group[] = [
   {
     title: 'Business',
     links: [
+      { href: '/subscribe', label: 'Plans & billing', icon: 'card', meta: 'Your trial and your plan' },
       { href: '/settings', label: 'Costs & targets', icon: 'settings' },
       { href: '/settings/people', label: 'People', icon: 'people' },
       { href: '/reports', label: 'Reports', icon: 'reports' },
-      { href: '/account', label: 'Account & plan', icon: 'account' },
+      { href: '/account', label: 'Account', icon: 'account' },
     ],
   },
 ]
@@ -43,9 +47,14 @@ async function MorePageBody() {
   const { accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/more'))
 
-  const groups: Group[] = (await isPlatformAdmin())
+  const [admin, site] = await Promise.all([isPlatformAdmin(), loadSiteSettings()])
+  const groups: Group[] = admin
     ? [...GROUPS, { title: 'Platform', links: [{ href: '/admin', label: 'Administration', icon: 'admin' }] }]
     : GROUPS
+  // The support number the admin set for the website (Admin → Website).
+  const help = site.landing.whatsapp
+    ? `https://wa.me/${site.landing.whatsapp}?text=${encodeURIComponent('Hello, I need help with Menu Master')}`
+    : null
 
   return (
     <div className="space-y-5">
@@ -60,6 +69,17 @@ async function MorePageBody() {
           </div>
         </section>
       ))}
+      {help && (
+        <section className="space-y-2.5">
+          <SectionHeading>Help</SectionHeading>
+          <a href={help} target="_blank" rel="noopener noreferrer" className="mm-btn mm-btn-secondary w-full sm:w-auto">
+            Ask us on WhatsApp
+          </a>
+        </section>
+      )}
+      <form action={signOut}>
+        <Button variant="secondary" className="w-full sm:w-auto" busyLabel="Signing out…">Sign out</Button>
+      </form>
     </div>
   )
 }
