@@ -148,6 +148,24 @@ select * from (
                   from information_schema.role_table_grants
                  where table_schema='public' and grantee='anon') = 'SELECT'
           then 'PASS' else 'FAIL' end),
+  -- 4 sees TABLE grants only. A column grant is narrower but still a read,
+  -- so it is pinned too: none before 0057; after it, exactly the three public
+  -- columns of site_settings (never updated_by).
+  ('4c anon column grants',
+     (select coalesce(string_agg(table_name||'.'||column_name||':'||privilege_type, ', '
+                                 order by table_name, column_name), 'NONE')
+        from information_schema.column_privileges
+       where table_schema='public' and grantee='anon'
+         and table_name not in (select table_name from information_schema.role_table_grants
+                                 where table_schema='public' and grantee='anon')),
+     case when (select coalesce(string_agg(table_name||'.'||column_name||':'||privilege_type, ','
+                                           order by table_name, column_name), '')
+                  from information_schema.column_privileges
+                 where table_schema='public' and grantee='anon'
+                   and table_name not in (select table_name from information_schema.role_table_grants
+                                           where table_schema='public' and grantee='anon'))
+              in ('', 'site_settings.key:SELECT,site_settings.updated_at:SELECT,site_settings.value:SELECT')
+          then 'PASS' else 'FAIL' end),
   ('5  authenticated privileges',
      (select coalesce(string_agg(distinct privilege_type,',' order by privilege_type),'NONE')
         from information_schema.role_table_grants where table_schema='public' and grantee='authenticated'),

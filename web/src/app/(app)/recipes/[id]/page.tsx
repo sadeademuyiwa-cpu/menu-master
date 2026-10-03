@@ -2,12 +2,14 @@ import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { requiredAmount } from '@/lib/money-input'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, inputClass, inputStyle,
   Notice, SectionHeading, BackLink, Empty, Stat, StatRow, HeroStat, CostBar, Disclosure, Badge,
 } from '@/components/ui'
 import { money, percent, quantity, marginVerdict, lineStatus, NOT_ENTERED } from '@/lib/format'
+import { localToday } from '@/lib/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -156,14 +158,15 @@ async function setFormatPrice(formData: FormData) {
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, here))
 
-  const price = Number(formData.get('price'))
-  if (!Number.isFinite(price) || price <= 0) {
+  // A selling price left blank must not become a free dish. See money-input.ts.
+  const price = requiredAmount(formData, 'price')
+  if (price === null) {
     redirect(withNotice(here, 'Enter what you charge for this size. It must be more than zero.'))
   }
   const { error } = await supabase.from('recipe_prices').insert({
     account_id: accountId, recipe_id: recipeId,
     variant_id: String(formData.get('variant_id') ?? ''),
-    price, effective_from: new Date().toISOString().slice(0, 10),
+    price, effective_from: localToday(),
   })
   revalidatePath(here)
   redirect(withNotice(here, describeWriteError(error) ?? 'Price saved for that size.'))
@@ -248,8 +251,9 @@ async function setSellingPrice(formData: FormData) {
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, here))
 
-  const price = Number(formData.get('price'))
-  if (!Number.isFinite(price) || price < 0) {
+  // A selling price left blank must not become a free dish. See money-input.ts.
+  const price = requiredAmount(formData, 'price')
+  if (price === null) {
     redirect(withNotice(here, 'Enter the price you sell one portion for.'))
   }
 
@@ -360,6 +364,10 @@ export default async function RecipeDetail(props: {
         )
       : []
 
+  // Which ingredient each missing item is, so its fix can be linked.
+  const idByName = new Map((lines ?? []).flatMap((l) =>
+    l.ingredient_id && l.item_name ? [[l.item_name, l.ingredient_id] as const] : []))
+  const hasPrice = !!check?.selling_price
   const cookLines = (lines ?? []).filter((l) => l.item_kind !== 'packaging')
   const packLines = (lines ?? []).filter((l) => l.item_kind === 'packaging')
   const byCost = (a: LineCost, b: LineCost) =>
@@ -370,7 +378,7 @@ export default async function RecipeDetail(props: {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <BackLink href="/recipes">← All recipes</BackLink>
+        <BackLink href="/recipes">All recipes</BackLink>
         <Link href={otherView} className="mm-tap text-sm underline" style={{ color: 'var(--mm-muted)' }}>
           {pro ? 'Simple view' : 'Full costing view'}
         </Link>
@@ -446,20 +454,36 @@ export default async function RecipeDetail(props: {
                 ? 'Cost incomplete — one thing is still missing.'
                 : `Cost incomplete — ${(blockers ?? []).length} things are still missing.`}
             </p>
-            <ul className="mt-2 space-y-1">
-              {(blockers ?? []).map((b, i) => (
-                <li key={i}>
-                  {b.problem === 'missing_price' &&
-                    <>Cost incomplete — <strong>{b.ingredient_name ?? b.item}</strong> has no purchase price.</>}
-                  {b.problem === 'missing_conversion' &&
-                    <>Cost incomplete — tell us how much one <strong>{b.unit_code ?? 'measure'}</strong> of{' '}
-                      <strong>{b.ingredient_name ?? b.item}</strong> weighs.</>}
-                  {b.problem === 'missing_portion_size' &&
-                    <>Cost incomplete — set how much one portion is, above.</>}
-                  {!['missing_price','missing_conversion','missing_portion_size'].includes(b.problem) &&
-                    <>Cost incomplete — {b.problem.replace(/_/g, ' ')}.</>}
-                </li>
-              ))}
+            <ul className="mt-2 space-y-2">
+              {(blockers ?? []).map((b, i) => {
+                const fixId = idByName.get(b.ingredient_name ?? b.item ?? '')
+                return (
+                  <li key={i} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span>
+                      {b.problem === 'missing_price' &&
+                        <>Cost incomplete — <strong>{b.ingredient_name ?? b.item}</strong> has no purchase price.</>}
+                      {b.problem === 'missing_conversion' &&
+                        <>Cost incomplete — tell us how much one <strong>{b.unit_code ?? 'measure'}</strong> of{' '}
+                          <strong>{b.ingredient_name ?? b.item}</strong> weighs.</>}
+                      {b.problem === 'missing_portion_size' &&
+                        <>Cost incomplete — set how much one portion is, above.</>}
+                      {!['missing_price','missing_conversion','missing_portion_size'].includes(b.problem) &&
+                        <>Cost incomplete — {b.problem.replace(/_/g, ' ')}.</>}
+                    </span>
+                    {/* The fix, one tap away. */}
+                    {b.problem === 'missing_price' && fixId && (
+                      <Link href={`/purchases/new?ingredient=${fixId}`} className="mm-btn mm-btn-secondary shrink-0 text-sm">
+                        Enter what you paid
+                      </Link>
+                    )}
+                    {b.problem === 'missing_conversion' && fixId && (
+                      <Link href={`/ingredients/${fixId}`} className="mm-btn mm-btn-secondary shrink-0 text-sm">
+                        Tell us its size
+                      </Link>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
             <p className="mt-2 text-xs">
               Menu Master will not show a cost it cannot stand behind, and it will
@@ -467,6 +491,104 @@ export default async function RecipeDetail(props: {
             </p>
           </Notice>
         )}
+      </section>
+
+      {/* NEXT STEP: a dish with a cost but no price is asked for its price first. */}
+      {!hasPrice && costed && (
+<>
+      {/* 6. SELLING PRICE ---------------------------------------------- */}
+      <section className="space-y-3">
+        <SectionHeading sub="What you charge for one portion.">
+          {hasPrice ? 'Change your selling price' : costed ? 'Next: set your selling price' : 'Selling price'}
+        </SectionHeading>
+        {!hasPrice && costed && check?.recommended_price !== null && check?.recommended_price !== undefined && (
+          <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+            To keep {percent(target)} for yourself you would charge about{' '}
+            <span className="font-semibold tabular-nums" style={{ color: 'var(--mm-fg)' }}>{money(n(check.recommended_price))}</span>.
+            Enter the price you actually charge.
+          </p>
+        )}
+
+        <form action={setSellingPrice} className="grid gap-3 sm:grid-cols-3 sm:items-end">
+          <input type="hidden" name="recipe_id" value={recipe.id} />
+          <Field label="Price per portion (₦)">
+            <input name="price" type="number" step="0.01" min="0" required inputMode="decimal"
+              defaultValue={check?.selling_price ? Number(check.selling_price) : undefined}
+              className={inputClass} style={inputStyle} />
+          </Field>
+          <Submit>Save price</Submit>
+        </form>
+
+        {check && !check.is_complete && (
+          <Notice>
+            No margin is shown while the costing is incomplete. A margin worked out
+            against a partial cost would tell you that you are making more than you are.
+          </Notice>
+        )}
+
+        {pro && costed && check?.recommended_price !== null && (
+          <Card>
+            <p className="text-sm">
+              To hit your {percent(target)} target you would charge{' '}
+              <span className="font-medium tabular-nums">
+                {money(n(check?.recommended_price ?? null))}
+              </span>{' '}
+              a portion.
+            </p>
+          </Card>
+        )}
+      </section>
+
+</>
+      )}
+
+      {/* 3. INGREDIENT COSTING ----------------------------------------- */}
+      <section className="space-y-3">
+        <SectionHeading sub="What one batch uses, and what each item adds to the cost.">
+          Ingredients
+        </SectionHeading>
+
+        {cookLines.length === 0 && packLines.length === 0 ? (
+          <Empty>Nothing in this recipe yet. Add what goes into one batch and the cost appears as you go.</Empty>
+        ) : (
+          <>
+            <LineGroup title={null} lines={[...cookLines].sort(byCost)} recipeId={recipe.id} pro={pro} />
+            {packLines.length > 0 && (
+              <LineGroup title="Packaging" lines={[...packLines].sort(byCost)} recipeId={recipe.id} pro={pro} />
+            )}
+          </>
+        )}
+
+        <Disclosure summary="Add an ingredient" open={cookLines.length === 0 && packLines.length === 0}>
+          <form action={addLine} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <input type="hidden" name="recipe_id" value={recipe.id} />
+            <Field label="Ingredient">
+              <select name="ingredient_id" required className={inputClass} style={inputStyle}>
+                {(ingredients ?? []).map((i) => (
+                  <option key={i.id} value={i.id}>{i.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Quantity used">
+              <input name="qty" type="number" step="any" min="0" required inputMode="decimal"
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Unit">
+              <select name="unit_id" required className={inputClass} style={inputStyle}>
+                {(units ?? []).map((u) => (
+                  <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Submit>Add ingredient</Submit>
+          </form>
+          {(ingredients ?? []).length === 0 && (
+            <p className="mt-3 text-sm" style={{ color: 'var(--mm-warn)' }}>
+              You have no ingredients yet. Add them under Ingredients first, with
+              what you paid for them.
+            </p>
+          )}
+        </Disclosure>
       </section>
 
       {/* 7. PROFITABILITY + 5. OTHER COSTS + 8. BREAKDOWN (pro) --------- */}
@@ -763,58 +885,20 @@ export default async function RecipeDetail(props: {
         </section>
       )}
 
-      {/* 3. INGREDIENT COSTING ----------------------------------------- */}
-      <section className="space-y-3">
-        <SectionHeading sub="What one batch uses, and what each item adds to the cost.">
-          Ingredients
-        </SectionHeading>
-
-        {cookLines.length === 0 && packLines.length === 0 ? (
-          <Empty>Nothing in this recipe yet. Add what goes into one batch and the cost appears as you go.</Empty>
-        ) : (
-          <>
-            <LineGroup title={null} lines={[...cookLines].sort(byCost)} recipeId={recipe.id} pro={pro} />
-            {packLines.length > 0 && (
-              <LineGroup title="Packaging" lines={[...packLines].sort(byCost)} recipeId={recipe.id} pro={pro} />
-            )}
-          </>
-        )}
-
-        <Disclosure summary="Add an ingredient">
-          <form action={addLine} className="grid gap-3 sm:grid-cols-4 sm:items-end">
-            <input type="hidden" name="recipe_id" value={recipe.id} />
-            <Field label="Ingredient">
-              <select name="ingredient_id" required className={inputClass} style={inputStyle}>
-                {(ingredients ?? []).map((i) => (
-                  <option key={i.id} value={i.id}>{i.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Quantity used">
-              <input name="qty" type="number" step="any" min="0" required inputMode="decimal"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Unit">
-              <select name="unit_id" required className={inputClass} style={inputStyle}>
-                {(units ?? []).map((u) => (
-                  <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Submit>Add ingredient</Submit>
-          </form>
-          {(ingredients ?? []).length === 0 && (
-            <p className="mt-3 text-sm" style={{ color: 'var(--mm-warn)' }}>
-              You have no ingredients yet. Add them under Ingredients first, with
-              what you paid for them.
-            </p>
-          )}
-        </Disclosure>
-      </section>
-
+      {(hasPrice || !costed) && (
+<>
       {/* 6. SELLING PRICE ---------------------------------------------- */}
       <section className="space-y-3">
-        <SectionHeading sub="What you charge for one portion.">Selling price</SectionHeading>
+        <SectionHeading sub="What you charge for one portion.">
+          {hasPrice ? 'Change your selling price' : costed ? 'Next: set your selling price' : 'Selling price'}
+        </SectionHeading>
+        {!hasPrice && costed && check?.recommended_price !== null && check?.recommended_price !== undefined && (
+          <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+            To keep {percent(target)} for yourself you would charge about{' '}
+            <span className="font-semibold tabular-nums" style={{ color: 'var(--mm-fg)' }}>{money(n(check.recommended_price))}</span>.
+            Enter the price you actually charge.
+          </p>
+        )}
 
         <form action={setSellingPrice} className="grid gap-3 sm:grid-cols-3 sm:items-end">
           <input type="hidden" name="recipe_id" value={recipe.id} />
@@ -845,6 +929,9 @@ export default async function RecipeDetail(props: {
           </Card>
         )}
       </section>
+
+</>
+      )}
 
       <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
         This cost covers the ingredients, packaging and labour you have entered.

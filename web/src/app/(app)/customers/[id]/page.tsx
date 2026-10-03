@@ -82,7 +82,7 @@ export default async function CustomerDetail({
 
   return (
     <div className="space-y-6">
-      <BackLink href="/customers">← All customers</BackLink>
+      <BackLink href="/customers">All customers</BackLink>
       <PageHeader
         title={customer.name}
         sub={[customer.company, customer.phone, customer.email].filter(Boolean).join(' · ') || undefined}

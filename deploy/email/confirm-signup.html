@@ -1,0 +1,20 @@
+<!--
+  Supabase → Authentication → Emails → "Confirm signup".
+  Subject: Confirm your email for Menu Master NG
+
+  The link points at menumasterng.com/auth/confirm, not at supabase.co:
+  a link on the sender's own domain is trusted by spam filters, and a
+  token_hash link works on any phone or computer, not only the one that
+  signed up. Requires Site URL = https://menumasterng.com in Supabase.
+-->
+<div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#171b18">
+  <p style="font-size:18px;font-weight:bold;margin:0 0 16px">Menu Master NG</p>
+  <p style="font-size:16px;line-height:1.5;margin:0 0 16px">Welcome! Confirm your email to start your 14-day free trial.</p>
+  <p style="margin:0 0 24px">
+    <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/onboarding"
+       style="display:inline-block;background:#1f7a52;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 20px;border-radius:8px">Confirm my email</a>
+  </p>
+  <p style="font-size:14px;line-height:1.5;color:#66706a;margin:0 0 8px">If the button does not work, copy this link into your browser:</p>
+  <p style="font-size:13px;line-height:1.5;word-break:break-all;margin:0 0 24px">{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/onboarding</p>
+  <p style="font-size:13px;line-height:1.5;color:#66706a;margin:0">You are getting this because someone signed up for Menu Master NG with {{ .Email }}. If that was not you, ignore this email and no account will be created.</p>
+</div>

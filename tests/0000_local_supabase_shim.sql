@@ -148,6 +148,45 @@ $$;
 grant execute on function auth.role() to anon, authenticated, service_role;
 
 -- ----------------------------------------------------------------------------
+-- 4b. A minimal storage schema (added for 0059, website pictures)
+--
+-- Supabase Storage keeps one row per file in storage.objects, under RLS, and
+-- one row per bucket in storage.buckets. Only the columns 0059 and its suite
+-- use are modelled; the HTTP API is stood in for by web/e2e/supabase-local.mjs,
+-- which writes these rows AS the calling user so the real policies decide.
+-- Supabase grants the client roles all privileges on storage.objects and lets
+-- RLS do the gating; this does the same.
+-- ----------------------------------------------------------------------------
+
+create schema if not exists storage;
+grant usage on schema storage to anon, authenticated, service_role;
+
+create table if not exists storage.buckets (
+  id                  text primary key,
+  name                text not null unique,
+  public              boolean not null default false,
+  file_size_limit     bigint,
+  allowed_mime_types  text[],
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+create table if not exists storage.objects (
+  id          uuid primary key default gen_random_uuid(),
+  bucket_id   text references storage.buckets(id),
+  name        text,
+  owner       uuid,
+  metadata    jsonb,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (bucket_id, name)
+);
+
+alter table storage.objects enable row level security;
+grant select on storage.buckets to anon, authenticated, service_role;
+grant all on storage.objects to anon, authenticated, service_role;
+
+-- ----------------------------------------------------------------------------
 -- 5. Notes on what this shim deliberately does NOT do
 --
 --   - It does not grant anon or authenticated any privilege on public tables.

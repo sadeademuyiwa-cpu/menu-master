@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
-import { PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading } from '@/components/ui'
+import { PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading, Disclosure } from '@/components/ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,10 +52,10 @@ export default async function CustomersPage({
       />
       {notice && <Notice tone={/could not|cannot|needs/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
-      <Card>
-        <SectionHeading sub="Only what you actually need to remember. Menu Master does not collect addresses or birthdays — what is not collected cannot be lost.">
-          Add a customer
-        </SectionHeading>
+      <Disclosure summary="Add a customer" open={!customers?.length}>
+        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+          Only what you actually need to remember. Customers can also be added while you take an order.
+        </p>
         <form action={addCustomer} className="mt-3 grid gap-3 sm:grid-cols-3">
           <Field label="Name">
             <input name="name" className="mm-input mt-1" />
@@ -77,7 +77,7 @@ export default async function CustomersPage({
           </div>
           <div className="flex items-end"><Submit>Add customer</Submit></div>
         </form>
-      </Card>
+      </Disclosure>
 
       <section className="space-y-3">
         <SectionHeading sub="Tap a name to see what they have bought.">Your customers</SectionHeading>

@@ -1,0 +1,225 @@
+============================================================================
+0050 + PAYSTACK CHECKOUT -- PRE-PRODUCTION REHEARSAL, raw evidence
+Captured 2026-09-05 15:15 UTC on the local production-faithful replica
+PostgreSQL 17.6
+0050          md5 59fe2693fabf7540026bebe80f83feeb
+0050 rollback md5 5f24b4de7e552355acd3163ec6051bf0
+============================================================================
+
+#### 1. REGRESSION: every SQL suite, 0049 vs 0050 ####
+gating 0050_checkout_and_billing_apply.sql  md5 59fe2693fabf7540026bebe80f83feeb
+building the before/after templates ...
+
+SUITE                                          BEFORE           AFTER            VERDICT
+---------------------------------------------- ---------------  ---------------  -------
+001_correctness_and_isolation.sql              pass=27 fail=0   pass=27 fail=0   same
+002_gate1_attack_and_regression.sql            pass=56 fail=0   pass=56 fail=0   same
+003_real_client_role_escalation.sql            NO RESULT        NO RESULT        same
+004_gate1_closure.sql                          pass=23 fail=0   pass=23 fail=0   same
+005_role_write_matrix.sql                      pass=51 fail=0   pass=51 fail=0   same
+006_supabase_boundary_fixtures.sql             NO RESULT        NO RESULT        same
+007_service_context.sql                        NO RESULT        NO RESULT        same
+008_post_phase_b.sql                           NO RESULT        NO RESULT        same
+009_evidence_0018.sql                          NO RESULT        NO RESULT        same
+010_anon_reference_read.sql                    NO RESULT        NO RESULT        same
+011_gate2_phase1.sql                           pass=32 fail=1   pass=32 fail=1   same
+012_gate2_backfill.sql                         NO RESULT        NO RESULT        same
+013_gate2_overhead_basis.sql                   pass=15 fail=0   pass=15 fail=0   same
+014_gate2_cutover.sql                          pass=13 fail=0   pass=13 fail=0   same
+015_gate2_repoint.sql                          pass=14 fail=3   pass=14 fail=3   same
+016_gate2_attack_matrix.sql                    pass=16 fail=0   pass=16 fail=0   same
+017_billing_events.sql                         pass=19 fail=1   pass=19 fail=1   same
+018_entitlement.sql                            pass=15 fail=0   pass=15 fail=0   same
+019_billing_lifecycle.sql                      pass=17 fail=0   pass=17 fail=0   same
+020_plan_code_mapping.sql                      pass=13 fail=0   pass=13 fail=0   same
+021_costing_mvp_journey.sql                    pass=22 fail=0   pass=22 fail=0   same
+022_entitlement_final.sql                      pass=26 fail=0   pass=26 fail=0   same
+023_recipe_costing_experience.sql              pass=27 fail=0   pass=27 fail=0   same
+024_source_aware_costing.sql                   pass=23 fail=0   pass=23 fail=0   same
+025_purchase_ledger.sql                        pass=19 fail=0   pass=19 fail=0   same
+026_recipe_worksheet.sql                       pass=25 fail=0   pass=25 fail=0   same
+027_view_security.sql                          pass=26 fail=0   pass=26 fail=0   same
+028_formats_labour_overhead.sql                pass=26 fail=0   pass=26 fail=0   same
+029_costing_models.sql                         pass=35 fail=0   pass=35 fail=0   same
+030_overhead_allocation.sql                    pass=26 fail=0   pass=26 fail=0   same
+031_dashboard.sql                              pass=21 fail=0   pass=21 fail=0   same
+032_sales_and_frozen_cogs.sql                  pass=43 fail=0   pass=43 fail=0   same
+033_discounts.sql                              pass=20 fail=0   pass=20 fail=0   same
+034_function_surface.sql                       pass=6 fail=0    pass=6 fail=0    same
+035_billing_tiers_and_founders.sql             pass=34 fail=0   pass=34 fail=0   same
+036_checkout_and_founder_payment.sql           NO RESULT        pass=29 fail=0   new suite (cannot pass before)
+
+unchanged: 35   new suites: 1   regressions: 0
+
+#### 2. ATOMICITY: 0050 ####
+migration : 0050_checkout_and_billing_apply.sql  md5 59fe2693fabf7540026bebe80f83feeb
+baseline  : ddb2417b56de90c9fab0453908ce7908  (2512 lines, from t49)
+
+failing where fn_checkout_quote exists and the payment boundary is next
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : ddb2417b56de90c9fab0453908ce7908  identical to the baseline -- nothing partial remains
+
+failing where both new functions exist and fn_billing_apply is about to be REPLACED
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : ddb2417b56de90c9fab0453908ce7908  identical to the baseline -- nothing partial remains
+
+failing where every change is made and we are one statement from COMMIT
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : ddb2417b56de90c9fab0453908ce7908  identical to the baseline -- nothing partial remains
+
+the clean file still applies after the aborted attempts: OK
+
+and the wrong executor (autocommit, i.e. the SQL Editor):
+  psql:migrations/proposed/0050_checkout_and_billing_apply.sql:48: ERROR:  0050 ABORT: this executor is not honouring transaction control (each statement is committing on its own). Do NOT run 0050 here. Run it with psql --single-transaction over the Session Pooler.
+  refused before any object was touched (ddb2417b56de90c9fab0453908ce7908)
+
+#### 3. ATOMICITY: 0049, re-proved on the generalised harness ####
+migration : 0049_billing_tiers_and_founders.sql  md5 6640bc6c1ed71315b814af1b6af15776
+baseline  : 5fe622f29fd2f916b0e08fa810cb3291  (2445 lines, from t48)
+
+failing where the new tables exist and are seeded
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : 5fe622f29fd2f916b0e08fa810cb3291  identical to the baseline -- nothing partial remains
+
+failing where an RLS write policy has been DROPPED and not yet recreated
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : 5fe622f29fd2f916b0e08fa810cb3291  identical to the baseline -- nothing partial remains
+
+failing where every change is made and we are one statement from COMMIT
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : 5fe622f29fd2f916b0e08fa810cb3291  identical to the baseline -- nothing partial remains
+
+the clean file still applies after the aborted attempts: OK
+
+and the wrong executor (autocommit, i.e. the SQL Editor):
+  psql:migrations/proposed/0049_billing_tiers_and_founders.sql:54: ERROR:  0049 ABORT: this executor is not honouring transaction control (each statement is committing on its own). Do NOT run 0049 here. Run it with psql --single-transaction over the Session Pooler.
+  refused before any object was touched (5fe622f29fd2f916b0e08fa810cb3291)
+
+#### 4. ROLLBACK ####
+psql:migrations/proposed/0050_checkout_and_billing_apply.sql:412: NOTICE:  0050 OK: checkout quote added, billing apply now confirms founder slots and writes the five 0049 fields, 117 policies unchanged, nothing reachable from the browser.
+psql:migrations/proposed/0050_rollback.sql:193: NOTICE:  0050 rollback OK: back at the 0049 billing pipeline, 117 policies.
+fresh 0049     : ddb2417b56de90c9fab0453908ce7908  (2512 lines)
+after rollback : ddb2417b56de90c9fab0453908ce7908  (2512 lines)
+byte-faithful
+
+#### 5. NEW SUITE 036, in full ####
+ n  |                        check_name                         | verdict |                        detail                         
+----+-----------------------------------------------------------+---------+-------------------------------------------------------
+  1 | a first customer is quoted FOUNDING costing               | PASS    | founding_costing at 350000 kobo
+  2 | the quote reserved a slot but did NOT consume it          | PASS    | slot 1 held, not claimed
+  3 | switching tier keeps the SAME slot, not a second          | PASS    | founding_trading
+  4 | an unknown tier is refused                                | PASS    | Unknown tier 'enterprise'. Choose costing or trading
+  5 | the amount comes from OUR data, never the caller          | PASS    | quote matches plans.price_kobo exactly
+  6 | a founding payment APPLIES                                | PASS    | applied 
+  7 | and the slot is now CONFIRMED, not merely reserved        | PASS    | slot 1 claimed_at 2026-09-05 15:15:50.494257+00
+  8 | the founding price is LOCKED on the subscription          | PASS    | price_kobo 350000, founding_price_active true
+  9 | the provider codes are stored so we can act at Paystack   | PASS    | CUS_6eaf58bf / SUB_alice
+ 10 | and they can now record a sale                            | PASS    | founding_costing grants costing only, as designed
+ 11 | a later price rise does NOT re-price them                 | PASS    | still 350000 kobo
+ 12 | a lapse FORFEITS the founding price                       | PASS    | forfeited_at 2026-09-05 15:15:50.494257+00
+ 13 | the slot is kept, not returned to the pool                | PASS    | slot 1 still names the account that held it
+ 14 | and they are quoted STANDARD ever after                   | PASS    | costing at 750000
+ 15 | switching off renewal is NOT a lapse -- no forfeit        | PASS    | they keep what they paid for, founding price included
+ 16 | and it is recorded as cancel_at_period_end                | PASS    | cancel_at_period_end = true
+ 17 | a standard payment locks the standard price               | PASS    | price_kobo 1500000
+ 18 | a standard customer holds no founder slot                 | PASS    | none
+ 19 | and Costing + Sales grants Sales                          | PASS    | 
+ 20 | customer 101 is quoted STANDARD, never a made-up discount | PASS    | costing at 750000 kobo
+ 21 | and no 101st slot was created                             | PASS    | 100 slots
+ 22 | a missing price REFUSES rather than inventing one         | PASS    | No active costing plan at standard pricing. Checkout
+ 23 | a zero price REFUSES -- free is a decision, not a default | PASS    | Plan costing is priced at zero. Checkout refused.
+ 24 | an unmapped Paystack plan code is still refused           | PASS    | unmapped plan code PLN_does_not_exist
+ 25 | an event we do not act on is still ignored, not applied   | PASS    | ignored
+ 26 | every applied event is recorded                           | PASS    | 5 applied event(s)
+ 27 | no billing function is callable from the browser          | PASS    | 0 reachable
+ 28 | but the service context can quote                         | PASS    | 
+ 29 | a signed-in user cannot quote themselves a price          | PASS    | 42501
+(29 rows)
+
+ pass | fail 
+------+------
+   29 |    0
+(1 row)
+
+
+#### 6. EDGE FUNCTION UNIT TESTS ####
+running 9 tests from ./supabase/functions/paystack-checkout/lib_test.ts
+only costing and trading are accepted as a tier ... ok (313µs)
+a hostile body cannot set the amount, the tier or the account ... ok (105µs)
+metadata carries exactly what fn_billing_apply reads ... ok (41µs)
+the amount is a string of kobo, never naira and never a float ... ok (36µs)
+the plan code is sent so the charge becomes a subscription ... ok (47µs)
+a quote with no plan code is refused before Paystack ... ok (52µs)
+the callback url is ours, and is passed through unchanged ... ok (27µs)
+standard pricing initializes identically -- one code path, not two ... ok (99µs)
+an error response is a fixed code and never a provider message ... ok (55µs)
+running 10 tests from ./supabase/functions/paystack-webhook/lib_test.ts
+HMAC matches a known Paystack-style signature over exact bytes ... ok (928µs)
+re-serialising JSON changes the bytes and breaks the signature ... ok (259µs)
+a one-character body change changes the signature ... ok (181µs)
+a wrong key does not verify ... ok (243µs)
+constant-time compare is correct for equal, unequal and short input ... ok (80µs)
+an absent signature header never verifies ... ok (137µs)
+sha256 of the body is stable and 64 hex chars ... ok (222µs)
+redact strips every bearer credential and keeps what support needs ... ok (91µs)
+redact is safe on payloads with no authorization block ... ok (7ms)
+the body size cap is 256 KB ... ok (81µs)
+
+ok | 19 passed | 0 failed (67ms)
+
+
+#### 7. WEB UNIT TESTS ####
+# (node:4233) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/user/menu-master/web/src/lib/money-input.ts is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /home/user/menu-master/web/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a blank sale price is rejected and cannot become a free line
+# Subtest: a whitespace-only sale price is rejected
+# Subtest: a missing sale price field is rejected
+# Subtest: 2000 stores as 2000
+# Subtest: a genuinely typed zero is still accepted, because a free item is real
+# Subtest: nonsense and impossible amounts are rejected
+# Subtest: an optional discount left blank still means zero
+# Subtest: an optional field still rejects nonsense rather than reading it as zero
+# Subtest: an optional field that IS filled in is honoured
+# Subtest: the sale line price is read with requiredAmount, not Number()
+# Subtest: a blank recipe selling price cannot silently become zero
+# Subtest: a blank ingredient purchase amount cannot silently become zero
+# Subtest: deliberately optional money fields were left alone
+# Subtest: the sale form offers the price the product is already sold at
+# (node:4234) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/user/menu-master/web/src/lib/nav.ts is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /home/user/menu-master/web/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the five destinations are unchanged
+# Subtest: a section page lights its own item
+# Subtest: a child page lights its parent
+# Subtest: everything reached from More lights More
+# Subtest: no reachable path leaves the navigation unlit
+# Subtest: the prefix test respects a path boundary
+# Subtest: exactly one destination is ever active
+# (node:4240) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/user/menu-master/web/src/lib/data/resolve-context.ts is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /home/user/menu-master/web/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A. valid session with a business resolves to ok, with both ids
+# Subtest: B. expired session is unauthenticated, and never blamed on the business
+# Subtest: B2. a null user with no error is also unauthenticated, not "no account"
+# Subtest: C. signed in with no membership is no_membership, and goes to onboarding
+# Subtest: D. signed in, has an account, no business -> no_business, keeps the account id
+# Subtest: E1. a membership query error is an error, and keeps the real message server-side
+# Subtest: E2. a business query error stays on the page and leaks nothing
+# Subtest: E4. no database, network or SQL detail can reach a URL, whatever the error says
+# Subtest: E5. the generic sentence is fixed text with nothing interpolated
+# Subtest: E3. authentication is awaited BEFORE the lookups run
+# Subtest: F. no app guard can still blame the business for a session failure
+# Subtest: F2. the false messages are gone from the application source
+# Subtest: G. the sales list does not claim to show every sale
+# tests 34
+# suites 0
+# pass 34
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 137.886482

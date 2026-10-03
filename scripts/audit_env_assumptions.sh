@@ -20,7 +20,7 @@ set -uo pipefail
 R="$(cd "$(dirname "$0")/.." && pwd)"
 FILES=()
 for n in 0034 0035 0036 0037 0038 0039 0040 0041 0042 0043 0044 0045 0046 0047 0048; do
-  FILES+=("$(ls "$R"/migrations/proposed/${n}_*.sql | grep -v _rollback | head -1)")
+  FILES+=("$(ls "$R"/migrations/${n}_*.sql | grep -v _rollback | head -1)")
 done
 
 # Names the local shim creates that the hosted platform does NOT provide.

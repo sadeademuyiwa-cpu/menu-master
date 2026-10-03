@@ -1,8 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
-import { PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading } from '@/components/ui'
+import { currentContext, contextRedirect } from '@/lib/data/context'
+import { PageHeader, Card, Notice, Empty, SectionHeading } from '@/components/ui'
+import { AppIcon } from '@/components/icons'
 import { money } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
@@ -11,29 +11,6 @@ type Row = {
   purchase_id: string; purchase_date: string; status: string
   reference: string | null; supplier_name: string | null
   line_count: number; total_amount: string | null
-}
-type Supplier = { id: string; name: string }
-
-/** Start a draft. Lines are added on the next screen; nothing costs anything
- *  until fn_post_purchase runs, so an abandoned draft affects no recipe. */
-async function startPurchase(formData: FormData) {
-  'use server'
-  const ctx = await currentContext()
-  const { supabase, accountId, businessId } = ctx
-  if (!accountId || !businessId) redirect(contextRedirect(ctx, '/purchases'))
-
-  const supplierRaw = String(formData.get('supplier_id') ?? '')
-  const { data, error } = await supabase.from('purchases').insert({
-    account_id: accountId,
-    business_id: businessId,
-    purchase_date: String(formData.get('purchase_date') || new Date().toISOString().slice(0, 10)),
-    supplier_id: supplierRaw || null,
-    reference: String(formData.get('reference') ?? '') || null,
-  }).select('id').single()
-
-  if (error || !data) redirect(withNotice('/purchases', describeWriteError(error) ?? 'Could not start that purchase.'))
-  revalidatePath('/purchases')
-  redirect(`/purchases/${data.id}`)
 }
 
 export default async function PurchasesPage({
@@ -44,7 +21,7 @@ export default async function PurchasesPage({
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/purchases'))
 
-  const [{ data: purchases }, { data: suppliers }] = await Promise.all([
+  const [{ data: purchases }] = await Promise.all([
     // v_purchase_summary (0035). purchase_lines carries two foreign keys to
     // both ingredients and purchases, so an unhinted PostgREST embed returns
     // PGRST201 and the list silently renders zero items. The view resolves the
@@ -52,11 +29,7 @@ export default async function PurchasesPage({
     supabase.from('v_purchase_summary')
       .select('purchase_id,purchase_date,status,reference,supplier_name,line_count,total_amount')
       .order('purchase_date', { ascending: false }).limit(50).returns<Row[]>(),
-    supabase.from('suppliers').select('id,name').eq('is_active', true)
-      .order('name').returns<Supplier[]>(),
   ])
-
-  const today = new Date().toISOString().slice(0, 10)
 
   return (
     <div className="space-y-6">
@@ -64,38 +37,22 @@ export default async function PurchasesPage({
         title="Purchases"
         sub="What you actually paid. Every ingredient cost in Menu Master comes from here."
       />
-      <p className="text-sm">
-        <Link href="/suppliers" className="mm-tap underline">Your suppliers and markets →</Link>
-      </p>
       {notice && <Notice tone={/could not|cannot/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
-      <Card>
-        <SectionHeading sub="Record a market run or a supplier delivery. Add the items on the next screen.">
-          Record a purchase
-        </SectionHeading>
-        <form action={startPurchase} className="mt-3 grid gap-3 sm:grid-cols-4">
-          <Field label="Date">
-            <input name="purchase_date" type="date" defaultValue={today}
-              className="mm-input mt-1" />
-          </Field>
-          <Field label="Supplier or market (optional)">
-            <select name="supplier_id" className="mm-input mt-1">
-              <option value="">Not recorded</option>
-              {(suppliers ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Reference (optional)">
-            <input name="reference" placeholder="receipt no."
-              className="mm-input mt-1" />
-          </Field>
-          <div className="flex items-end"><Submit>Start purchase</Submit></div>
-        </form>
-      </Card>
+      {/* One obvious thing to do here. The purchase screen takes it from there. */}
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <Link href="/purchases/new" className="mm-btn mm-btn-primary w-full text-base">
+          <AppIcon name="plus" size={20} /> New purchase
+        </Link>
+        <Link href="/suppliers" className="mm-btn mm-btn-secondary w-full">
+          <AppIcon name="supplier" size={18} /> Suppliers and markets
+        </Link>
+      </div>
 
       <section className="space-y-3">
         <SectionHeading sub="Newest first.">Purchase history</SectionHeading>
         {!purchases?.length ? (
-          <Empty>No purchases yet. Record one above and your ingredient costs start working.</Empty>
+          <Empty>No purchases yet. Tap New purchase after your next market run and your dish costs start working.</Empty>
         ) : (
           <ul className="space-y-2">
             {purchases.map((p) => {

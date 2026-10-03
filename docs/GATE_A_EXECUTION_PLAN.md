@@ -1,5 +1,9 @@
 # GATE A — EXECUTION PLAN
 
+> **Superseded.** This is a dated record and no longer describes the present.
+> For what is true now — production level, branches, test state — read
+> [`STATUS.md`](../STATUS.md) at the repository root. (Banner added 10 Sep 2026.)
+
 **Target: 1 September 2026. Public product and trial launch. No path accepts
 money.** Planning only — nothing here has been executed.
 

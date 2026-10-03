@@ -25,21 +25,42 @@ export async function currentContext(): Promise<
 > {
   const supabase = await createClient()
 
-  const resolved = await resolveContext({
+  // Set by getUserId, which resolveContext awaits before getMembership.
+  let userId: string | null = null
+  const port = {
     // Awaited first and alone: validates the token with the auth server, and
     // completes any refresh before the two lookups run.
     getUserId: async () => {
       const { data, error } = await supabase.auth.getUser()
-      return { userId: data?.user?.id ?? null, error }
+      userId = data?.user?.id ?? null
+      return { userId, error }
     },
+    // THE CALLER'S OWN membership. RLS lets every member of an account read
+    // every membership of it, so without the user filter a sales member on a
+    // two-person account was handed the owner's row -- and the page believed
+    // it was an owner. The database still refused everything an owner may do
+    // (0056 proved that in the browser); only the courtesy gating was wrong.
     // await, not returned directly: the PostgREST builder is a thenable, not a
     // Promise, so it does not satisfy the port's return type on its own.
     getMembership: async () =>
-      await supabase.from('memberships').select('account_id, role').limit(1).maybeSingle(),
+      await supabase.from('memberships').select('account_id, role')
+        .eq('user_id', userId ?? '').order('created_at').limit(1).maybeSingle(),
     getBusiness: async () =>
       await supabase.from('businesses').select('id, name').is('deleted_at', null)
         .order('created_at').limit(1).maybeSingle(),
-  })
+  }
+  let resolved = await resolveContext(port)
+
+  // A login on no account may have been INVITED to one (0056). Accepting is
+  // the database's decision -- it matches the login's own email to open
+  // invitations -- and happens here, once, so an invited person who signs up
+  // lands in the right business with no extra step. A genuinely new user
+  // gets 0 and goes to onboarding as before.
+  if (resolved.status === 'no_membership') {
+    const { data } = await supabase.rpc('fn_accept_invitations')
+    const accepted = (data as { accepted?: number } | null)?.accepted ?? 0
+    if (accepted > 0) resolved = await resolveContext(port)
+  }
 
   // The real reason stays on the server. contextRedirect() sends the browser a
   // fixed generic sentence, so nothing about the database travels in a URL.
@@ -72,6 +93,27 @@ export async function entitlementStatus(): Promise<EntitlementStatus | null> {
   if (error || !data || (Array.isArray(data) && data.length === 0)) return null
   const row = Array.isArray(data) ? data[0] : data
   return row as EntitlementStatus
+}
+
+/**
+ * Whether this account has paid for Sales.
+ *
+ * fn_my_has_sales() is the SAME predicate the thirteen Sales write policies
+ * consult, so the screen and the database cannot disagree about what a plan
+ * grants. The database remains the authority -- a false here hides a button,
+ * it does not protect anything. RLS does that, and still would if this
+ * returned true wrongly.
+ *
+ * Null when the function is absent (0051 not yet applied) or the lookup fails.
+ * Callers treat null as "do not claim either way" rather than as "no": telling
+ * a paying customer they cannot sell would be worse than showing a button the
+ * database will refuse.
+ */
+export async function hasSalesEntitlement(): Promise<boolean | null> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('fn_my_has_sales')
+  if (error || data === null || data === undefined) return null
+  return data === true
 }
 
 type PgError = { code?: string; message?: string; details?: string | null } | null

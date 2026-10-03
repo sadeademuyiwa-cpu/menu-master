@@ -1,12 +1,18 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { requiredAmount } from '@/lib/money-input'
+import { ProductAndPriceFields } from '@/components/product-price-field'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Stat, StatRow, Badge, Disclosure,
 } from '@/components/ui'
 import { money, percent } from '@/lib/format'
+import { buildReceipt, whatsappLink, whatsappNumber } from '@/lib/receipt'
+import { ReceiptActions } from '@/components/receipt-actions'
+import { Button } from '@/components/button'
+import { AppIcon } from '@/components/icons'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +34,25 @@ type SaleLine = {
 }
 type Recipe = { id: string; name: string }
 type Variant = { id: string; recipe_id: string; format: { name: string } | null }
-type Customer = { id: string; name: string }
+type Customer = { id: string; name: string; phone: string | null }
+type ProductPrice = { recipe_id: string; variant_id: string | null; selling_price: string | null }
+
+/** A line of a CANCELLED sale, read straight from order_lines.
+ *  v_sale_lines deliberately excludes voided and cancelled orders -- that is
+ *  its documented contract and the reason live totals are correct -- so the
+ *  historical record has to be read from the table it was never deleted from. */
+type HistoryLine = {
+  id: string; qty: string; unit_price: string; discount_amount: string
+  unit_cost_at_sale: string | null; description: string | null
+  recipe: { name: string } | null
+}
+/** One row of fn_allocate_order_discount(order_id) -- the SAME function
+ *  v_sale_lines joins, so a cancelled sale's figures are computed by the same
+ *  code as a live one and cannot drift from it. */
+type Allocation = {
+  order_line_id: string; gross_revenue: string; line_discount: string
+  allocated_order_discount: string; net_revenue: string
+}
 
 /* ---------------------------------------------------------------- actions */
 
@@ -41,13 +65,15 @@ async function addLine(formData: FormData) {
   if (!accountId) redirect(contextRedirect(ctx, here))
 
   const qty = Number(formData.get('qty'))
-  const price = Number(formData.get('unit_price'))
+  // requiredAmount, not Number(): Number('') is 0, and a blank price used to
+  // pass the `price < 0` guard and be stored as a free item.
+  const price = requiredAmount(formData, 'unit_price')
   const discount = Number(formData.get('discount_amount') || 0)
   if (!Number.isFinite(qty) || qty <= 0) {
     redirect(withNotice(here, 'Enter how many you sold. It must be more than zero.'))
   }
-  if (!Number.isFinite(price) || price < 0) {
-    redirect(withNotice(here, 'Enter what you charged for one.'))
+  if (price === null) {
+    redirect(withNotice(here, 'Enter what you charged for one, using digits only.'))
   }
   if (!Number.isFinite(discount) || discount < 0) {
     redirect(withNotice(here, 'A discount is an amount in naira, and cannot be negative.'))
@@ -206,7 +232,8 @@ export default async function SaleDetail({
     .eq('id', id).maybeSingle<Order>()
   if (!order) notFound()
 
-  const [{ data: lines }, { data: recipes }, { data: variants }, { data: customers }] =
+  const [{ data: lines }, { data: recipes }, { data: variants }, { data: customers },
+         { data: productPrices }] =
     await Promise.all([
       supabase.from('v_sale_lines').select('*').eq('order_id', id).returns<SaleLine[]>(),
       supabase.from('recipes').select('id,name').is('deleted_at', null)
@@ -216,13 +243,67 @@ export default async function SaleDetail({
       supabase.from('recipe_variants')
         .select('id,recipe_id,format:serving_formats(name)')
         .eq('is_active', true).returns<Variant[]>(),
-      supabase.from('customers').select('id,name').order('name').returns<Customer[]>(),
+      supabase.from('customers').select('id,name,phone').order('name').returns<Customer[]>(),
+      // The same view the dashboard reads "You charge" from, so the price
+      // offered here is the price shown there -- not a second opinion.
+      supabase.from('v_product_attention')
+        .select('recipe_id,variant_id,selling_price').returns<ProductPrice[]>(),
     ])
 
   const rows = lines ?? []
   const confirmed = order.finalised_at !== null
   const voided = order.voided_at !== null
-  const customerName = (customers ?? []).find((c) => c.id === order.customer_id)?.name ?? null
+
+  // A cancelled sale keeps everything: fn_void_order writes only voided_at,
+  // voided_by and void_reason, and trg_order_lines_revenue refuses any edit or
+  // delete on a finalised sale's lines. Only v_sale_lines hides it, by design.
+  // So read the preserved record directly, and let the database do the money.
+  const [{ data: histLines }, { data: allocations }, { data: replacement }] = voided
+    ? await Promise.all([
+        supabase.from('order_lines')
+          // The constraint hint is REQUIRED. order_lines has TWO foreign keys
+          // to recipes -- order_lines_recipe_id_fkey (recipe_id) and
+          // fk_order_lines_recipe_id_account (recipe_id, account_id) -- and an
+          // unhinted embed makes PostgREST answer PGRST201 / HTTP 300 rather
+          // than rows. That shipped once: every cancelled sale then rendered
+          // 0.00 with no items, because the error left histLines null.
+          // e2e/postgrest-embeds.mjs now proves every embed against real
+          // PostgREST so this cannot return silently.
+          .select('id,qty,unit_price,discount_amount,unit_cost_at_sale,description,' +
+                  'recipe:recipes!order_lines_recipe_id_fkey(name)')
+          .eq('order_id', id).returns<HistoryLine[]>(),
+        // The rpc's generated return type is not array-shaped, so it is cast
+        // where it is consumed rather than through .returns<>().
+        supabase.rpc('fn_allocate_order_discount', { p_order_id: id }),
+        supabase.from('orders').select('id,order_no').eq('replaces', id)
+          .maybeSingle<{ id: string; order_no: string | null }>(),
+      ])
+    : [{ data: null }, { data: null }, { data: null }]
+
+  // Array.isArray, not `?? []`: the page must still show the preserved lines
+  // even if the allocation call answers with something unexpected. Losing the
+  // money figures is bad; losing the whole record on a page whose purpose is to
+  // prove the record survived would be worse.
+  const allocRows: Allocation[] = Array.isArray(allocations) ? allocations as Allocation[] : []
+  const allocOf = new Map(allocRows.map((a) => [a.order_line_id, a]))
+  const history = (histLines ?? []).map((l) => ({ line: l, alloc: allocOf.get(l.id) ?? null }))
+
+  // The same arithmetic the live page uses, over the preserved rows. These
+  // figures are displayed as history and are NOT added to any live total --
+  // revenue, COGS and profit reporting still exclude cancelled sales entirely,
+  // because those come from v_sales_unified, which is untouched.
+  const histNet = history.reduce((t, h) => t + Number(h.alloc?.net_revenue ?? 0), 0)
+  const histGross = history.reduce((t, h) => t + Number(h.alloc?.gross_revenue ?? 0), 0)
+  const histCosted = history.filter((h) => h.line.unit_cost_at_sale !== null)
+  const histCogs = histCosted.reduce(
+    (t, h) => t + Number(h.line.qty) * Number(h.line.unit_cost_at_sale), 0)
+  const histCostedRevenue = histCosted.reduce(
+    (t, h) => t + Number(h.alloc?.net_revenue ?? 0), 0)
+  const histProfit = histCosted.length ? histCostedRevenue - histCogs : null
+  const histMargin = histProfit !== null && histCostedRevenue !== 0
+    ? (100 * histProfit) / histCostedRevenue : null
+  const customer = (customers ?? []).find((c) => c.id === order.customer_id) ?? null
+  const customerName = customer?.name ?? null
 
   // Totals are summed from the view, which is the same arithmetic the reports
   // use. Nothing is recomputed differently here.
@@ -241,6 +322,24 @@ export default async function SaleDetail({
     ? (100 * profit) / costedRevenue : null
   const uncosted = rows.filter((r) => r.cost_status === 'sold_without_cost')
 
+  // The receipt, from the confirmed figures in v_sale_lines.
+  const receipt = confirmed && !voided && rows.length > 0
+    ? buildReceipt({
+        businessName: ctx.businessName ?? 'Menu Master NG',
+        date: order.order_date,
+        reference: order.order_no,
+        customerName,
+        lines: rows.map((r) => ({
+          name: r.product_name
+            ? `${r.product_name}${r.format_name ? ` (${r.format_name})` : ''}`
+            : (r.description ?? 'Item'),
+          qty: Number(r.qty), unitPrice: Number(r.unit_price), gross: Number(r.gross_revenue),
+        })),
+        discount: discounts,
+        total: net,
+      })
+    : null
+
   const byRecipe = new Map<string, Variant[]>()
   for (const v of variants ?? []) {
     const list = byRecipe.get(v.recipe_id) ?? []
@@ -248,9 +347,32 @@ export default async function SaleDetail({
     byRecipe.set(v.recipe_id, list)
   }
 
+  // "recipe:variant" values, identical to the options this replaces, each
+  // carrying the price already recorded for that product so the form can offer
+  // it. A product with no recorded price simply offers nothing.
+  const priceOf = new Map<string, string | null>()
+  for (const pp of productPrices ?? []) {
+    priceOf.set(`${pp.recipe_id}:${pp.variant_id ?? ''}`, pp.selling_price)
+  }
+  const productOptions = (recipes ?? []).flatMap((rec) => {
+    const vs = byRecipe.get(rec.id) ?? []
+    if (vs.length === 0) {
+      const value = `${rec.id}:`
+      return [{ value, label: rec.name, price: priceOf.get(value) ?? null }]
+    }
+    return vs.map((v) => {
+      const value = `${rec.id}:${v.id}`
+      return {
+        value,
+        label: `${rec.name} \u2014 ${v.format?.name ?? 'one size'}`,
+        price: priceOf.get(value) ?? null,
+      }
+    })
+  })
+
   return (
     <div className="space-y-6">
-      <BackLink href="/sales">← All sales</BackLink>
+      <BackLink href="/sales">All sales</BackLink>
       <PageHeader
         title={order.order_no ?? `Sale of ${order.order_date}`}
         sub={[
@@ -266,6 +388,12 @@ export default async function SaleDetail({
           This sale was cancelled: {order.void_reason ?? 'no reason recorded'}. It no longer
           counts in your figures. The record and the cost frozen onto it are kept, so nothing
           disappears without a trace.
+          {replacement && (
+            <> It was replaced by{' '}
+              <Link href={`/sales/${replacement.id}`} className="mm-inline-tap">
+                {replacement.order_no ?? 'a later sale'}
+              </Link>.</>
+          )}
         </Notice>
       )}
       {!confirmed && !voided && (
@@ -274,6 +402,31 @@ export default async function SaleDetail({
           will be worked out from your prices at the moment you confirm — not from when you
           typed it.
         </Notice>
+      )}
+      {receipt && (
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-semibold">Receipt</div>
+              <div className="text-sm" style={{ color: 'var(--mm-muted)' }}>{money(net)} · {rows.length} item{rows.length === 1 ? '' : 's'}</div>
+            </div>
+            <Link href="/sales/new" className="mm-btn mm-btn-primary">
+              <AppIcon name="plus" size={18} /> New sale
+            </Link>
+          </div>
+          <div className="mt-3">
+            <ReceiptActions
+              text={receipt}
+              whatsappHref={whatsappLink(customer?.phone, receipt)}
+              toName={whatsappNumber(customer?.phone) ? customerName : null}
+            />
+          </div>
+          <div className="mt-3">
+            <Disclosure summary="See the receipt">
+              <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed">{receipt}</pre>
+            </Disclosure>
+          </div>
+        </Card>
       )}
       {confirmed && !voided && uncosted.length > 0 && (
         <Notice>
@@ -285,6 +438,73 @@ export default async function SaleDetail({
         </Notice>
       )}
 
+      {voided ? (
+        <>
+          {/* HISTORY, not live figures. Labelled as such, and summed only over
+              the preserved rows: nothing here reaches revenue, COGS or profit
+              reporting, which read v_sales_unified and exclude cancelled sales
+              at the database. */}
+          <SectionHeading sub="What this sale was when it was cancelled. These figures are kept for your records and are NOT counted in your revenue, cost or profit.">
+            The original cancelled sale
+          </SectionHeading>
+          <StatRow>
+            <Stat label="Was charged" value={money(histGross)} />
+            <Stat label="Came to" value={money(histNet)} />
+            <Stat
+              label="Cost frozen at the time"
+              value={histCosted.length ? money(histCogs) : money(null, 'never known')}
+            />
+            <Stat
+              label="Would have kept"
+              value={histProfit === null ? money(null, 'not known') : money(histProfit)}
+              sub={histMargin === null
+                ? 'No item on this sale had a known cost.'
+                : `${percent(histMargin)} of ${money(histCostedRevenue)}`}
+            />
+          </StatRow>
+
+          <section className="space-y-3">
+            <SectionHeading sub="Read from the original record, which cancellation never altered.">
+              What was on it
+            </SectionHeading>
+            {history.length === 0 ? (
+              <Empty>This sale had no items on it when it was cancelled.</Empty>
+            ) : (
+              <ul className="space-y-2">
+                {history.map(({ line, alloc }) => {
+                  const lineCogs = line.unit_cost_at_sale === null ? null
+                    : Number(line.qty) * Number(line.unit_cost_at_sale)
+                  const lineNet = Number(alloc?.net_revenue ?? 0)
+                  return (
+                    <li key={line.id}>
+                      <Card>
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                          <span className="font-medium">
+                            {line.recipe?.name ?? line.description ?? 'Item'}
+                          </span>
+                          <span className="mm-num font-medium">{money(lineNet)}</span>
+                        </div>
+                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                          {Number(line.qty).toLocaleString('en-NG')} × {money(line.unit_price)}
+                          {Number(line.discount_amount) > 0
+                            ? ` · less ${money(line.discount_amount)} off` : ''}
+                          {' · '}
+                          {lineCogs === null
+                            ? 'cost was never known'
+                            : `cost frozen at ${money(lineCogs)}, kept ${money(lineNet - lineCogs)}`}
+                        </div>
+                      </Card>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        </>
+      ) : (
+      <>
+      {/* An empty draft has no figures yet; three ₦0.00 boxes only got in the way. */}
+      {(confirmed || rows.length > 0) && (
       <StatRow>
         <Stat label="Charged" value={money(gross)}
               sub={discounts > 0 ? `less ${money(discounts)} in discounts` : undefined} />
@@ -298,6 +518,7 @@ export default async function SaleDetail({
                 costedRows.length < rows.length ? ' — the part with a known cost' : ''}`}
         />
       </StatRow>
+      )}
 
       <section className="space-y-3">
         <SectionHeading sub={confirmed
@@ -353,41 +574,32 @@ export default async function SaleDetail({
           </ul>
         )}
       </section>
+      </>
+      )}
 
       {!confirmed && !voided && (
         <>
-          <Card>
-            <SectionHeading sub="Choose the dish and, where you sell it in sizes, the size.">
-              Add an item
-            </SectionHeading>
-            <form action={addLine} className="mt-3 grid gap-3 sm:grid-cols-5">
+          {/* The next step comes first. Adding to the order and a discount
+              are there when needed, folded away when they are not. */}
+          {rows.length > 0 && (
+            <Card>
+              <SectionHeading sub="Confirming locks in what this sale cost you, using today's prices. After that it cannot be edited — only cancelled and re-issued.">
+                Ready? Confirm the sale
+              </SectionHeading>
+              <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                Confirm when the order is served or paid for. Until then it does not count as a sale.
+              </p>
+              <form action={confirm} className="mt-3">
+                <input type="hidden" name="order_id" value={id} />
+                <Button className="w-full sm:w-auto" busyLabel="Confirming…">Confirm sale · {money(net)}</Button>
+              </form>
+            </Card>
+          )}
+
+          <Disclosure summary={rows.length === 0 ? 'Add what they bought' : 'Add another item'} open={rows.length === 0}>
+            <form action={addLine} className="grid gap-3 sm:grid-cols-5">
               <input type="hidden" name="order_id" value={id} />
-              <div className="sm:col-span-2">
-                <Field label="What was sold">
-                  <select name="product" className="mm-input mt-1">
-                    <option value="">Something not on your menu</option>
-                    {(recipes ?? []).map((rec) => {
-                      const vs = byRecipe.get(rec.id) ?? []
-                      if (vs.length === 0) {
-                        return <option key={rec.id} value={`${rec.id}:`}>{rec.name}</option>
-                      }
-                      return vs.map((v) => (
-                        <option key={v.id} value={`${rec.id}:${v.id}`}>
-                          {rec.name} — {v.format?.name ?? 'one size'}
-                        </option>
-                      ))
-                    })}
-                  </select>
-                </Field>
-              </div>
-              <Field label="How many">
-                <input name="qty" type="number" step="0.001" min="0.001"
-                       inputMode="decimal" className="mm-input mt-1" />
-              </Field>
-              <Field label="Price for one">
-                <input name="unit_price" type="number" step="0.01" min="0"
-                       inputMode="decimal" className="mm-input mt-1" />
-              </Field>
+              <ProductAndPriceFields products={productOptions} />
               <Field label="Discount (₦, optional)">
                 <input name="discount_amount" type="number" step="0.01" min="0"
                        inputMode="decimal" defaultValue="0" className="mm-input mt-1" />
@@ -400,42 +612,37 @@ export default async function SaleDetail({
               </div>
               <div className="flex items-end"><Submit>Add</Submit></div>
             </form>
-          </Card>
+          </Disclosure>
 
-          <Card>
-            <SectionHeading sub="Taken off the whole sale and shared across the items, so each dish still shows a true margin.">
-              Discount on the whole sale
-            </SectionHeading>
-            <form action={setOrderDiscount} className="mt-3 flex flex-wrap items-end gap-3">
-              <input type="hidden" name="order_id" value={id} />
-              <Field label="Amount (₦)">
-                <input name="order_discount" type="number" step="0.01" min="0"
-                       inputMode="decimal" defaultValue={order.order_discount}
-                       className="mm-input mt-1" />
-              </Field>
-              <Submit>Save discount</Submit>
-            </form>
-          </Card>
-
-          <Card>
-            <SectionHeading sub="Confirming locks in what this sale cost you, using today's prices. After that it cannot be edited — only cancelled and re-issued.">
-              Confirm this sale
-            </SectionHeading>
-            <form action={confirm} className="mt-3">
-              <input type="hidden" name="order_id" value={id} />
-              <Submit>Confirm sale</Submit>
-            </form>
-            <Disclosure summary="Discard this draft instead">
+          {rows.length > 0 && (
+            <Disclosure summary={Number(order.order_discount) > 0
+              ? `Discount on the whole sale · ${money(order.order_discount)}`
+              : 'Discount on the whole sale'}>
               <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-                A draft has never counted as a sale, so discarding one changes none of your
-                figures.
+                Taken off the whole sale and shared across the items, so each dish still shows a true margin.
               </p>
-              <form action={deleteDraft} className="mt-2">
+              <form action={setOrderDiscount} className="mt-3 flex flex-wrap items-end gap-3">
                 <input type="hidden" name="order_id" value={id} />
-                <InlineSubmit>Discard this draft</InlineSubmit>
+                <Field label="Amount (₦)">
+                  <input name="order_discount" type="number" step="0.01" min="0"
+                         inputMode="decimal" defaultValue={order.order_discount}
+                         className="mm-input mt-1" />
+                </Field>
+                <Submit>Save discount</Submit>
               </form>
             </Disclosure>
-          </Card>
+          )}
+
+          <Disclosure summary="Discard this draft">
+            <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+              A draft has never counted as a sale, so discarding one changes none of your
+              figures.
+            </p>
+            <form action={deleteDraft} className="mt-2">
+              <input type="hidden" name="order_id" value={id} />
+              <InlineSubmit>Discard this draft</InlineSubmit>
+            </form>
+          </Disclosure>
         </>
       )}
 
@@ -445,6 +652,34 @@ export default async function SaleDetail({
             <SectionHeading sub="Money can still come in after the sale. Recording it changes nothing about what was sold.">
               Payment
             </SectionHeading>
+            {/* A sale paid in full needs no form, only the fact. */}
+            {order.payment_status === 'paid' ? (
+              <>
+                <p className="mt-2 text-sm">
+                  <span className="font-semibold">Paid in full</span>
+                  <span style={{ color: 'var(--mm-muted)' }}> · {money(order.amount_paid)}</span>
+                </p>
+                <div className="mt-3">
+                  <Disclosure summary="Change the payment">
+                      <form action={markPaid} className="mt-3 flex flex-wrap items-end gap-3">
+                        <input type="hidden" name="order_id" value={id} />
+                        <Field label="Paid so far (₦)">
+                          <input name="amount_paid" type="number" step="0.01" min="0" inputMode="decimal"
+                                 defaultValue={order.amount_paid} className="mm-input mt-1" />
+                        </Field>
+                        <Field label="Status">
+                          <select name="payment_status" defaultValue={order.payment_status} className="mm-input mt-1">
+                            <option value="unpaid">Not paid</option>
+                            <option value="part_paid">Part paid</option>
+                            <option value="paid">Paid in full</option>
+                          </select>
+                        </Field>
+                        <Submit>Save payment</Submit>
+                      </form>
+                  </Disclosure>
+                </div>
+              </>
+            ) : (
             <form action={markPaid} className="mt-3 flex flex-wrap items-end gap-3">
               <input type="hidden" name="order_id" value={id} />
               <Field label="Paid so far (₦)">
@@ -460,6 +695,7 @@ export default async function SaleDetail({
               </Field>
               <Submit>Save payment</Submit>
             </form>
+            )}
           </Card>
 
           <Disclosure summary="Something is wrong with this sale">

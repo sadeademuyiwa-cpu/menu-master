@@ -74,7 +74,49 @@ const table = (name) => ({
   }],
   plans: [{ id: 'trial', name: 'Free Trial' }],
   v_onboarding_status: [], v_dashboard_waterfall: [],
-  v_profit_by_period: [], v_profit_by_product: [], v_voided_sales: [],
+  v_profit_by_period: [], v_profit_by_product: [],
+  v_voided_sales: [{
+    source: 'order', record_id: U(61), reference: 'TEST-2', sale_date: '2026-09-02',
+    voided_at: '2026-09-02T11:00:00Z', voided_by: U(99), void_reason: 'test',
+    replaced_by: U(62),
+  }],
+
+  // An empty draft sale, so the "Add an item" form renders and its price
+  // prefill can be exercised. Jollof Rice already sells for N2,000, which is
+  // what v_product_attention reports and what the form must offer.
+  orders: [{
+    id: U(60), order_no: 'TEST-1', order_date: '2026-09-02', status: 'draft',
+    payment_status: 'unpaid', amount_paid: '0.00', order_discount: '0.00',
+    customer_id: null, finalised_at: null, voided_at: null, void_reason: null, replaces: null,
+  }, {
+    // A CONFIRMED-THEN-CANCELLED sale. fn_void_order sets voided_at and leaves
+    // status alone, so this is exactly the shape production holds.
+    id: U(61), order_no: 'TEST-2', order_date: '2026-09-02', status: 'confirmed',
+    payment_status: 'paid', amount_paid: '2000.00', order_discount: '0.00',
+    customer_id: null, finalised_at: '2026-09-02T10:00:00Z',
+    voided_at: '2026-09-02T11:00:00Z', void_reason: 'test', replaces: null,
+  }, {
+    id: U(62), order_no: 'TEST-2-R', order_date: '2026-09-02', status: 'draft',
+    payment_status: 'unpaid', amount_paid: '0.00', order_discount: '0.00',
+    customer_id: null, finalised_at: null, voided_at: null, void_reason: null,
+    replaces: U(61),
+  }],
+  // v_sale_lines excludes cancelled orders BY DESIGN -- that contract is what
+  // keeps live totals right, and this mock honours it: no row for U(61).
+  v_sale_lines: [],
+  // ...while order_lines still holds the record, which is the whole point.
+  order_lines: [{
+    id: U(70), order_id: U(61), qty: '1.000', unit_price: '2000.00',
+    discount_amount: '0.00', unit_cost_at_sale: '1000.0000', description: null,
+    recipe: { name: 'Jollof Rice' },
+  }],
+  recipe_variants: [],
+  customers: [],
+  v_product_attention: [{
+    recipe_id: U(20), variant_id: null, product_name: 'Jollof Rice', format_name: null,
+    is_complete: true, true_cost: '1000.00', selling_price: '2000.00', profit: '1000.00',
+    margin_pct: '50.00', recommended_price: '2000.00', state: 'ok', attention_rank: 1,
+  }],
 }[name] ?? [])
 
 createServer((req, res) => {
@@ -115,7 +157,37 @@ createServer((req, res) => {
   if (url.pathname === '/auth/v1/user') {
     return send(mockUser)
   }
+    if (url.pathname === '/rest/v1/rpc/fn_allocate_order_discount') {
+      // The shape the real set-returning function gives back.
+      return send([{
+        order_line_id: U(70), order_id: U(61), gross_revenue: '2000.00',
+        line_discount: '0.00', line_revenue: '2000.00',
+        allocated_order_discount: '0.00', net_revenue: '2000.00',
+      }])
+    }
   if (url.pathname.startsWith('/rest/v1/rpc/')) return send(8000)
+    // AMBIGUOUS EMBEDS. This mock returns pre-shaped objects and does not
+    // implement embedding, so it used to accept `recipe:recipes(name)` on
+    // order_lines and hand back a row -- while real PostgREST answers PGRST201
+    // / HTTP 300, because order_lines has TWO foreign keys to recipes. Fifteen
+    // browser assertions passed on a query that could never work in
+    // production. A mock must not be more permissive than the thing it stands
+    // in for, so the known-ambiguous pairs are refused here exactly as
+    // PostgREST refuses them. e2e/postgrest-embeds.mjs is the real check.
+    const AMBIGUOUS = { order_lines: ['recipes'] }
+    const sel = url.searchParams.get('select') ?? ''
+    const parent = url.pathname.replace('/rest/v1/', '').split('?')[0]
+    for (const child of AMBIGUOUS[parent] ?? []) {
+      // hinted as `child!constraint(...)` is fine; bare `child(...)` is not
+      if (new RegExp(`[a-z_]+:${child}\\(`).test(sel)) {
+        return send({
+          code: 'PGRST201',
+          message: `Could not embed because more than one relationship was found for '${parent}' and '${child}'`,
+          hint: `Try changing '${child}' to one of the following: '${child}!<constraint>'`,
+        }, 300)
+      }
+    }
+
   if (url.pathname.startsWith('/rest/v1/')) {
     const name = url.pathname.replace('/rest/v1/', '')
     let rows = table(name)

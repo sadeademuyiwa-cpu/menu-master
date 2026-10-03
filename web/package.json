@@ -9,13 +9,16 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "e2e": "node e2e/run.mjs",
-    "test": "node --test --experimental-strip-types \"tests/*.test.mts\""
+    "test": "node --test --experimental-strip-types \"tests/*.test.mts\"",
+    "test:embeds": "bash ../scripts/postgrest-embed-check.sh"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.76.0",
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.112.4",
     "next": "^15.5.24",
     "pg": "^8.23.0",
+    "posthog-js": "^1.435.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

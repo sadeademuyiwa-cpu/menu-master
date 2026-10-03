@@ -1,5 +1,9 @@
 # MASTER COMPLETION REGISTER — SEPTEMBER 1 2026
 
+> **Superseded.** This is a dated record and no longer describes the present.
+> For what is true now — production level, branches, test state — read
+> [`STATUS.md`](../STATUS.md) at the repository root. (Banner added 10 Sep 2026.)
+
 Derived by sweeping the entire repository plus the live schema on a PostgreSQL
 17.6 replica built to the exact production baseline. Nothing is invented; every
 row cites its source. Where the repository is silent this register says

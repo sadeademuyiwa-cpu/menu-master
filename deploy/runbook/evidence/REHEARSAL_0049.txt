@@ -1,0 +1,201 @@
+============================================================================
+0049 PRE-PRODUCTION REHEARSAL -- raw evidence
+Captured 2026-09-04 00:49 UTC on the local production-faithful replica
+PostgreSQL 17.6
+0049 md5 6640bc6c1ed71315b814af1b6af15776
+rollback md5 e75a02743f3d1ea131284a0a1072e0bf
+============================================================================
+
+#### 1. REGRESSION: every SQL suite, 0048 vs 0049 ####
+building the 0048 and 0049 templates ...
+0049 md5: 6640bc6c1ed71315b814af1b6af15776
+
+SUITE                                        AT 0048          AT 0049          VERDICT
+-------------------------------------------- ---------------  ---------------  -------
+001_correctness_and_isolation.sql            pass=27 fail=0   pass=27 fail=0   same
+002_gate1_attack_and_regression.sql          pass=56 fail=0   pass=56 fail=0   same
+003_real_client_role_escalation.sql          NO RESULT        NO RESULT        same
+004_gate1_closure.sql                        pass=23 fail=0   pass=23 fail=0   same
+005_role_write_matrix.sql                    pass=51 fail=0   pass=51 fail=0   same
+006_supabase_boundary_fixtures.sql           NO RESULT        NO RESULT        same
+007_service_context.sql                      NO RESULT        NO RESULT        same
+008_post_phase_b.sql                         NO RESULT        NO RESULT        same
+009_evidence_0018.sql                        NO RESULT        NO RESULT        same
+010_anon_reference_read.sql                  NO RESULT        NO RESULT        same
+011_gate2_phase1.sql                         pass=32 fail=1   pass=32 fail=1   same
+012_gate2_backfill.sql                       NO RESULT        NO RESULT        same
+013_gate2_overhead_basis.sql                 pass=15 fail=0   pass=15 fail=0   same
+014_gate2_cutover.sql                        pass=13 fail=0   pass=13 fail=0   same
+015_gate2_repoint.sql                        pass=14 fail=3   pass=14 fail=3   same
+016_gate2_attack_matrix.sql                  pass=16 fail=0   pass=16 fail=0   same
+017_billing_events.sql                       pass=19 fail=1   pass=19 fail=1   same
+018_entitlement.sql                          pass=15 fail=0   pass=15 fail=0   same
+019_billing_lifecycle.sql                    pass=17 fail=0   pass=17 fail=0   same
+020_plan_code_mapping.sql                    pass=13 fail=0   pass=13 fail=0   same
+021_costing_mvp_journey.sql                  pass=22 fail=0   pass=22 fail=0   same
+022_entitlement_final.sql                    pass=26 fail=0   pass=26 fail=0   same
+023_recipe_costing_experience.sql            pass=27 fail=0   pass=27 fail=0   same
+024_source_aware_costing.sql                 pass=23 fail=0   pass=23 fail=0   same
+025_purchase_ledger.sql                      pass=19 fail=0   pass=19 fail=0   same
+026_recipe_worksheet.sql                     pass=25 fail=0   pass=25 fail=0   same
+027_view_security.sql                        pass=26 fail=0   pass=26 fail=0   same
+028_formats_labour_overhead.sql              pass=26 fail=0   pass=26 fail=0   same
+029_costing_models.sql                       pass=35 fail=0   pass=35 fail=0   same
+030_overhead_allocation.sql                  pass=26 fail=0   pass=26 fail=0   same
+031_dashboard.sql                            pass=21 fail=0   pass=21 fail=0   same
+032_sales_and_frozen_cogs.sql                pass=43 fail=0   pass=43 fail=0   same
+033_discounts.sql                            pass=20 fail=0   pass=20 fail=0   same
+034_function_surface.sql                     pass=6 fail=0    pass=6 fail=0    same
+035_billing_tiers_and_founders.sql           NO RESULT        pass=34 fail=0   new suite (0048 cannot pass it)
+
+pre-existing suites unchanged by 0049: 34    regressions: 0
+
+#### 2. ATOMICITY: four deliberate failures ####
+0049 md5:                  6640bc6c1ed71315b814af1b6af15776
+0048 baseline fingerprint: 5fe622f29fd2f916b0e08fa810cb3291  (2445 lines)
+
+failing where the new tables exist and are seeded
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : 5fe622f29fd2f916b0e08fa810cb3291  identical to 0048 -- nothing partial remains
+
+failing where the columns, constraints, plan rows and slots are all in
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : 5fe622f29fd2f916b0e08fa810cb3291  identical to 0048 -- nothing partial remains
+
+failing where an RLS write policy has been DROPPED and not yet recreated
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : 5fe622f29fd2f916b0e08fa810cb3291  identical to 0048 -- nothing partial remains
+
+failing where every change is made and we are one statement from COMMIT
+  error raised : INJECTED FAILURE for atomicity rehearsal
+  schema after : 5fe622f29fd2f916b0e08fa810cb3291  identical to 0048 -- nothing partial remains
+
+the clean file still applies after four aborted attempts: OK
+
+#### 3. THE WRONG EXECUTOR IS REFUSED ####
+############ 1. the wrong executor (autocommit, i.e. the SQL Editor) ############
+psql:migrations/proposed/0049_billing_tiers_and_founders.sql:54: ERROR:  0049 ABORT: this executor is not honouring transaction control (each statement is committing on its own). Do NOT run 0049 here. Run it with psql --single-transaction over the Session Pooler.
+  0048 before: 5fe622f29fd2f916b0e08fa810cb3291
+  after      : 5fe622f29fd2f916b0e08fa810cb3291
+  the guard refused the executor BEFORE any object was touched
+founder_slots exists? false
+p_orders_insert still present? true
+
+############ 2. rollback fidelity ############
+psql:migrations/proposed/0049_rollback.sql:157: NOTICE:  0049 rollback OK: back at the 0048 entitlement model, 116 policies.
+  fresh 0048     : 5fe622f29fd2f916b0e08fa810cb3291  (2445 lines)
+  after rollback : 5fe622f29fd2f916b0e08fa810cb3291  (2445 lines)
+  byte-faithful: the rollback returns the schema to exactly 0048
+
+[exited with code 0]
+
+#### 4. FOUNDER CONCURRENCY: 180 claimants, 30 parallel processes, 100 slots ####
+  racing 180 claimants for 100 slots across 30 parallel processes ...
+slots held | 100
+distinct slots held | 100
+accounts holding a slot | 100
+claims that got a seq | 100
+claims refused (null) | 80
+any seq issued twice? | NO
+any account with 2 slots? | NO
+slot seqs allocated | 1..100
+
+#### 5. POLICY INVENTORY: 0048 -> 0049 ####
+0048: 116 policies
+0049: 117 policies
+
+10,11c10,11
+< channels.p_channels_delete [DELETE] roles={public} has_sales=n
+< channels.p_channels_insert [INSERT] roles={public} has_sales=n
+---
+> channels.p_channels_delete [DELETE] roles={public} has_sales=Y
+> channels.p_channels_insert [INSERT] roles={public} has_sales=Y
+13c13
+< channels.p_channels_update [UPDATE] roles={public} has_sales=n
+---
+> channels.p_channels_update [UPDATE] roles={public} has_sales=Y
+20,21c20,21
+< customers.p_customers_delete [DELETE] roles={public} has_sales=n
+< customers.p_customers_insert [INSERT] roles={public} has_sales=n
+---
+> customers.p_customers_delete [DELETE] roles={public} has_sales=Y
+> customers.p_customers_insert [INSERT] roles={public} has_sales=Y
+23c23,24
+< customers.p_customers_update [UPDATE] roles={public} has_sales=n
+---
+> customers.p_customers_update [UPDATE] roles={public} has_sales=Y
+> founder_slots.p_founder_slots_select [SELECT] roles={public} has_sales=n
+53,54c54,55
+< order_lines.p_order_lines_delete [DELETE] roles={public} has_sales=n
+< order_lines.p_order_lines_insert [INSERT] roles={public} has_sales=n
+---
+> order_lines.p_order_lines_delete [DELETE] roles={public} has_sales=Y
+> order_lines.p_order_lines_insert [INSERT] roles={public} has_sales=Y
+56,58c57,59
+< order_lines.p_order_lines_update [UPDATE] roles={public} has_sales=n
+< orders.p_orders_delete [DELETE] roles={public} has_sales=n
+< orders.p_orders_insert [INSERT] roles={public} has_sales=n
+---
+> order_lines.p_order_lines_update [UPDATE] roles={public} has_sales=Y
+> orders.p_orders_delete [DELETE] roles={public} has_sales=Y
+> orders.p_orders_insert [INSERT] roles={public} has_sales=Y
+60c61
+< orders.p_orders_update [UPDATE] roles={public} has_sales=n
+---
+> orders.p_orders_update [UPDATE] roles={public} has_sales=Y
+97c98
+< sales_entries.p_sales_entries_insert [INSERT] roles={public} has_sales=n
+---
+> sales_entries.p_sales_entries_insert [INSERT] roles={public} has_sales=Y
+
+#### 6. NEW BILLING SUITE, in full ####
+CREATE TABLE
+CREATE TABLE
+DO
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+DO
+ n  |                     check_name                      | verdict |                            detail                            
+----+-----------------------------------------------------+---------+--------------------------------------------------------------
+  1 | Costing cannot record a sale                        | PASS    | new row violates row-level security policy for table "orders
+  2 | Costing cannot add a customer                       | PASS    | new row violates row-level security policy for table "custom
+  3 | Costing cannot add a sales channel                  | PASS    | new row violates row-level security policy for table "channe
+  4 | Costing can still do costing work                   | PASS    | WROTE
+  5 | Costing + Sales can record a sale                   | PASS    | WROTE
+  6 | Costing + Sales can add a customer                  | PASS    | WROTE
+  7 | a live trial can record a sale (full product)       | PASS    | WROTE
+  8 | an EXPIRED trial cannot record a sale               | PASS    | new row violates row-level security policy for table "orders
+  9 | an EXPIRED trial cannot do costing work either      | PASS    | new row violates row-level security policy for table "ingred
+ 10 | Founding Costing cannot record a sale               | PASS    | new row violates row-level security policy for table "orders
+ 11 | Founding Costing + Sales can record a sale          | PASS    | WROTE
+ 12 | a downgrade still reads its own sales history       | PASS    | 1 order(s) still visible
+ 13 | a downgrade cannot record NEW sales                 | PASS    | new row violates row-level security policy for table "orders
+ 14 | an upgrade to Costing + Sales can record a sale     | PASS    | WROTE
+ 15 | past_due inside grace can still record a sale       | PASS    | WROTE
+ 16 | past_due BEYOND grace cannot record a sale          | PASS    | new row violates row-level security policy for table "orders
+ 17 | cancelled but paid-up can still record a sale       | PASS    | WROTE
+ 18 | cancelled and past the period end cannot            | PASS    | new row violates row-level security policy for table "orders
+ 19 | exactly 100 founder slots exist                     | PASS    | 100 slot(s)
+ 20 | a 101st slot cannot be created                      | PASS    | new row for relation "founder_slots" violates check constrai
+ 21 | claiming twice returns the SAME slot, not two       | PASS    | 1 then 1
+ 22 | a confirmed slot is claimed and no longer reserved  | PASS    | 
+ 23 | no more than 100 slots can ever be held             | PASS    | 100 held
+ 24 | customer 101 is refused a founder slot              | PASS    | null means fall back to standard pricing
+ 25 | a lapse forfeits the founding price                 | PASS    | 
+ 26 | founder status is kept historically, with the date  | PASS    | the slot still names the account that held it
+ 27 | a forfeited slot NEVER returns to the pool          | PASS    | customer 101 still cannot inherit it
+ 28 | a forfeited founder cannot reclaim founding pricing | PASS    | resubscribing gets standard pricing
+ 29 | a signed-in user cannot allocate a founder slot     | PASS    | service context only
+ 30 | anon cannot read the sales entitlement function     | PASS    | 
+ 31 | the approved prices are in the database, in kobo    | PASS    | N7,500 / N15,000 / N3,500 / N7,500
+ 32 | no active paid plan is priced at zero               | PASS    | 
+ 33 | exactly 13 Sales WRITE policies check the tier      | PASS    | 
+ 34 | no SELECT policy checks the tier                    | PASS    | history survives a downgrade
+(34 rows)
+
+ pass | fail 
+------+------
+   34 |    0
+(1 row)
+

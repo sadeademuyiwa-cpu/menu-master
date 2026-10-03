@@ -1,5 +1,9 @@
 # SEPTEMBER 1 CRITICAL PATH — COMPLETION BOARD
 
+> **Superseded.** This is a dated record and no longer describes the present.
+> For what is true now — production level, branches, test state — read
+> [`STATUS.md`](../STATUS.md) at the repository root. (Banner added 10 Sep 2026.)
+
 **Directive:** 1 September 2026 hard launch. Full approved architecture, no MVP
 reduction, **no new scope**. Feature-complete 30 Aug · RC 31 Aug · launch 1 Sep.
 

@@ -1,11 +1,13 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
-import {
-  PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading, HeroStat, Badge,
-} from '@/components/ui'
+import { currentContext, contextRedirect, hasSalesEntitlement } from '@/lib/data/context'
+import { SalesLocked } from '@/components/sales-locked'
+import { isSalesLocked } from '@/lib/sales-gate'
+import { PageHeader, Card, Notice, Empty, SectionHeading, HeroStat, Badge } from '@/components/ui'
+import { AppIcon } from '@/components/icons'
 import { money, percent, coverageLabel } from '@/lib/format'
+import { localToday } from '@/lib/dates'
+import { loadPlanOffers } from '@/lib/data/plans'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,29 +37,6 @@ type OrderRow = {
   attention: string
   what_to_do: string
 }
-type Customer = { id: string; name: string }
-
-/** Start a draft. Nothing is revenue and nothing is costed until it is
- *  confirmed, so an abandoned draft affects no report. */
-async function startSale(formData: FormData) {
-  'use server'
-  const ctx = await currentContext()
-  const { supabase, accountId, businessId } = ctx
-  if (!accountId || !businessId) redirect(contextRedirect(ctx, '/sales'))
-
-  const customerRaw = String(formData.get('customer_id') ?? '')
-  const { data, error } = await supabase.from('orders').insert({
-    account_id: accountId,
-    business_id: businessId,
-    order_date: String(formData.get('order_date') || new Date().toISOString().slice(0, 10)),
-    customer_id: customerRaw || null,
-    order_no: String(formData.get('order_no') ?? '').trim() || null,
-  }).select('id').single()
-
-  if (error || !data) redirect(withNotice('/sales', describeWriteError(error) ?? 'Could not start that sale.'))
-  revalidatePath('/sales')
-  redirect(`/sales/${data.id}`)
-}
 
 /** The plain-English state of an order, decided in PostgreSQL
  *  (v_orders_attention) so this page cannot invent a different one. */
@@ -79,14 +58,35 @@ export default async function SalesPage({
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/sales'))
 
-  const today = new Date().toISOString().slice(0, 10)
+  // Ask the database whether this plan includes Sales, using the same
+  // predicate the write policies use. A Costing subscriber was being shown the
+  // full Record a Sale form and a Start Sale button that the database was
+  // always going to refuse.
+  //
+  // Null means we could not find out -- the function is absent, or the lookup
+  // failed. In that case the page renders as before: showing a button that may
+  // fail is better than telling a paying customer they cannot sell. RLS
+  // refuses either way, so nothing is protected by guessing.
+  const canSell = await hasSalesEntitlement()
+  if (isSalesLocked(canSell)) {
+    const { data: sub } = await supabase
+      .from('subscriptions').select('plan_id').maybeSingle<{ plan_id: string }>()
+    const { data: plan } = sub
+      ? await supabase.from('plans').select('name').eq('id', sub.plan_id)
+          .maybeSingle<{ name: string }>()
+      : { data: null }
+    const { offers } = await loadPlanOffers(supabase)
+    const trading = offers.find((o) => o.tier === 'trading')
+    return <SalesLocked planName={plan?.name ?? null} price={trading?.monthly ? money(trading.monthly) : null} />
+  }
 
-  const [{ data: days }, { data: orders }, { data: customers }] = await Promise.all([
+  const today = localToday()
+
+  const [{ data: days }, { data: orders }] = await Promise.all([
     supabase.from('v_sales_summary').select('*')
       .order('sale_date', { ascending: false }).limit(14).returns<Day[]>(),
     supabase.from('v_orders_attention').select('*')
       .order('order_date', { ascending: false }).limit(40).returns<OrderRow[]>(),
-    supabase.from('customers').select('id,name').order('name').returns<Customer[]>(),
   ])
 
   const recent = days ?? []
@@ -101,6 +101,16 @@ export default async function SalesPage({
       />
       {notice && <Notice tone={/could not|cannot|do not/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
+      {/* One obvious thing to do here. The order screen takes it from there. */}
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <Link href="/sales/new" className="mm-btn mm-btn-primary w-full text-base">
+          <AppIcon name="plus" size={20} /> New sale
+        </Link>
+        <Link href="/customers" className="mm-btn mm-btn-secondary w-full">
+          <AppIcon name="customers" size={18} /> Customers
+        </Link>
+      </div>
+
       {/* Today, first, because that is what the owner opened the page for. */}
       <section className="grid gap-0 sm:grid-cols-3 sm:gap-3">
         <HeroStat
@@ -108,7 +118,7 @@ export default async function SalesPage({
           value={todayRow ? money(todayRow.revenue) : money(null, 'nothing yet')}
           sub={todayRow
             ? `${todayRow.sale_count} sale${todayRow.sale_count === 1 ? '' : 's'}`
-            : 'Record your first sale of the day below.'}
+            : 'Tap New sale to record one.'}
         />
         <HeroStat
           label="You kept"
@@ -130,30 +140,6 @@ export default async function SalesPage({
           Profit is worked out only on the sales whose cost we actually know.
         </p>
       )}
-
-      <Card>
-        <SectionHeading sub="Start it here, add what they bought on the next screen, then confirm it.">
-          Record a sale
-        </SectionHeading>
-        <form action={startSale} className="mt-3 grid gap-3 sm:grid-cols-4">
-          <Field label="Date">
-            <input name="order_date" type="date" defaultValue={today} className="mm-input mt-1" />
-          </Field>
-          <Field label="Customer (optional)">
-            <select name="customer_id" className="mm-input mt-1">
-              <option value="">Not recorded</option>
-              {(customers ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Your reference (optional)">
-            <input name="order_no" placeholder="e.g. Sat wedding" className="mm-input mt-1" />
-          </Field>
-          <div className="flex items-end"><Submit>Start sale</Submit></div>
-        </form>
-        <p className="mt-3 text-sm">
-          <Link href="/customers" className="mm-tap underline">Your customers →</Link>
-        </p>
-      </Card>
 
       {needsAttention.length > 0 && (
         <section className="space-y-3">
@@ -190,7 +176,7 @@ export default async function SalesPage({
             under Reports. The heading has to say what the list actually is. */}
         <SectionHeading sub={
           <>Newest first. Cancelled sales are kept under{' '}
-            <Link href="/reports" className="underline">Reports &rarr; Voided sales</Link>.</>
+            <Link href="/reports" className="mm-inline-tap">Reports &rarr; Voided sales</Link>.</>
         }>Active sales</SectionHeading>
         {!orders?.length ? (
           <Empty>
