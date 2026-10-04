@@ -39,6 +39,8 @@ export function isSetupExempt(pathname: string): boolean {
 }
 
 export type SetupFacts = {
+  /** The owner chose "Skip for now" (kept on their login, so every device agrees). */
+  skipped?: boolean
   /** The login is on an account that has a business. */
   hasBusiness: boolean
   /** The login's own role on that account. */
@@ -58,6 +60,7 @@ export type SetupFacts = {
  * No business yet is onboarding's job, not this one.
  */
 export function needsFirstRunSetup(f: SetupFacts): boolean {
+  if (f.skipped) return false
   if (!f.hasBusiness) return false
   if (f.role !== 'owner' && f.role !== 'manager') return false
   return f.completeCostings === 0 || f.pricesSet === 0
@@ -86,3 +89,45 @@ export function stepNumber(step: WizardStep): number {
 }
 
 export const SETUP_STEP_COUNT = 4
+
+/**
+ * A screen of setup the owner can open: the four steps, and "done". The
+ * business itself is step 1; it already exists by the time /start opens.
+ */
+export type SetupView = 'business' | WizardStep
+
+export const SETUP_VIEWS: readonly SetupView[] = ['business', 'purchase', 'dish', 'price', 'done']
+
+const ORDER: Record<SetupView, number> = { business: 1, purchase: 2, dish: 3, price: 4, done: 5 }
+
+/**
+ * Whether the owner may open a step, given how far they have got. Every step
+ * up to the one they are on can be opened again to look and change;
+ * steps after it cannot, because each needs the one before (a dish needs a
+ * priced ingredient, a price needs a costed dish).
+ */
+export function canOpen(view: SetupView, progress: WizardStep): boolean {
+  return ORDER[view] <= ORDER[progress]
+}
+
+/**
+ * Which screen to show for /start?step=..., falling back to where the owner
+ * actually is when the step is missing, unknown or not reachable yet.
+ */
+export function resolveView(requested: string | null | undefined, progress: WizardStep): SetupView {
+  const v = SETUP_VIEWS.find((x) => x === requested)
+  return v && canOpen(v, progress) ? v : progress
+}
+
+/** The steps either side of a screen, for Back and Next. Null at either end. */
+export function neighbours(view: SetupView, progress: WizardStep): { back: SetupView | null; next: SetupView | null } {
+  const i = SETUP_VIEWS.indexOf(view)
+  const back = i > 0 ? SETUP_VIEWS[i - 1] : null
+  const nextView = i < SETUP_VIEWS.length - 1 ? SETUP_VIEWS[i + 1] : null
+  return { back, next: nextView && canOpen(nextView, progress) ? nextView : null }
+}
+
+/** Whether this screen shows something already saved (edit) or asks for the first time. */
+export function isRevisit(view: SetupView, progress: WizardStep): boolean {
+  return view !== 'done' && ORDER[view] < ORDER[progress]
+}

@@ -96,13 +96,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // First-run setup is compulsory for a new owner: the app is only useful once
-  // one dish is costed from their own purchases and has a price. The database
-  // is asked only until that is true; the cookie then remembers it. A forged
-  // cookie skips a tutorial and nothing else -- RLS still guards every write.
+  // First-run setup comes first for a new owner: the app is only useful once
+  // one dish is costed from their own purchases and has a price. They may
+  // skip it ("Skip for now"); otherwise the database is asked only until it
+  // is finished, and the cookie then remembers. A forged cookie or metadata
+  // skips a tutorial and nothing else -- RLS still guards every write.
   if (user && !isPublic && !isSetupExempt(path) &&
       request.cookies.get(SETUP_COOKIE)?.value !== user.id) {
-    const facts = await setupFacts(supabase, user.id)
+    // "Skip for now" is kept on the login (user metadata), so it holds on
+    // every device, not only the one where it was pressed.
+    const skipped = (user.user_metadata as { setup_skipped?: unknown } | undefined)?.setup_skipped === true
+    const facts = skipped ? { hasBusiness: true, role: null, completeCostings: 0, pricesSet: 0, skipped } : await setupFacts(supabase, user.id)
     if (facts && needsFirstRunSetup(facts)) {
       const url = request.nextUrl.clone()
       url.pathname = '/start'

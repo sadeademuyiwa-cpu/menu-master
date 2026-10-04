@@ -42,15 +42,21 @@ const GROUPS: Group[] = [
   },
 ]
 
+/** The guided setup, reopened: owners and managers only (it is theirs to change). */
+const SETUP_GUIDE: LinkItem = { href: '/start', label: 'Setup guide', icon: 'check', meta: 'See or change your setup answers' }
+
 async function MorePageBody() {
   const ctx = await currentContext()
   const { accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/more'))
 
   const [admin, site] = await Promise.all([isPlatformAdmin(), loadSiteSettings()])
+  const canSetUp = ctx.role === 'owner' || ctx.role === 'manager'
+  const base: Group[] = GROUPS.map((g) =>
+    g.title === 'Business' && canSetUp ? { ...g, links: [g.links[0], SETUP_GUIDE, ...g.links.slice(1)] } : g)
   const groups: Group[] = admin
-    ? [...GROUPS, { title: 'Platform', links: [{ href: '/admin', label: 'Administration', icon: 'admin' }] }]
-    : GROUPS
+    ? [...base, { title: 'Platform', links: [{ href: '/admin', label: 'Administration', icon: 'admin' }] }]
+    : base
   // The support number the admin set for the website (Admin → Website).
   const help = site.landing.whatsapp
     ? `https://wa.me/${site.landing.whatsapp}?text=${encodeURIComponent('Hello, I need help with Menu Master')}`

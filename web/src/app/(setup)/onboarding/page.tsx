@@ -17,7 +17,7 @@ export default async function OnboardingPage() {
 
   return (
     <div className="space-y-6">
-      <SetupSteps current={1} />
+      <SetupSteps view="business" />
       <OnboardingForm />
     </div>
   )

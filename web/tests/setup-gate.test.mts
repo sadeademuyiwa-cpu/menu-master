@@ -7,6 +7,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   isSetupExempt, needsFirstRunSetup, wizardStep, stepNumber,
+  canOpen, resolveView, neighbours, isRevisit,
 } from '../src/lib/setup-gate.ts'
 
 const owner = { hasBusiness: true, role: 'owner', completeCostings: 0, pricesSet: 0 }
@@ -69,4 +70,41 @@ test('business details are step 1, so the wizard counts on from 2', () => {
   assert.equal(stepNumber('purchase'), 2)
   assert.equal(stepNumber('dish'), 3)
   assert.equal(stepNumber('price'), 4)
+})
+
+test('an owner who chose "Skip for now" is not sent back to setup', () => {
+  assert.equal(needsFirstRunSetup({ ...owner, skipped: true }), false)
+  assert.equal(needsFirstRunSetup({ ...owner, skipped: false }), true)
+})
+
+test('every step up to the current one can be opened again; later ones cannot', () => {
+  assert.equal(canOpen('business', 'purchase'), true)
+  assert.equal(canOpen('purchase', 'purchase'), true)
+  assert.equal(canOpen('dish', 'purchase'), false)   // a dish needs a priced ingredient
+  assert.equal(canOpen('price', 'dish'), false)      // a price needs a costed dish
+  for (const v of ['business', 'purchase', 'dish', 'price', 'done'] as const) {
+    assert.equal(canOpen(v, 'done'), true, v)
+  }
+})
+
+test('/start?step= shows that step when it can be opened, otherwise where the owner is', () => {
+  assert.equal(resolveView('purchase', 'price'), 'purchase')
+  assert.equal(resolveView('business', 'dish'), 'business')
+  assert.equal(resolveView('price', 'purchase'), 'purchase')   // not reachable yet
+  assert.equal(resolveView('nonsense', 'dish'), 'dish')
+  assert.equal(resolveView(null, 'price'), 'price')
+})
+
+test('Back and Next walk the steps; Next stops where the owner has not been', () => {
+  assert.deepEqual(neighbours('purchase', 'done'), { back: 'business', next: 'dish' })
+  assert.deepEqual(neighbours('business', 'dish'), { back: null, next: 'purchase' })
+  assert.deepEqual(neighbours('dish', 'dish'), { back: 'purchase', next: null })
+  assert.deepEqual(neighbours('done', 'done'), { back: 'price', next: null })
+})
+
+test('a step before the current one is a revisit (shows what was saved)', () => {
+  assert.equal(isRevisit('purchase', 'price'), true)
+  assert.equal(isRevisit('price', 'price'), false)
+  assert.equal(isRevisit('price', 'done'), true)
+  assert.equal(isRevisit('done', 'done'), false)
 })

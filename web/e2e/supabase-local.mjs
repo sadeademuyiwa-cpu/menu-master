@@ -62,12 +62,19 @@ const session = (user) => ({
   refresh_token: `refresh-${user.id}`, user,
 })
 
+/**
+ * LOCAL ONLY: user metadata (e.g. setup_skipped), kept in memory because the
+ * local auth.users shim has no metadata column. Lost when the gateway stops,
+ * which is fine for a stand-in.
+ */
+const userMeta = new Map()
+
 const shape = (row) => ({
   id: row.id, email: row.email, aud: 'authenticated', role: 'authenticated',
   email_confirmed_at: row.email_confirmed_at ?? new Date().toISOString(),
   confirmed_at: row.email_confirmed_at ?? new Date().toISOString(),
   created_at: row.created_at ?? new Date().toISOString(),
-  app_metadata: { provider: 'email' }, user_metadata: {},
+  app_metadata: { provider: 'email' }, user_metadata: userMeta.get(row.id) ?? {},
 })
 
 const CORS = {
@@ -233,13 +240,16 @@ createServer(async (req, res) => {
         console.log(`[local mail] confirmation resent to ${payload.email} (local accounts are confirmed already)`)
         return send({})
       }
-      // GET reads the user; PUT (a new password) answers the same, since the
-      // stand-in keeps no passwords.
+      // GET reads the user. PUT updates it: a new password is accepted (the
+      // stand-in keeps no passwords) and `data` is merged into the metadata.
       if (url.pathname === '/auth/v1/user') {
         const claims = verify(bearer)
         if (!claims) return send({ message: 'invalid claim' }, 401)
         const { rows } = await db.query('select * from auth.users where id = $1', [claims.sub])
         if (!rows[0]) return send({ message: 'user not found' }, 404)
+        if (req.method === 'PUT' && payload.data && typeof payload.data === 'object') {
+          userMeta.set(rows[0].id, { ...(userMeta.get(rows[0].id) ?? {}), ...payload.data })
+        }
         return send(shape(rows[0]))
       }
       if (url.pathname === '/auth/v1/logout') { res.writeHead(204, CORS); return res.end() }

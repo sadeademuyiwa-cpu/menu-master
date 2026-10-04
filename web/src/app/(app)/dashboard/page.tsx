@@ -95,6 +95,10 @@ async function DashboardPageBody() {
   const settingUp = doneCount < core.length
   const progress = Math.round((doneCount / core.length) * 100)
   const extrasLeft = extras.filter((s) => !s.done).length
+  // The guided setup (/start) is for owners and managers, and only until one
+  // dish is costed and priced -- the same test the middleware uses.
+  const wizardOpen = (ctx.role === 'owner' || ctx.role === 'manager') &&
+    ((setup?.complete_costings ?? 0) === 0 || (setup?.selling_prices_set ?? 0) === 0)
 
   const quickActions: { href: string; icon: IconName; label: string; meta: string }[] = [
     { href: '/sales/new', icon: 'sales', label: 'New sale', meta: 'Record what you sold' },
@@ -145,6 +149,14 @@ async function DashboardPageBody() {
             )}
 
             <StepList steps={core} />
+
+            {/* The guided steps, for an owner who skipped them: picks up where
+                they stopped, and every finished step can be opened to change. */}
+            {wizardOpen && (
+              <Link href="/start" className="mm-btn mm-btn-primary mt-4 w-full">
+                Continue guided setup <AppIcon name="arrow-right" size={16} />
+              </Link>
+            )}
           </Card>
         </section>
       )}

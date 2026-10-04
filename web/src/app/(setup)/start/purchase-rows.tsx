@@ -7,7 +7,10 @@ export type MeasureKind = 'mass' | 'volume' | 'count'
 export type StarterIngredient = { id: string; name: string; group: string; kind: MeasureKind }
 export type StarterUnit = { id: string; label: string; kind: MeasureKind; isDefault: boolean }
 
-type Row = { key: number; ingredientId: string; unitId: string }
+type Row = { key: number; ingredientId: string; unitId: string; qty?: string; amount?: string }
+
+/** A row as the owner entered it before, to correct. */
+export type InitialRow = { ingredientId: string; unitId: string; qty: string; amount: string }
 
 const FIRST_ROWS = 3
 const MAX_ROWS = 8
@@ -19,18 +22,26 @@ const MAX_ROWS = 8
  * Nothing is computed here; the server action records a real purchase.
  */
 export function PurchaseRows({
-  ingredients, units, common, action,
+  ingredients, units, common, action, initial, hidden, submitLabel = 'Save and continue', busyLabel = 'Saving what you paid…',
 }: {
   ingredients: StarterIngredient[]
   units: StarterUnit[]
   /** Ids of the staples most owners buy, offered first. */
   common: string[]
   action: (formData: FormData) => void | Promise<void>
+  /** What the owner entered before, when correcting it. */
+  initial?: InitialRow[]
+  /** Extra fields the action needs (e.g. which purchase is being corrected). */
+  hidden?: Record<string, string>
+  submitLabel?: string
+  busyLabel?: string
 }) {
   const [rows, setRows] = useState<Row[]>(
-    Array.from({ length: FIRST_ROWS }, (_, i) => ({ key: i, ingredientId: '', unitId: '' })),
+    initial && initial.length
+      ? initial.map((r, i) => ({ key: i, ...r }))
+      : Array.from({ length: FIRST_ROWS }, (_, i) => ({ key: i, ingredientId: '', unitId: '' })),
   )
-  const [nextKey, setNextKey] = useState(FIRST_ROWS)
+  const [nextKey, setNextKey] = useState(Math.max(FIRST_ROWS, initial?.length ?? 0))
 
   const byId = new Map(ingredients.map((i) => [i.id, i]))
   const groups = new Map<string, StarterIngredient[]>()
@@ -50,6 +61,7 @@ export function PurchaseRows({
 
   return (
     <form action={action} className="space-y-4">
+      {Object.entries(hidden ?? {}).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
       <ol className="space-y-3">
         {rows.map((r, index) => (
           <li key={r.key} className="mm-card space-y-3">
@@ -94,7 +106,7 @@ export function PurchaseRows({
               <label className="block">
                 <span className="text-sm font-medium">You bought</span>
                 <input name="qty" type="number" step="any" min="0" inputMode="decimal"
-                       placeholder="e.g. 5" className="mm-input mt-1" />
+                       defaultValue={r.qty} placeholder="e.g. 5" className="mm-input mt-1" />
               </label>
               <label className="block">
                 <span className="text-sm font-medium">Unit</span>
@@ -112,7 +124,7 @@ export function PurchaseRows({
               <label className="block">
                 <span className="text-sm font-medium">You paid (₦)</span>
                 <input name="amount" type="number" step="0.01" min="0" inputMode="decimal"
-                       placeholder="e.g. 8000" className="mm-input mt-1" />
+                       defaultValue={r.amount} placeholder="e.g. 8000" className="mm-input mt-1" />
               </label>
             </div>
           </li>
@@ -132,7 +144,7 @@ export function PurchaseRows({
         </button>
       )}
 
-      <Button className="w-full" busyLabel="Saving what you paid…">Save and continue</Button>
+      <Button className="w-full" busyLabel={busyLabel}>{submitLabel}</Button>
     </form>
   )
 }
