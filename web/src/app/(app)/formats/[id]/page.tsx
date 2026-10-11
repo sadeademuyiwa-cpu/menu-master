@@ -6,6 +6,7 @@ import {
   SectionHeading, BackLink, Badge, Disclosure,
 } from '@/components/ui'
 import { money, quantity } from '@/lib/format'
+import { ConfirmSubmit } from '@/components/confirm-submit'
 
 export const dynamic = 'force-dynamic'
 
@@ -230,7 +231,7 @@ export default async function FormatDetail({
                     <form action={removePackaging}>
                       <input type="hidden" name="format_id" value={id} />
                       <input type="hidden" name="id" value={l.id} />
-                      <InlineSubmit>Remove</InlineSubmit>
+                      <ConfirmSubmit message={`Remove ${l.item?.name ?? 'this packaging'} from this size?`}>Remove</ConfirmSubmit>
                     </form>
                   </div>
                 </Card>

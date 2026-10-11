@@ -74,6 +74,7 @@ async function signUp(p, who) {
 
 const browser = await chromium.launch({ args: ['--no-proxy-server'] })
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })
+ctx.on('dialog', (d) => d.accept())
 const page = await ctx.newPage()
 
 // ---- a fresh owner, through setup -------------------------------------------

@@ -3,10 +3,11 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { currentContext, contextRedirect, hasSalesEntitlement } from '@/lib/data/context'
 import {
-  PageHeader, Card, Notice, Empty, SectionHeading, Badge, ActionTile,
+  PageHeader, Card, Notice, Empty, SectionHeading, Badge, ActionTile, HeroStat,
 } from '@/components/ui'
 import { AppIcon, type IconName } from '@/components/icons'
 import { money, percent, productState, priceState } from '@/lib/format'
+import { localToday } from '@/lib/dates'
 import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
@@ -29,6 +30,26 @@ type Product = {
 type PriceRow = {
   ingredient_id: string; ingredient_name: string
   price_state: string; used_in_recipes: number; last_purchase_date: string | null
+}
+type Day = { sale_date: string; sale_count: number; revenue: string | null; gross_profit: string | null }
+
+/** YYYY-MM-DD, n days before a YYYY-MM-DD. Calendar arithmetic, no time zone. */
+function daysBefore(day: string, n: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10)
+}
+
+/** Money in, money kept and sales over a run of days. Summed from the view's
+ *  per-day figures, which PostgreSQL already worked out; nothing is re-derived. */
+function sumDays(days: Day[], from: string, to: string) {
+  const inRange = days.filter((d) => d.sale_date >= from && d.sale_date <= to)
+  const sold = inRange.reduce((t, d) => t + Number(d.revenue ?? 0), 0)
+  const kept = inRange.filter((d) => d.gross_profit !== null)
+  return {
+    sales: inRange.reduce((t, d) => t + d.sale_count, 0),
+    sold,
+    kept: kept.length ? kept.reduce((t, d) => t + Number(d.gross_profit), 0) : null,
+  }
 }
 
 type Step = { done: boolean; label: string; href: string; hint: string; icon: IconName }
@@ -55,10 +76,18 @@ async function DashboardPageBody() {
       .limit(8).returns<PriceRow[]>(),
   ])
 
-  const [{ count: tradingDays }, canSell] = await Promise.all([
+  const [{ count: tradingDays }, canSell, { data: days }] = await Promise.all([
     supabase.from('v_sales_summary').select('sale_date', { count: 'exact', head: true }),
     hasSalesEntitlement(),
+    supabase.from('v_sales_summary').select('sale_date,sale_count,revenue,gross_profit')
+      .order('sale_date', { ascending: false }).limit(14).returns<Day[]>(),
   ])
+
+  // This week against last: the one number an owner opens the app for.
+  const today = localToday()
+  const week = sumDays(days ?? [], daysBefore(today, 6), today)
+  const lastWeek = sumDays(days ?? [], daysBefore(today, 13), daysBefore(today, 7))
+  const showMoney = canSell !== false && (tradingDays ?? 0) > 0
 
   const setup = setupRows?.[0]
   const all = products ?? []
@@ -113,6 +142,33 @@ async function DashboardPageBody() {
         title={businessName || 'Menu Master NG'}
         sub={settingUp ? 'Finish setup to see your real food costs and profit.' : 'Your business at a glance.'}
       />
+
+      {showMoney && (
+        <section className="space-y-2">
+          <div className="grid gap-0 sm:grid-cols-3 sm:gap-3">
+            <HeroStat
+              label="Sold this week"
+              value={money(week.sold)}
+              sub={`${week.sales} sale${week.sales === 1 ? '' : 's'} · last week ${money(lastWeek.sold)}`}
+            />
+            <HeroStat
+              label="You kept this week"
+              value={week.kept === null ? money(null, 'not known yet') : money(week.kept)}
+              tone="good"
+              sub={week.kept === null
+                ? 'No sale this week has a known cost yet.'
+                : lastWeek.kept === null ? 'Only on sales with a known cost.' : `last week ${money(lastWeek.kept)}`}
+            />
+            <Link href="/sales" className="mm-hero-stat flex items-center justify-between gap-3">
+              <span>
+                <span className="block text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: 'var(--mm-muted)' }}>Sales</span>
+                <span className="mt-1 block font-semibold">See every sale</span>
+              </span>
+              <AppIcon name="chevron-right" size={18} style={{ color: 'var(--mm-muted)' }} />
+            </Link>
+          </div>
+        </section>
+      )}
 
       <section>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

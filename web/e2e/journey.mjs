@@ -173,6 +173,9 @@ const netFailures = []
 // DESKTOP — the full first-time journey
 // ===========================================================================
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+// Irreversible buttons ask once (components/confirm-submit.tsx). Playwright
+// dismisses dialogs by default, which would silently cancel every removal.
+ctx.on('dialog', (d) => d.accept())
 const page = await ctx.newPage()
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()) })
 page.on('requestfailed', (r) => {
@@ -410,11 +413,14 @@ await page.screenshot({ path: 'e2e/shots/p4-format-detail.png', fullPage: true }
 
 await go(page, '/settings')
 await must(page, 'overhead is spread over what the business produces, not a fixed assumption',
-  'How much do you produce in a month?')
+  'How much do you make in a month?')
 
 // A non-accountant must be able to split bills across two kinds of output
 // without meeting the words "dimension", "basis" or "allocation".
 await openDetails(page, 'Add a monthly bill')
+// The split-across-outputs option is folded inside the add form (Phase 2):
+// most businesses make one kind of thing and never need it.
+await openDetails(page, 'Spread this bill across something else?')
 await must(page, 'running costs are explained in plain business language',
   'Spread across how much?', 'rent for the soup pots over 600')
 await mustNot(page, 'no dimensional-analysis jargon reaches the owner',
@@ -434,6 +440,7 @@ await must(page, 'a running cost states what it is spread across, in the owner\'
   'Soup pot rent', 'spread across 600 l you make')
 
 await openDetails(page, 'Add a monthly bill')
+await openDetails(page, 'Spread this bill across something else?')
 const ohForm2 = page.locator('details:has(> summary:has-text("Add a monthly bill")) form')
 await ohForm2.locator('input[name=name]').fill('Bakery rent')
 await ohForm2.locator('input[name=monthly_cost]').fill('200000')
@@ -451,7 +458,7 @@ await mustNot(page, 'the superseded servings-per-month field is gone',
 await page.screenshot({ path: 'e2e/shots/p4-settings.png', fullPage: true })
 
 await go(page, recipeUrl + '?view=pro')
-await must(page, 'the recipe worksheet offers labour from the business rates', 'Work', 'Add work')
+await must(page, 'the recipe worksheet offers labour from the business rates', 'Time it takes', 'Add work')
 
 // MODEL 1 vs MODEL 2, on SEPARATE recipes so each is exercised in its own
 // right. Attaching a format to the main recipe would switch it to the
@@ -646,6 +653,7 @@ await must(page, 'after logging back in the same authoritative figures return',
 // TENANT ISOLATION — a second real account, through the browser
 // ===========================================================================
 const ctxB = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+ctxB.on('dialog', (d) => d.accept())
 const pageB = await ctxB.newPage()
 await signUp(pageB, B)
 await onboard(pageB, 'Bola Foods', 'Bola Kitchen')
@@ -701,6 +709,7 @@ await page.screenshot({ path: 'e2e/shots/p5-dashboard-live.png', fullPage: true 
 // ===========================================================================
 for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'tablet']]) {
   const ctxM = await browser.newContext({ viewport: { width: w, height: h } })
+  ctxM.on('dialog', (d) => d.accept())
   const pageM = await ctxM.newPage()
   await logIn(pageM, A)
   // logIn already polls /dashboard, but the recipe page is a different route

@@ -10,6 +10,8 @@
   --mm-accent-soft: #e8f5ee;
   --mm-warn: #a06300;
   --mm-warn-soft: #fff6df;
+  --mm-bad: #b42318;
+  --mm-bad-soft: #fdecea;
   --mm-surface: #ffffff;
   --mm-surface-2: #f0f3f0;
   --mm-radius: 16px;
@@ -33,6 +35,8 @@
     --mm-accent-soft: #173426;
     --mm-warn: #e3b14e;
     --mm-warn-soft: #33290f;
+    --mm-bad: #f08c7d;
+    --mm-bad-soft: #3b1512;
     --mm-surface: #171d19;
     --mm-surface-2: #1d251f;
     --mm-shadow: 0 10px 30px -20px rgb(0 0 0 / 0.9);
@@ -221,7 +225,9 @@ a { -webkit-tap-highlight-color: transparent; }
   background: var(--mm-surface);
 }
 .mm-badge[data-tone="good"] { border-color: color-mix(in srgb, var(--mm-accent) 45%, var(--mm-line)); color: var(--mm-accent); background: var(--mm-accent-soft); }
-.mm-badge[data-tone="warn"], .mm-badge[data-tone="bad"] { border-color: color-mix(in srgb, var(--mm-warn) 45%, var(--mm-line)); color: var(--mm-warn); background: var(--mm-warn-soft); }
+.mm-badge[data-tone="warn"] { border-color: color-mix(in srgb, var(--mm-warn) 45%, var(--mm-line)); color: var(--mm-warn); background: var(--mm-warn-soft); }
+/* Selling below cost is its own colour: amber is "look", red is "stop". */
+.mm-badge[data-tone="bad"] { border-color: color-mix(in srgb, var(--mm-bad) 45%, var(--mm-line)); color: var(--mm-bad); background: var(--mm-bad-soft); }
 .mm-badge[data-tone="muted"] { color: var(--mm-muted); background: var(--mm-surface-2); }
 .mm-disclosure { overflow: hidden; border: 1px solid var(--mm-line); border-radius: var(--mm-radius); background: var(--mm-surface); }
 .mm-back-link {
@@ -314,8 +320,10 @@ summary:focus-visible {
 .mm-btn-primary:hover:not(:disabled) { background: var(--mm-accent-strong); }
 .mm-btn-secondary { background: var(--mm-surface); color: var(--mm-fg); border-color: var(--mm-line); }
 .mm-btn-secondary:hover:not(:disabled) { background: var(--mm-surface-2); }
-.mm-btn-quiet { min-height: 44px; padding: 0 .2rem; font-size: .875rem; font-weight: 600; color: var(--mm-muted); background: transparent; }
-.mm-btn-quiet:hover:not(:disabled) { color: var(--mm-fg); }
+/* A small bordered pill, not grey text: "Update", "Remove" and "Hide" read as
+   buttons an owner can press, and sit apart from the sentence beside them. */
+.mm-btn-quiet { min-height: 40px; padding: 0 .8rem; font-size: .8125rem; font-weight: 600; color: var(--mm-fg); background: var(--mm-surface); border-color: var(--mm-line); border-radius: 999px; }
+.mm-btn-quiet:hover:not(:disabled) { background: var(--mm-surface-2); border-color: var(--mm-muted); }
 .mm-spinner { width: 1em; height: 1em; flex: none; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: mm-spin .7s linear infinite; }
 @keyframes mm-spin { to { transform: rotate(360deg); } }
 
@@ -494,6 +502,64 @@ summary:focus-visible {
   border: 1px solid var(--mm-line); border-radius: var(--mm-radius);
   box-shadow: 0 12px 40px rgba(0,0,0,.18);
 }
+
+/* ===========================================================================
+   SHELL -- a sidebar from 1024px up. Below that the header carries the nav
+   (md) or the bottom bar does (phones). Same five destinations everywhere.
+   =========================================================================== */
+.mm-sidebar {
+  display: none;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  flex-direction: column;
+  gap: .35rem;
+  padding: 1.1rem .85rem;
+  border-right: 1px solid var(--mm-line);
+  background: var(--mm-surface);
+}
+.mm-nav-side {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  min-height: 46px;
+  padding: 0 .8rem;
+  border-radius: 12px;
+  font-size: .9rem;
+  font-weight: 600;
+  color: var(--mm-muted);
+  transition: background var(--mm-motion-fast) var(--mm-ease), color var(--mm-motion-fast) var(--mm-ease);
+}
+.mm-nav-side:hover { background: var(--mm-surface-2); color: var(--mm-fg); }
+.mm-nav-side[data-current="true"] { background: var(--mm-accent-soft); color: var(--mm-accent); }
+@media (min-width: 1024px) {
+  .mm-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); }
+  .mm-sidebar { display: flex; }
+  .mm-shell-header-nav { display: none; }
+}
+
+/* QUICK ADD -- the one raised button on a phone: a sale, a purchase, a dish,
+   an item. Sits above the bottom bar; gone from md up where the tiles are. */
+.mm-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  z-index: 31;
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border: 0;
+  border-radius: 19px;
+  background: var(--mm-accent);
+  color: #fff;
+  box-shadow: 0 12px 26px -10px var(--mm-accent);
+  cursor: pointer;
+  transition: transform var(--mm-motion-fast) var(--mm-ease);
+}
+.mm-fab:active { transform: scale(.95); }
+@media (min-width: 768px) { .mm-fab { display: none; } }
+.mm-quick-list { display: grid; gap: .5rem; }
 
 /* Setup steps as tabs: each a full-height tap target. */
 .mm-setup-tab { display: block; min-height: var(--mm-touch); padding: 6px 4px; border-radius: 10px; }

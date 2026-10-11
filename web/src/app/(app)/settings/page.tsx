@@ -357,7 +357,7 @@ export default async function SettingsPage({
 
       {/* LABOUR ------------------------------------------------------- */}
       <section className="space-y-3">
-        <SectionHeading sub="What you pay per hour for the work that goes into a batch. Add it to a recipe to include it in the cost.">
+        <SectionHeading sub="What you pay per hour for cooking, prep or decorating. Each dish then says how many hours one batch takes, under “Time it takes”. Leave the rate blank if you do not know it yet: the dish is reported as incomplete, never as if the work were free.">
           Kinds of work
         </SectionHeading>
 
@@ -416,27 +416,23 @@ export default async function SettingsPage({
             </Field>
             <div className="flex items-end"><Submit>Add</Submit></div>
           </form>
-          <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
-            Leave the rate blank if you do not know it yet. Recipes using it will
-            be reported as incomplete — never as if the work were free.
-          </p>
         </Disclosure>
       </section>
 
       {/* OVERHEAD ----------------------------------------------------- */}
       <section className="space-y-3">
-        <SectionHeading sub="Rent, gas, electricity, airtime — the costs you pay whether you cook or not.">
+        <SectionHeading sub="Rent, gas, light, airtime: the bills you pay whether you cook or not. Menu Master spreads them over what you make in a month, so each plate carries its share. If a figure is missing, a dish is reported as incomplete rather than given a share of zero.">
           Monthly running costs
         </SectionHeading>
         <Card>
-          <form action={saveOverheadSettings} className="grid gap-3 sm:grid-cols-3">
+          <form action={saveOverheadSettings} className="grid gap-3 sm:grid-cols-3 sm:items-end">
             <label className="mm-tap flex items-center gap-2 text-sm sm:col-span-3">
               <input type="checkbox" name="overhead_enabled" className="h-6 w-6"
                 defaultChecked={settings?.overhead_enabled ?? false} />
-              Include running costs in my recipe costs
+              Count my running costs in each plate
             </label>
-            <Field label="How much do you produce in a month?">
-              <input name="overhead_basis_qty" type="number" step="any" min="0"
+            <Field label="How much do you make in a month?">
+              <input name="overhead_basis_qty" type="number" step="any" min="0" inputMode="decimal"
                 defaultValue={settings?.overhead_basis_qty ?? undefined}
                 placeholder="600" className={inputClass} style={inputStyle} />
             </Field>
@@ -447,13 +443,9 @@ export default async function SettingsPage({
                 {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
               </select>
             </Field>
-            <div className="sm:col-span-3"><Submit>Save</Submit></div>
+            <div className="flex items-end"><Submit>Save</Submit></div>
             <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
-              Running costs are spread across what you produce — 600 litres of
-              soup a month, 400 kg of bread. Menu Master needs the amount and
-              its unit to work out a share per recipe. If either is missing, or
-              a running cost has no figure, recipes are reported as incomplete
-              rather than being given a share of zero.
+              For example 600 litres of soup, 400 kg of bread, or 2,000 plates.
             </p>
           </form>
         </Card>
@@ -517,31 +509,39 @@ export default async function SettingsPage({
           </ul>
         )}
         <Disclosure summary="Add a monthly bill" open={!overheads?.length}>
-          <form action={addOverhead} className="grid gap-3 sm:grid-cols-4">
+          <form action={addOverhead} className="grid gap-3 sm:grid-cols-3 sm:items-end">
             <Field label="What is it?">
               <input name="name" required placeholder="Gas" className={inputClass} style={inputStyle} />
             </Field>
             <Field label="Cost each month (₦)">
-              <input name="monthly_cost" type="number" step="0.01" min="0"
+              <input name="monthly_cost" type="number" step="0.01" min="0" inputMode="decimal"
                 className={inputClass} style={inputStyle} />
             </Field>
-            <Field label="Spread across how much?">
-              <input name="basis_qty" type="number" step="any" min="0" placeholder="600"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Of what?">
-              <select name="basis_unit_id" className={inputClass} style={inputStyle}>
-                <option value="">— use my usual amount —</option>
-                {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
-              </select>
-            </Field>
-            <div className="sm:col-span-4"><Submit>Add running cost</Submit></div>
-            <p className="sm:col-span-4 text-xs" style={{ color: 'var(--mm-muted)' }}>
-              If you make more than one kind of thing, say what each bill is
-              spread across — for example rent for the soup pots over 600
-              litres, and the bakery bill over 400 kg. Split the money between
-              the lines; do not enter the same bill twice.
-            </p>
+            <div className="flex items-end"><Submit>Add running cost</Submit></div>
+            {/* The precise option, folded: most businesses make one kind of
+                thing and the bill is simply spread across the monthly amount
+                above. A soup-and-bread kitchen opens this and says which. */}
+            <div className="sm:col-span-3">
+              <Disclosure summary="Spread this bill across something else?">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Spread across how much?">
+                    <input name="basis_qty" type="number" step="any" min="0" placeholder="600" inputMode="decimal"
+                      className={inputClass} style={inputStyle} />
+                  </Field>
+                  <Field label="Of what?">
+                    <select name="basis_unit_id" className={inputClass} style={inputStyle}>
+                      <option value="">— use my usual amount —</option>
+                      {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                    </select>
+                  </Field>
+                </div>
+                <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                  Only if you make more than one kind of thing: rent for the soup pots over 600
+                  litres, the bakery bill over 400 kg. Split the money between the lines; do not
+                  enter the same bill twice.
+                </p>
+              </Disclosure>
+            </div>
           </form>
         </Disclosure>
       </section>

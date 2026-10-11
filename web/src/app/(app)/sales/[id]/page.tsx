@@ -12,6 +12,7 @@ import { money, percent, saleLabel } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
 import { buildReceipt, whatsappLink, whatsappNumber } from '@/lib/receipt'
 import { ReceiptActions } from '@/components/receipt-actions'
+import { ConfirmSubmit } from '@/components/confirm-submit'
 import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
 
@@ -725,7 +726,7 @@ export default async function SaleDetail({
             </p>
             <form action={deleteDraft} className="mt-2">
               <input type="hidden" name="order_id" value={id} />
-              <InlineSubmit>Discard this draft</InlineSubmit>
+              <ConfirmSubmit message="Discard this draft? It has never counted as a sale.">Discard this draft</ConfirmSubmit>
             </form>
           </Disclosure>
         </>
@@ -794,7 +795,7 @@ export default async function SaleDetail({
               <Field label="Why">
                 <input name="reason" placeholder="e.g. customer cancelled" className="mm-input mt-1" />
               </Field>
-              <Submit>Cancel this sale</Submit>
+              <ConfirmSubmit variant="secondary" message="Cancel this sale? It stops counting in your figures. The record is kept and you can put through a corrected one.">Cancel this sale</ConfirmSubmit>
             </form>
           </Disclosure>
         </>

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { EntitlementBanner } from '@/components/entitlement-banner'
 import { PrimaryNav } from '@/components/primary-nav'
+import { QuickAdd } from '@/components/quick-add'
 import { Toaster } from '@/components/toaster'
 import { AppIcon } from '@/components/icons'
 
@@ -22,42 +23,59 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const businessName = business?.name?.trim() || null
 
   return (
-    <div className="min-h-dvh flex flex-col">
-      <header className="mm-app-header">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">
-          <Link
-            href="/dashboard"
-            className="flex min-h-[44px] min-w-0 items-center gap-2.5 font-semibold tracking-tight"
-            title="Menu Master NG"
-          >
-            <span className="mm-brand-mark" aria-hidden>MM</span>
-            <span className="truncate">{businessName ?? 'Menu Master'}</span>
-          </Link>
-
-          <PrimaryNav variant="header" />
-
-          <Link
-            href="/account"
-            className="mm-account-chip"
-            title="Your account"
-            aria-label="Your account"
-          >
-            <AppIcon name="account" size={19} />
-            <span className="hidden text-xs lg:inline">Account</span>
-          </Link>
+    <div className="mm-shell min-h-dvh">
+      {/* A sidebar from lg: the five destinations down the left, the business
+          at the top, the account at the bottom. Below lg the header and the
+          bottom bar carry the same five. */}
+      <aside className="mm-sidebar">
+        <Link href="/dashboard" className="mb-3 flex min-h-[44px] items-center gap-2.5 px-2 font-semibold tracking-tight" title="Menu Master NG">
+          <span className="mm-brand-mark" aria-hidden>MM</span>
+          <span className="truncate">{businessName ?? 'Menu Master'}</span>
+        </Link>
+        <PrimaryNav variant="sidebar" />
+        <div className="mt-auto grid gap-1 border-t pt-3" style={{ borderColor: 'var(--mm-line)' }}>
+          <Link href="/settings" className="mm-nav-side"><AppIcon name="settings" size={20} /><span>Settings</span></Link>
+          <Link href="/account" className="mm-nav-side"><AppIcon name="account" size={20} /><span>Account</span></Link>
         </div>
-      </header>
+      </aside>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-5 pb-28 sm:py-7 md:pb-8">
-        <EntitlementBanner />
-        {children}
-      </main>
+      <div className="flex min-h-dvh min-w-0 flex-col">
+        <header className="mm-app-header">
+          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">
+            <Link
+              href="/dashboard"
+              className="flex min-h-[44px] min-w-0 items-center gap-2.5 font-semibold tracking-tight lg:invisible"
+              title="Menu Master NG"
+            >
+              <span className="mm-brand-mark" aria-hidden>MM</span>
+              <span className="truncate">{businessName ?? 'Menu Master'}</span>
+            </Link>
 
-      <div className="mm-bottom-nav md:hidden">
-        <PrimaryNav variant="bottom" />
+            <div className="mm-shell-header-nav"><PrimaryNav variant="header" /></div>
+
+            <Link
+              href="/account"
+              className="mm-account-chip lg:hidden"
+              title="Your account"
+              aria-label="Your account"
+            >
+              <AppIcon name="account" size={19} />
+            </Link>
+          </div>
+        </header>
+
+        <main className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-5 pb-28 sm:py-7 md:pb-8">
+          <EntitlementBanner />
+          {children}
+        </main>
+
+        <div className="mm-bottom-nav md:hidden">
+          <PrimaryNav variant="bottom" />
+        </div>
+        <QuickAdd />
+
+        <Suspense fallback={null}><Toaster /></Suspense>
       </div>
-
-      <Suspense fallback={null}><Toaster /></Suspense>
     </div>
   )
 }

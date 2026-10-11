@@ -169,7 +169,8 @@ export function HeroStat({ label, value, sub, tone = 'plain' }: {
 }) {
   const colour =
     tone === 'good' ? 'var(--mm-accent)' :
-    tone === 'bad' || tone === 'warn' ? 'var(--mm-warn)' : 'inherit'
+    tone === 'bad' ? 'var(--mm-bad)' :
+    tone === 'warn' ? 'var(--mm-warn)' : 'inherit'
 
   return (
     <div className="mm-hero-stat">

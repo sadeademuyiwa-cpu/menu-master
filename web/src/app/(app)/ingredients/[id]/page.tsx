@@ -10,6 +10,7 @@ import {
 import Link from 'next/link'
 import { money, quantity, NOT_ENTERED } from '@/lib/format'
 import { localToday, formatDay } from '@/lib/dates'
+import { ConfirmSubmit } from '@/components/confirm-submit'
 
 export const dynamic = 'force-dynamic'
 
@@ -476,7 +477,7 @@ export default async function IngredientDetail(props: {
                     <form action={removeConversion}>
                       <input type="hidden" name="ingredient_id" value={ingredient.id} />
                       <input type="hidden" name="conversion_id" value={c.id} />
-                      <InlineSubmit>Remove</InlineSubmit>
+                      <ConfirmSubmit message={`Remove the ${unitById.get(c.unit_id)?.code ?? ''} measure? Anything recorded in it cannot be costed until you add it again.`}>Remove</ConfirmSubmit>
                     </form>
                   </div>
                 </Card>

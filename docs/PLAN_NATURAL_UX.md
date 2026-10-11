@@ -208,6 +208,24 @@ Nigerian measures already exist in `units` from 0003, so nothing was needed).
 
 ### Phase 2: make it feel natural (1 week)
 
+**Built 12 Oct 2026.** Less than sketched, because the code was already past
+the screenshots this plan was judged from: the five tabs already had icons,
+badges were already coloured, and the action tiles already carried icons.
+What was actually missing and is now in: the money card on Home ("Sold this
+week", "You kept this week", against last week, from `v_sales_summary`); a
+raised "+" on phones opening a sheet with the four things an owner records
+(hidden on the screens that are one of them); a left sidebar from 1024px with
+the five destinations, Settings and Account; a distinct red for "selling below
+cost" (amber stays "look"); "Update / Remove / Hide" as small bordered pills
+instead of grey text, with a one-line confirm on the irreversible ones
+(remove a line, discard a draft, cancel a sale or purchase); "Time it takes"
+(labour) on the simple recipe view, not only behind "See every cost"; the
+running-costs screen reduced to the switch, "how much you make in a month",
+and bills with a name and a cost, with the spread-across-something-else
+option folded away. Not done: a percentage or per-plate overhead shortcut
+(the engine allocates by output; a shortcut would be a second engine), and
+"Why?" folds on the recipe page beyond what SectionHeading already does.
+
 - **Home money card**: "This week · Sold ₦X · Kept ₦Y · N sales", with last week in small text. Uses the existing `v_sales_reporting`/dashboard views. Below it the task list as today, then quick actions.
 - **Navigation**: icons on the five tabs; a raised centre **+** on phones opening "Record a sale / Record a purchase / New dish / New ingredient". A left sidebar from 1000 px up; the bottom bar only on phones.
 - **Statuses in colour**: Costed green, Ready to sell green, Price needed amber, Low margin amber, Below cost red, Incomplete grey. One `Status` component.

@@ -10,6 +10,7 @@ import {
 } from '@/components/ui'
 import { money, percent, quantity, marginVerdict, lineStatus, NOT_ENTERED } from '@/lib/format'
 import { localToday, formatDay } from '@/lib/dates'
+import { ConfirmSubmit } from '@/components/confirm-submit'
 
 export const dynamic = 'force-dynamic'
 
@@ -970,14 +971,16 @@ export default async function RecipeDetail(props: {
         </section>
       )}
 
-      {/* 4. OTHER PRODUCTION COSTS: labour on this recipe ---------------- */}
-      {pro && (
+      {/* 4. OTHER PRODUCTION COSTS: labour on this recipe ----------------
+          On the simple view too. Labour is the cost owners most often forget
+          to charge for; hidden behind "See every cost" it stayed forgotten. */}
+      {(
         <section className="space-y-3">
-          <SectionHeading sub="Time that goes into one batch. The hourly rate lives in your settings so it applies everywhere.">
-            Work
+          <SectionHeading sub="Hours of paid work in one batch, at the rate you set under Settings → Kinds of work. If you cook it yourself and pay no one, leave this empty.">
+            Time it takes
           </SectionHeading>
           {!(labourLines ?? []).length ? (
-            <Empty>No paid work recorded for this batch. If someone is paid to cook it, add the hours and it will be counted.</Empty>
+            <Empty>No paid work on this batch yet. If someone is paid to cook or prep it, add the hours and it is counted in the cost.</Empty>
           ) : (
             <ul className="space-y-2">
               {(labourLines ?? []).map((l) => (
@@ -1012,7 +1015,7 @@ export default async function RecipeDetail(props: {
                       <form action={removeLabour}>
                         <input type="hidden" name="recipe_id" value={recipe.id} />
                         <input type="hidden" name="id" value={l.id} />
-                        <InlineSubmit>Remove</InlineSubmit>
+                        <ConfirmSubmit message={`Remove ${l.rate?.name ?? 'this work'} from this dish?`}>Remove</ConfirmSubmit>
                       </form>
                     </div>
                   </Card>
@@ -1244,7 +1247,7 @@ function LineGroup({ title, lines, recipeId, pro, units }: {
                   <form action={removeLine}>
                     <input type="hidden" name="recipe_id" value={recipeId} />
                     <input type="hidden" name="line_id" value={l.line_id} />
-                    <InlineSubmit>Remove</InlineSubmit>
+                    <ConfirmSubmit message={`Remove ${l.item_name ?? 'this ingredient'} from this dish?`}>Remove</ConfirmSubmit>
                   </form>
                 </div>
               </Card>

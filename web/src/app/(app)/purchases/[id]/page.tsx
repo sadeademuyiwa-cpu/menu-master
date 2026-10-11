@@ -10,6 +10,7 @@ import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
 import { money, quantity, productState, purchaseReference } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
+import { ConfirmSubmit } from '@/components/confirm-submit'
 
 export const dynamic = 'force-dynamic'
 
@@ -488,7 +489,7 @@ export default async function PurchaseDetail({
           </p>
           <form action={discardDraft} className="mt-2">
             <input type="hidden" name="purchase_id" value={id} />
-            <InlineSubmit>Discard this draft</InlineSubmit>
+            <ConfirmSubmit message="Discard this draft? Nothing on it has been recorded.">Discard this draft</ConfirmSubmit>
           </form>
         </Disclosure>
       )}
@@ -520,7 +521,7 @@ export default async function PurchaseDetail({
                   className={inputClass} style={inputStyle} />
               </Field>
             </div>
-            <Submit>Cancel this purchase</Submit>
+            <ConfirmSubmit variant="secondary" message="Cancel this purchase? The prices it set are undone. The record is kept.">Cancel this purchase</ConfirmSubmit>
           </form>
         </Disclosure>
       )}

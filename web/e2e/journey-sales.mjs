@@ -136,6 +136,8 @@ const browser = await chromium.launch({ args: ['--no-proxy-server'] })
 const consoleErrors = []
 const netFailures = []
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+// Cancelling a sale asks once (confirm-submit.tsx); Playwright would dismiss it.
+ctx.on('dialog', (d) => d.accept())
 const page = await ctx.newPage()
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()) })
 page.on('requestfailed', (r) => {
@@ -370,6 +372,7 @@ await page.screenshot({ path: 'e2e/shots/p6-customer.png', fullPage: true })
 // ===========================================================================
 for (const [tag, width] of [['360', 360], ['390', 390]]) {
   const ctxM = await browser.newContext({ viewport: { width, height: 780 }, isMobile: true })
+  ctxM.on('dialog', (d) => d.accept())
   const pageM = await ctxM.newPage()
   await go(pageM, '/login')
   await pageM.fill('input[type=email]', A.email)
