@@ -2,14 +2,33 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
-import { PageHeader, Card, Field, Submit, Empty, Notice, Disclosure } from '@/components/ui'
+import { PageHeader, Card, Field, Submit, InlineSubmit, Empty, Notice, Disclosure, SectionHeading } from '@/components/ui'
 import { AppIcon } from '@/components/icons'
 import { money } from '@/lib/format'
+import { formatDay } from '@/lib/dates'
 
 export const dynamic = 'force-dynamic'
 
 type Row = { id: string; name: string; kind: 'ingredient' | 'packaging'; category_id: string | null; base_unit_id: string }
 type Unit = { id: string; code: string; name: string; kind: string }
+type PutAway = { id: string; name: string; deleted_at: string }
+
+/** An item that was put away comes back exactly as it was. */
+async function restoreIngredient(formData: FormData) {
+  'use server'
+  const id = String(formData.get('ingredient_id') ?? '')
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const { data, error } = await supabase.from('ingredients')
+    .update({ deleted_at: null }).eq('id', id).select('name').maybeSingle<{ name: string }>()
+  revalidatePath('/ingredients')
+  if (error) {
+    redirect(withNotice('/ingredients?show=away', error.code === '23505'
+      ? 'You now have another item with that name. Rename the new one first, then bring this one back.'
+      : describeWriteError(error)))
+  }
+  redirect(withNotice(`/ingredients/${id}`, `${data?.name ?? 'The item'} is back.`))
+}
 
 /** The three ways almost everything is measured, in the owner's words. */
 const COMMON_UNITS: { code: string; label: string }[] = [
@@ -65,6 +84,10 @@ export default async function IngredientsPage(props: {
   const ctx = await currentContext()
   if (!ctx.accountId) redirect(contextRedirect(ctx, '/ingredients'))
   const { supabase } = ctx
+
+  const { data: putAway } = await supabase.from('ingredients').select('id,name,deleted_at')
+    .not('deleted_at', 'is', null).order('deleted_at', { ascending: false }).returns<PutAway[]>()
+  const away = putAway ?? []
 
   const [{ data: ingredients }, { data: categories }, { data: units }, { data: prices }, { data: missing }] = await Promise.all([
     supabase.from('ingredients').select('id,name,kind,category_id,base_unit_id')
@@ -227,6 +250,43 @@ export default async function IngredientsPage(props: {
           </ul>
         )}
       </section>
+
+      {away.length > 0 && (
+        <section className="space-y-3">
+          {show === 'away' ? (
+            <>
+              <SectionHeading sub="Items you put away. Dishes and purchases that use them keep them.">
+                Put away ({away.length})
+              </SectionHeading>
+              <ul className="space-y-2">
+                {away.map((r) => (
+                  <li key={r.id}>
+                    <Card>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="font-medium">{r.name}</span>
+                          <span className="text-sm" style={{ color: 'var(--mm-muted)' }}> · put away {formatDay(r.deleted_at).toLowerCase()}</span>
+                        </span>
+                        <form action={restoreIngredient}>
+                          <input type="hidden" name="ingredient_id" value={r.id} />
+                          <InlineSubmit>Bring back</InlineSubmit>
+                        </form>
+                      </div>
+                    </Card>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm"><Link href="/ingredients" className="mm-tap underline">Hide put-away items</Link></p>
+            </>
+          ) : (
+            <p className="text-sm">
+              <Link href="/ingredients?show=away" className="mm-tap underline">
+                {away.length} item{away.length === 1 ? '' : 's'} put away →
+              </Link>
+            </p>
+          )}
+        </section>
+      )}
     </div>
   )
 }

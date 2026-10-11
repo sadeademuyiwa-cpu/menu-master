@@ -106,6 +106,48 @@ async function post(formData: FormData) {
     `Recorded. ${data?.price_rows_written ?? 0} ingredient price${data?.price_rows_written === 1 ? '' : 's'} updated.`))
 }
 
+/** A draft line's quantity, unit and amount. The 0006 guard refuses this once
+ *  the purchase is posted, so the form is only offered on a draft. */
+async function updateLine(formData: FormData) {
+  'use server'
+  const id = String(formData.get('purchase_id') ?? '')
+  const here = `/purchases/${id}`
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const qty = Number(formData.get('qty'))
+  const amount = Number(formData.get('amount'))
+  if (!Number.isFinite(qty) || qty <= 0) {
+    redirect(withNotice(here, 'Enter how much you bought. It must be greater than zero.'))
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    redirect(withNotice(here, 'Enter what you paid. It must be greater than zero.'))
+  }
+  const { error } = await supabase.from('purchase_lines')
+    .update({ qty, unit_id: String(formData.get('unit_id') ?? ''), amount })
+    .eq('id', String(formData.get('line_id') ?? ''))
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Item updated.'))
+}
+
+/** The draft's date, supplier and reference. */
+async function updateHeader(formData: FormData) {
+  'use server'
+  const id = String(formData.get('purchase_id') ?? '')
+  const here = `/purchases/${id}`
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const date = String(formData.get('purchase_date') ?? '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) redirect(withNotice(here, 'Choose the date of the purchase.'))
+  const { error } = await supabase.from('purchases').update({
+    purchase_date: date,
+    supplier_id: String(formData.get('supplier_id') ?? '') || null,
+    reference: String(formData.get('reference') ?? '').trim() || null,
+    note: String(formData.get('note') ?? '').trim() || null,
+  }).eq('id', id)
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Saved.'))
+}
+
 /** A draft never set a price, so discarding one changes nothing. */
 async function discardDraft(formData: FormData) {
   'use server'
@@ -154,7 +196,13 @@ export default async function PurchaseDetail({
     .eq('id', id).maybeSingle<Purchase>()
   if (!purchase) notFound()
 
-  const [{ data: lines }, { data: ingredients }, { data: units }] = await Promise.all([
+  // Set by 0060: which corrected purchase replaced this one. Read on its own so
+  // a database that does not have the column yet still renders the page.
+  const { data: link } = await supabase.from('purchases').select('replaced_by')
+    .eq('id', id).maybeSingle<{ replaced_by: string | null }>()
+  const replacedBy = link?.replaced_by ?? null
+
+  const [{ data: lines }, { data: ingredients }, { data: units }, { data: suppliers }] = await Promise.all([
     // The !constraint hints are required, not cosmetic: purchase_lines has two
     // foreign keys to ingredients (a composite tenant-scoped one and a simple
     // one), so an unhinted embed fails with PGRST201 and the page renders no
@@ -168,6 +216,8 @@ export default async function PurchaseDetail({
     supabase.from('ingredients').select('id,name').is('deleted_at', null)
       .eq('is_active', true).order('name').returns<Ingredient[]>(),
     supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<Unit[]>(),
+    supabase.from('suppliers').select('id,name').eq('is_active', true).order('name')
+      .returns<{ id: string; name: string }[]>(),
   ])
 
   const rows = lines ?? []
@@ -225,7 +275,20 @@ export default async function PurchaseDetail({
         always found NULL and the customer was never told why their purchase
         was cancelled. The reason is fetched from the reversal itself.
       */}
-      {(purchase.reversal_reason ?? reversalReason) && (
+      {replacedBy && (
+        <Notice tone="info">
+          This purchase was corrected.{' '}
+          <Link href={`/purchases/${replacedBy}`} className="mm-inline-tap">See the corrected purchase →</Link>
+        </Notice>
+      )}
+      {purchase.reverses && (
+        <Notice tone="info">
+          This is the cancellation record of{' '}
+          <Link href={`/purchases/${purchase.reverses}`} className="mm-inline-tap">an earlier purchase</Link>.
+          It holds no items of its own.
+        </Notice>
+      )}
+      {!replacedBy && (purchase.reversal_reason ?? reversalReason) && (
         <Notice tone="warn">
           This purchase was cancelled. Reason given:{' '}
           {purchase.reversal_reason ?? reversalReason}
@@ -317,11 +380,35 @@ export default async function PurchaseDetail({
                     {quantity(Number(l.qty), l.unit?.code ?? null)}
                   </div>
                   {draft && (
-                    <form action={removeLine} className="mt-2">
-                      <input type="hidden" name="purchase_id" value={id} />
-                      <input type="hidden" name="line_id" value={l.id} />
-                      <InlineSubmit>Remove</InlineSubmit>
-                    </form>
+                    <div className="mt-3 flex flex-wrap items-end gap-4">
+                      <form action={updateLine} className="flex flex-wrap items-end gap-2">
+                        <input type="hidden" name="purchase_id" value={id} />
+                        <input type="hidden" name="line_id" value={l.id} />
+                        <label className="block">
+                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Quantity</span>
+                          <input name="qty" type="number" step="any" min="0" inputMode="decimal"
+                            defaultValue={Number(l.qty)} className="mt-1 w-24 rounded border px-2 py-2 text-base" />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Unit</span>
+                          <select name="unit_id" className="mt-1 rounded border px-2 py-2 text-base"
+                            defaultValue={(units ?? []).find((u) => u.code === l.unit?.code)?.id ?? ''}>
+                            {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Paid (₦)</span>
+                          <input name="amount" type="number" step="0.01" min="0" inputMode="decimal"
+                            defaultValue={Number(l.amount)} className="mt-1 w-32 rounded border px-2 py-2 text-base" />
+                        </label>
+                        <InlineSubmit>Update</InlineSubmit>
+                      </form>
+                      <form action={removeLine}>
+                        <input type="hidden" name="purchase_id" value={id} />
+                        <input type="hidden" name="line_id" value={l.id} />
+                        <InlineSubmit>Remove</InlineSubmit>
+                      </form>
+                    </div>
                   )}
                 </Card>
               </li>
@@ -367,6 +454,34 @@ export default async function PurchaseDetail({
       </section>
 
       {draft && (
+        <Disclosure summary={`Date, supplier and reference · ${formatDay(purchase.purchase_date)}`}>
+          <form action={updateHeader} className="mt-2 grid gap-3 sm:grid-cols-4 sm:items-end">
+            <input type="hidden" name="purchase_id" value={id} />
+            <Field label="Date">
+              <input name="purchase_date" type="date" required defaultValue={purchase.purchase_date}
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Supplier or market">
+              <select name="supplier_id" defaultValue={purchase.supplier_id ?? ''} className={inputClass} style={inputStyle}>
+                <option value="">Not recorded</option>
+                {(suppliers ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Reference">
+              <input name="reference" defaultValue={purchase.reference ?? ''} placeholder="receipt no."
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <div className="flex items-end"><Submit>Save</Submit></div>
+            <div className="sm:col-span-4">
+              <Field label="Note (optional)">
+                <input name="note" defaultValue={purchase.note ?? ''} className={inputClass} style={inputStyle} />
+              </Field>
+            </div>
+          </form>
+        </Disclosure>
+      )}
+
+      {draft && (
         <Disclosure summary="Discard this draft">
           <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
             A draft has never changed a price, so discarding it changes nothing.
@@ -379,9 +494,23 @@ export default async function PurchaseDetail({
       )}
 
       {posted && (
-        <Disclosure summary="Something is wrong with this purchase">
+        <Card>
+          <SectionHeading sub="Wrong amount, wrong quantity, wrong item? Correct it in one step: the corrected purchase is recorded and this one is cancelled, and they stay linked.">
+            Something is wrong with this purchase
+          </SectionHeading>
+          <p className="mt-3">
+            <Link href={`/purchases/${id}/correct`} className="mm-btn mm-btn-primary">
+              Correct this purchase <AppIcon name="arrow-right" size={16} />
+            </Link>
+          </p>
+        </Card>
+      )}
+
+      {posted && (
+        <Disclosure summary="Cancel it without a replacement">
           <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-            Cancelling undoes the prices this purchase set. The record itself is kept.
+            For goods you returned or a purchase recorded by mistake. Cancelling undoes
+            the prices this purchase set. The record itself is kept.
           </p>
           <form action={reverse} className="mt-3 flex flex-wrap items-end gap-3">
             <input type="hidden" name="purchase_id" value={id} />

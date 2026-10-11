@@ -88,17 +88,19 @@ permissive SELECT policies; 7 unused indexes.
 
 ## Proposed, not yet applied
 
+*(Section updated 11 October 2026. 0052–0059 were applied to production on
+2–3 October per commits `5f08f2f` and `f8d5022`; the rest of this file still
+describes 10 September and is older than those facts.)*
+
 | Migration | What | Gate |
 |---|---|---|
-| `0052_search_path_and_fk_indexes.sql` | pins `search_path` on 23 functions, indexes 138 foreign keys, revokes `anon` from `billing_config` | `deploy/runbook/DEPLOY_0052.md` |
-| `0053_platform_admins.sql` | `platform_admins` (service context only) + `fn_is_platform_admin`, `fn_require_platform_admin`; nobody granted by the migration | `deploy/runbook/DEPLOY_0053_0055.md` |
-| `0054_admin_reads.sql` | `fn_admin_billing_health`, `fn_admin_subscriptions`, `fn_admin_signups` — refuse a non-admin before reading; no payload, no provider codes, no customer data | same |
-| `0055_platform_alerts.sql` | `platform_alerts` + `fn_admin_scan` (hourly via `pg_cron` when enabled), `fn_admin_alerts`, `fn_admin_resolve_alert`; emailed by `supabase/functions/platform-alert-mailer` | same |
-| `0056_invitations.sql` | `invitations` (service context only) + seven member functions; owners invite, invitees are in on sign-in, owners are promoted never invited; 117 policies unchanged | `deploy/runbook/DEPLOY_0056.md` |
+| `0060_edit_and_correct.sql` | `fn_correct_purchase` (one-step correction of a recorded purchase), `fn_reissue_order` now copies the lines, `fn_recompute_business_recipes`, `customers.deleted_at`, `purchases.replaced_by`, base unit locked once used; 118 policies unchanged, `fn_*` 95 → 98 | `deploy/runbook/DEPLOY_0060.md` |
 
-Each has a rollback in `migrations/rollbacks/`, an acceptance suite (`tests/038`–`042`)
-and a rehearsal on a repository-built replica. The app pages that read them
-(`/admin/*`, `/settings/people`) say "not available yet" until the migration is live.
+It has a rollback in `migrations/rollbacks/`, an acceptance suite (`tests/046`)
+and a rehearsal on a repository-built replica (`DEPLOY_0060.md`). The app's
+"Correct this purchase" says "not available yet" until the migration is live;
+the old empty reissue keeps working until then. Phase 1 of
+`docs/PLAN_NATURAL_UX.md`.
 
 ## What is not done
 

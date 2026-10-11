@@ -547,8 +547,9 @@ begin
     case when (select replaces = h.ord and status::text = 'draft' and finalised_at is null
                  from orders where id = newid) then 'PASS' else 'FAIL' end, res::text);
 
-  insert into order_lines(account_id, order_id, recipe_id, qty, unit_price)
-  values (f.acct, newid, f.jollof, 5, 2000);
+  -- 0060: the replacement carries the original's line (10 x 2000); the
+  -- owner corrects that line to 5 rather than retyping it.
+  update order_lines set qty = 5 where order_id = newid;
   perform fn_confirm_order(newid);
 
   select round(sum(revenue), 2) into rev_after from v_sales_unified where business_id = f.biz;

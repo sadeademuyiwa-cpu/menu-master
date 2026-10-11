@@ -152,7 +152,9 @@ async function logIn(page, who) {
   await page.fill('input[type=email]', who.email)
   await page.fill('input[type=password]', who.pass)
   await submit(page, 'button[type=submit]')
-  await settled(page, '/dashboard', 'Menu Master')
+  // The header names the business now, not the app; the primary nav is the
+  // one thing every signed-in page carries.
+  await settled(page, '/dashboard', 'Purchases')
 }
 /** The account takes the business's name now; `account` is kept for call sites. */
 async function onboard(page, _account, business) {
@@ -225,7 +227,7 @@ await buyForm.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
 await settledForm(page)
 await must(page, 'a purchase in an unknown local unit is REFUSED with a plain explanation',
-  'does not know how much of the base unit')
+  'does not know how much one of those holds')
 await page.screenshot({ path: 'e2e/shots/rc-ingredient-unknown-unit.png', fullPage: true })
 await mustNot(page, 'no cost is invented for the refused purchase', '₦0.00', 'NaN')
 
@@ -354,7 +356,7 @@ await mustNot(page, 'the stale margin is gone', '43.75%')
 // --- full costing view -------------------------------------------------------
 await go(page, recipeUrl + '?view=pro')
 await must(page, 'the full costing view shows the batch breakdown',
-  'Full costing', 'Batch cost', 'Where the batch cost goes', 'Portions per batch')
+  'Every cost', 'Batch cost', 'Where the batch cost goes', 'Portions per batch')
 // Owner rule: a customer must be able to reproduce a purchase-derived cost
 // from their own records, and an estimate must never look like a purchase.
 await must(page, 'the page states where the unit cost came from, in the units bought',
@@ -363,7 +365,7 @@ await must(page, 'the page states where the unit cost came from, in the units bo
 // Margin and markup are different numbers for the same dish and must both
 // appear, correctly labelled, so neither can be mistaken for the other.
 await must(page, 'the worksheet shows margin AND markup, distinctly labelled',
-  'Profitability, per portion', 'Margin (share of the price)',
+  'Profitability, per portion', 'Margin — what you keep, as a share of the price',
   'Markup (added to your cost)', 'Price to hit that target')
 await mustNot(page, 'a real purchase is never labelled an estimate',
   'Estimated price')
@@ -374,9 +376,11 @@ await page.screenshot({ path: 'e2e/shots/rc-desktop-pro.png', fullPage: true })
 // and states its own size, and the engine blocks rather than guesses.
 await go(page, '/settings')
 await openDetails(page, 'Add a kind of work')
-await page.fill('input[name=name]', 'Cooking')
-await page.locator('form:has(input[name=rate_per_hour]) input[name=rate_per_hour]').fill('500')
-await page.locator('form:has(input[name=rate_per_hour]) button[type=submit]').click()
+// Scoped: Settings now also carries the business's own name field above.
+const workForm = page.locator('details:has(> summary:has-text("Add a kind of work")) form')
+await workForm.locator('input[name=name]').fill('Cooking')
+await workForm.locator('input[name=rate_per_hour]').fill('500')
+await workForm.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
 await settledForm(page)
 await must(page, 'a business can define what it pays per hour', 'Cooking', '₦500.00 an hour')
@@ -416,7 +420,8 @@ await must(page, 'running costs are explained in plain business language',
 await mustNot(page, 'no dimensional-analysis jargon reaches the owner',
   'dimension', 'allocation basis', 'basis unit')
 
-const ohForm = page.locator('form:has(input[name=basis_qty])')
+// Scoped to the add form: each bill already listed carries its own edit form.
+const ohForm = page.locator('details:has(> summary:has-text("Add a monthly bill")) form')
 await ohForm.locator('input[name=name]').fill('Soup pot rent')
 await ohForm.locator('input[name=monthly_cost]').fill('300000')
 await ohForm.locator('input[name=basis_qty]').fill('600')
@@ -429,7 +434,7 @@ await must(page, 'a running cost states what it is spread across, in the owner\'
   'Soup pot rent', 'spread across 600 l you make')
 
 await openDetails(page, 'Add a monthly bill')
-const ohForm2 = page.locator('form:has(input[name=basis_qty])')
+const ohForm2 = page.locator('details:has(> summary:has-text("Add a monthly bill")) form')
 await ohForm2.locator('input[name=name]').fill('Bakery rent')
 await ohForm2.locator('input[name=monthly_cost]').fill('200000')
 await ohForm2.locator('input[name=basis_qty]').fill('400')
@@ -454,7 +459,7 @@ await must(page, 'the recipe worksheet offers labour from the business rates', '
 // correctly, but it would no longer test the portion model.
 await go(page, recipeUrl)
 await must(page, 'a recipe with no format is sold by the portion',
-  'How you sell this', 'Sold by the portion')
+  'Sizes you sell this in', 'Sold by the portion')
 
 await newDish(page, BASE, { name: `Format Soup ${stamp}`, batch: '10000', unit: 'ml — Millilitre' })
 const fmtRecipeUrl = page.url().split('?')[0]
@@ -542,8 +547,10 @@ await must(page, 'recording the purchase reports the prices it updated',
 await must(page, 'and shows the dishes it re-costed', 'What this changed', 'Ofada Special')
 await mustNot(page, 'a recorded purchase is never left as a draft', 'Not recorded yet')
 
-// Reversal: the cost is undone, the record is kept.
-await openDetails(page, 'Something is wrong with this purchase')
+// Reversal: the cost is undone, the record is kept. (Correcting in one step
+// is the primary path now -- web/e2e/journey-edit.mjs; this is the plain cancel.)
+await must(page, 'a recorded purchase offers a one-step correction', 'Correct this purchase')
+await openDetails(page, 'Cancel it without a replacement')
 const revForm = page.locator('form:has(input[name=reason])')
 await revForm.locator('input[name=reason]').fill('wrong amount')
 steps++

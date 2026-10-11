@@ -45,3 +45,4 @@
 043_site_settings.sql                 requires=0057
 044_trial_reminders.sql               requires=0058
 045_site_images.sql                   requires=0059
+046_edit_and_correct.sql              requires=0060

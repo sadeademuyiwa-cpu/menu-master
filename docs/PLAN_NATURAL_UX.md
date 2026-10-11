@@ -159,6 +159,29 @@ Ordered so that each phase is shippable on its own and the most painful problems
 
 ### Phase 1: edit and delete everywhere (1 to 2 weeks)
 
+**Built 11 Oct 2026, awaiting the production gate for 0060.** What shipped
+differs from the sketch below in one way that made it smaller: the audit of
+row policies showed that almost every edit the app lacked was already
+*permitted* by RLS (0015/0028) and only lacked a screen. So `0060` adds just
+what a client cannot do safely alone: `fn_correct_purchase` (one transaction),
+`fn_reissue_order` that copies the lines, `fn_recompute_business_recipes`
+(after a wage or bill changes), `customers.deleted_at`,
+`purchases.replaced_by`, and a trigger locking an ingredient's base unit once
+something is measured in it. Everything else is screens: edit-in-place on the
+dish (name, group, batch, unit, portion, cooking loss), recipe lines (unit as
+well as quantity), labour hours, ingredient (name, kind, yield, measure while
+free), local measures (edit and remove), sizes (name, capacity, hide/show),
+packaging quantities, suppliers (edit, hide/show), customers (put away/bring
+back), wages and bills (edit, hide/show, recompute), target margin / rounding
+/ price window, business name and type; draft purchases and sales edit their
+header and lines; a recorded purchase has "Correct this purchase"; a
+cancelled sale's replacement carries its items; dishes and ingredients are
+put away and brought back; purchases, sales and recipes lists have search and
+"show older"; the reversal bookkeeping twin is no longer listed. Verification:
+`tests/046` 25/25, full suite 44 suites, `web/e2e/journey-edit.mjs` 39/39, and the
+existing journeys (see the commit). Not done: account-level units UI (the
+Nigerian measures already exist in `units` from 0003, so nothing was needed).
+
 **Database (one proposed migration, `0060_edit_and_archive.sql`):**
 - `archived_at` on `recipes`, `serving_formats`, `ingredients`, `customers` (suppliers, labour_rates and overhead_items already have `is_active`). Every list filters archived rows; an "Archived" toggle shows them with "Restore".
 - `fn_update_recipe(id, name, batch_yield_qty, yield_unit, portion_qty, portion_unit, cooking_yield_pct, category)`: updates current facts, writes an audit row, then takes exactly one new cost snapshot (same rule as the Setup guide's F3).

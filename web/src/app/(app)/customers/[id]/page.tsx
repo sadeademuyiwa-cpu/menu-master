@@ -3,8 +3,8 @@ import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
-  PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading,
-  BackLink, Stat, StatRow, Badge,
+  PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading,
+  BackLink, Stat, StatRow, Badge, Disclosure,
 } from '@/components/ui'
 import { money, percent, saleLabel } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
@@ -41,6 +41,23 @@ async function saveCustomer(formData: FormData) {
   }).eq('id', id)
   revalidatePath(here)
   redirect(withNotice(here, describeWriteError(error) ?? 'Saved.'))
+}
+
+/** Put away, never deleted (0060): every sale keeps pointing at them. */
+async function archiveCustomer(formData: FormData) {
+  'use server'
+  const id = String(formData.get('customer_id') ?? '')
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const { error } = await supabase.from('customers')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', id)
+  if (error) {
+    redirect(withNotice(`/customers/${id}`, /deleted_at/.test(error.message)
+      ? 'Putting a customer away is not available on this account yet.'
+      : describeWriteError(error)))
+  }
+  revalidatePath('/customers')
+  redirect(withNotice('/customers', 'Customer put away. Their sales are kept; find them under “Put away” to bring them back.'))
 }
 
 export default async function CustomerDetail({
@@ -164,6 +181,17 @@ export default async function CustomerDetail({
           <div className="flex items-end"><Submit>Save</Submit></div>
         </form>
       </Card>
+
+      <Disclosure summary="Put this customer away">
+        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+          They leave your customer list and the order screen. Every sale they made is kept,
+          and you can bring them back from the Customers page.
+        </p>
+        <form action={archiveCustomer} className="mt-2">
+          <input type="hidden" name="customer_id" value={id} />
+          <InlineSubmit>Put this customer away</InlineSubmit>
+        </form>
+      </Disclosure>
     </div>
   )
 }

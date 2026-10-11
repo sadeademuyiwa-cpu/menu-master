@@ -334,7 +334,7 @@ await page.screenshot({ path: 'e2e/shots/p6-sale-no-cost.png', fullPage: true })
 
 await go(page, '/reports')
 await must(page, 'reports say how much of the picture is trustworthy',
-  'of revenue has a verified cost', 'Revenue without cost')
+  'of revenue has a verified cost', 'Money in with no known cost')
 await mustNot(page, 'and never show a zero cost for revenue with no cost', '₦0.00')
 
 // ===========================================================================

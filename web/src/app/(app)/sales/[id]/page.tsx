@@ -109,6 +109,50 @@ async function removeLine(formData: FormData) {
   redirect(withNotice(here, describeWriteError(error) ?? 'Removed.'))
 }
 
+/** A draft line's quantity, price and discount. The 0044 guard refuses this
+ *  once the sale is confirmed, so the form is only offered on a draft. */
+async function updateLine(formData: FormData) {
+  'use server'
+  const id = String(formData.get('order_id') ?? '')
+  const here = `/sales/${id}`
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const qty = Number(formData.get('qty'))
+  const price = requiredAmount(formData, 'unit_price')
+  const discount = Number(formData.get('discount_amount') || 0)
+  if (!Number.isFinite(qty) || qty <= 0) {
+    redirect(withNotice(here, 'Enter how many you sold. It must be more than zero.'))
+  }
+  if (price === null) {
+    redirect(withNotice(here, 'Enter what you charged for one, using digits only.'))
+  }
+  if (!Number.isFinite(discount) || discount < 0) {
+    redirect(withNotice(here, 'A discount is an amount in naira, and cannot be negative.'))
+  }
+  const { error } = await supabase.from('order_lines')
+    .update({ qty, unit_price: price, discount_amount: discount })
+    .eq('id', String(formData.get('line_id') ?? ''))
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Item updated.'))
+}
+
+/** The draft's date and customer. */
+async function updateHeader(formData: FormData) {
+  'use server'
+  const id = String(formData.get('order_id') ?? '')
+  const here = `/sales/${id}`
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const date = String(formData.get('order_date') ?? '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) redirect(withNotice(here, 'Choose the date of the sale.'))
+  const { error } = await supabase.from('orders').update({
+    order_date: date,
+    customer_id: String(formData.get('customer_id') ?? '') || null,
+  }).eq('id', id)
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Saved.'))
+}
+
 async function setOrderDiscount(formData: FormData) {
   'use server'
   const id = String(formData.get('order_id') ?? '')
@@ -189,8 +233,10 @@ async function reissue(formData: FormData) {
   if (error || !data?.new_order_id) {
     redirect(withNotice(`/sales/${id}`, describeWriteError(error) ?? 'Could not start a replacement.'))
   }
-  redirect(withNotice(`/sales/${data.new_order_id}`,
-    'A replacement sale has been started. Put the corrected items on it, then confirm.'))
+  const copied = Number(data?.lines_copied ?? 0)
+  redirect(withNotice(`/sales/${data.new_order_id}`, copied > 0
+    ? `A replacement sale has been started with the same ${copied} item${copied === 1 ? '' : 's'}. Change what was wrong, then confirm.`
+    : 'A replacement sale has been started. Put the corrected items on it, then confirm.'))
 }
 
 async function deleteDraft(formData: FormData) {
@@ -561,14 +607,36 @@ export default async function SaleDetail({
                         we do not know what this cost you, so it is left out of the profit
                       </span>
                     )}
-                    {!confirmed && !voided && (
-                      <form action={removeLine} className="ml-auto">
+                  </div>
+                  {!confirmed && !voided && (
+                    <div className="mt-3 flex flex-wrap items-end gap-4">
+                      <form action={updateLine} className="flex flex-wrap items-end gap-2">
+                        <input type="hidden" name="order_id" value={id} />
+                        <input type="hidden" name="line_id" value={r.line_id} />
+                        <label className="block">
+                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>How many</span>
+                          <input name="qty" type="number" step="any" min="0" inputMode="decimal"
+                            defaultValue={Number(r.qty)} className="mt-1 w-24 rounded border px-2 py-2 text-base" />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Price for one (₦)</span>
+                          <input name="unit_price" type="number" step="0.01" min="0" inputMode="decimal"
+                            defaultValue={Number(r.unit_price)} className="mt-1 w-32 rounded border px-2 py-2 text-base" />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Off (₦)</span>
+                          <input name="discount_amount" type="number" step="0.01" min="0" inputMode="decimal"
+                            defaultValue={Number(r.line_discount)} className="mt-1 w-24 rounded border px-2 py-2 text-base" />
+                        </label>
+                        <InlineSubmit>Update</InlineSubmit>
+                      </form>
+                      <form action={removeLine}>
                         <input type="hidden" name="order_id" value={id} />
                         <input type="hidden" name="line_id" value={r.line_id} />
                         <InlineSubmit>Remove</InlineSubmit>
                       </form>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </Card>
               </li>
             ))}
@@ -633,6 +701,22 @@ export default async function SaleDetail({
               </form>
             </Disclosure>
           )}
+
+          <Disclosure summary={`Date and customer · ${formatDay(order.order_date)}${customerName ? ` · ${customerName}` : ''}`}>
+            <form action={updateHeader} className="mt-2 grid gap-3 sm:grid-cols-3 sm:items-end">
+              <input type="hidden" name="order_id" value={id} />
+              <Field label="Date">
+                <input name="order_date" type="date" required defaultValue={order.order_date} className="mm-input mt-1" />
+              </Field>
+              <Field label="Customer">
+                <select name="customer_id" defaultValue={order.customer_id ?? ''} className="mm-input mt-1">
+                  <option value="">— no customer —</option>
+                  {(customers ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </Field>
+              <div className="flex items-end"><Submit>Save</Submit></div>
+            </form>
+          </Disclosure>
 
           <Disclosure summary="Discard this draft">
             <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
@@ -717,8 +801,20 @@ export default async function SaleDetail({
       )}
 
       {voided && (
+        replacement ? (
+          <Card>
+            <SectionHeading sub="This sale already has a replacement. Open it to finish or change it.">
+              Corrected sale
+            </SectionHeading>
+            <p className="mt-3">
+              <Link href={`/sales/${replacement.id}`} className="mm-btn mm-btn-primary">
+                Open {saleLabel(replacement.order_no) ?? 'the replacement'} <AppIcon name="arrow-right" size={16} />
+              </Link>
+            </p>
+          </Card>
+        ) : (
         <Card>
-          <SectionHeading sub="The cancelled sale stays exactly as it was. The replacement is a new record that points back at it.">
+          <SectionHeading sub="The cancelled sale stays exactly as it was. The replacement starts with the same items; change the one that was wrong and confirm.">
             Put through a corrected sale
           </SectionHeading>
           <form action={reissue} className="mt-3">
@@ -726,6 +822,7 @@ export default async function SaleDetail({
             <Submit>Start the replacement</Submit>
           </form>
         </Card>
+        )
       )}
 
       {order.replaces && (

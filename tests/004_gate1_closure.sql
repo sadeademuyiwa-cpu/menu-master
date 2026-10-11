@@ -303,8 +303,9 @@ begin
   select exists(select 1 from orders where id = newid and replaces = g.ord) into linked;
   perform c('0014','T31 reissued order carries replaces -> original', linked, res::text);
 
-  insert into order_lines (account_id,order_id,recipe_id,qty,unit_price)
-  values (f.acc,newid,g.rid,1,3500);
+  -- 0060: the replacement carries the original's line (2 x 3500). The
+  -- correction is to that line, not a fresh entry beside it.
+  update order_lines set qty = 1 where order_id = newid;
   perform fn_finalise_order(newid);
 
   select revenue into rev from v_profit_by_period where business_id = f.biz;

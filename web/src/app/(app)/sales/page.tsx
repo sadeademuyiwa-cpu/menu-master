@@ -52,8 +52,8 @@ function attentionBadge(a: string): { label: string; tone: 'good' | 'warn' | 'ba
 
 export default async function SalesPage({
   searchParams,
-}: { searchParams: Promise<{ notice?: string }> }) {
-  const { notice } = await searchParams
+}: { searchParams: Promise<{ notice?: string; q?: string; all?: string }> }) {
+  const { notice, q = '', all = '' } = await searchParams
   const ctx = await currentContext()
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/sales'))
@@ -82,16 +82,23 @@ export default async function SalesPage({
 
   const today = localToday()
 
-  const [{ data: days }, { data: orders }] = await Promise.all([
+  const limit = all ? 1000 : 40
+  const [{ data: days }, { data: orderRows }] = await Promise.all([
     supabase.from('v_sales_summary').select('*')
       .order('sale_date', { ascending: false }).limit(14).returns<Day[]>(),
     supabase.from('v_orders_attention').select('*')
-      .order('order_date', { ascending: false }).limit(40).returns<OrderRow[]>(),
+      .order('order_date', { ascending: false }).limit(limit + 1).returns<OrderRow[]>(),
   ])
 
   const recent = days ?? []
   const todayRow = recent.find((d) => d.sale_date === today) ?? null
-  const needsAttention = (orders ?? []).filter((o) => o.attention !== 'ok')
+  const term = q.trim().toLowerCase()
+  const more = (orderRows ?? []).length > limit
+  const orders = (orderRows ?? []).slice(0, limit).filter((o) => !term
+    || (o.customer_name ?? '').toLowerCase().includes(term)
+    || (saleLabel(o.order_no) ?? '').toLowerCase().includes(term)
+    || formatDay(o.order_date).toLowerCase().includes(term))
+  const needsAttention = orders.filter((o) => o.attention !== 'ok')
 
   return (
     <div className="space-y-6">
@@ -178,10 +185,20 @@ export default async function SalesPage({
           <>Newest first. Cancelled sales are kept under{' '}
             <Link href="/reports" className="mm-inline-tap">Reports &rarr; Cancelled sales</Link>.</>
         }>Active sales</SectionHeading>
+        {((orderRows ?? []).length > 6 || term) && (
+          <form method="get" className="flex gap-2">
+            {all && <input type="hidden" name="all" value="1" />}
+            <input name="q" defaultValue={q} placeholder="Find by customer, number or date"
+              aria-label="Find a sale" className="mm-input flex-1" />
+            <button className="mm-btn mm-btn-secondary" type="submit">Find</button>
+          </form>
+        )}
         {!orders?.length ? (
           <Empty>
-            No sales recorded yet. Record one above and Menu Master starts telling you
-            what you are really making.
+            {term
+              ? <>Nothing matches “{q}”. <Link href="/sales" className="underline">Show all</Link></>
+              : <>No sales recorded yet. Record one above and Menu Master starts telling you
+                what you are really making.</>}
           </Empty>
         ) : (
           <ul className="space-y-2">
@@ -215,6 +232,13 @@ export default async function SalesPage({
             ))}
           </ul>
         )}
+        {more && !all && (
+          <p className="text-sm">
+            <Link href={`/sales?all=1${q ? `&q=${encodeURIComponent(q)}` : ''}`} className="mm-tap underline">
+              Show older sales →
+            </Link>
+          </p>
+        )}
       </section>
 
       {recent.length > 0 && (
@@ -225,7 +249,7 @@ export default async function SalesPage({
               <li key={d.sale_date}>
                 <Card>
                   <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <span className="font-medium">{d.sale_date}</span>
+                    <span className="font-medium">{formatDay(d.sale_date)}</span>
                     <span className="mm-num font-medium">{money(d.revenue)}</span>
                   </div>
                   <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>

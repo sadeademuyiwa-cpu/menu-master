@@ -27,7 +27,7 @@ async function addFormat(formData: FormData) {
   if (!accountId || !businessId) redirect(contextRedirect(ctx, '/formats'))
 
   const name = String(formData.get('name') ?? '').trim()
-  if (!name) redirect(withNotice('/formats', 'Give this format a name your customers would recognise.'))
+  if (!name) redirect(withNotice('/formats', 'Give this size a name your customers would recognise.'))
 
   const qtyRaw = String(formData.get('capacity_qty') ?? '').trim()
   const unitRaw = String(formData.get('capacity_unit_id') ?? '')
@@ -47,7 +47,9 @@ async function addFormat(formData: FormData) {
     capacity_qty: qty, capacity_unit_id: unitRaw || null,
   })
   revalidatePath('/formats')
-  redirect(withNotice('/formats', describeWriteError(error) ?? 'Format added.'))
+  redirect(withNotice('/formats', error
+    ? (error.code === '23505' ? `You already have a size called “${name}”. Open it to change it, or hide it.` : describeWriteError(error))
+    : 'Size added.'))
 }
 
 export default async function FormatsPage({
@@ -72,7 +74,7 @@ export default async function FormatsPage({
     <div className="space-y-6">
       <PageHeader title="Sizes"
         sub="The sizes and containers your customers actually buy. You define these — Menu Master does not assume them." />
-      {notice && <Notice tone={/could not|must be|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={/could not|must be|give |already/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
       <Disclosure summary="Add a size" open={!formats?.length}>
         <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>A 2.5 litre bowl, a 250 g pack, a tray of 12, one loaf — whatever you sell.</p>

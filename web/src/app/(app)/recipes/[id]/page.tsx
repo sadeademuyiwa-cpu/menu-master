@@ -100,7 +100,8 @@ async function addLine(formData: FormData) {
   redirect(withNotice(here, failed ?? 'Ingredient added.'))
 }
 
-async function updateLineQty(formData: FormData) {
+/** Quantity AND unit. Changing "4 kg" to "4 paint" used to mean remove and re-add. */
+async function updateLine(formData: FormData) {
   'use server'
   const recipeId = String(formData.get('recipe_id') ?? '')
   const here = `/recipes/${recipeId}`
@@ -111,14 +112,86 @@ async function updateLineQty(formData: FormData) {
   if (!Number.isFinite(qty) || qty <= 0) {
     redirect(withNotice(here, 'A quantity has to be greater than zero.'))
   }
+  const unitId = String(formData.get('unit_id') ?? '')
+  const patch: { qty: number; unit_id?: string } = { qty }
+  if (unitId) patch.unit_id = unitId
 
   const { error } = await supabase.from('recipe_lines')
-    .update({ qty }).eq('id', String(formData.get('line_id') ?? ''))
+    .update(patch).eq('id', String(formData.get('line_id') ?? ''))
   if (error) redirect(withNotice(here, describeWriteError(error)))
 
   const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
-  redirect(withNotice(here, failed ?? 'Quantity updated.'))
+  redirect(withNotice(here, failed ?? 'Ingredient updated.'))
+}
+
+/**
+ * The dish itself: its name, what one batch makes, what one portion is.
+ * These are current facts, not history: the old snapshot keeps the old
+ * figures, and exactly one new snapshot follows (F3).
+ */
+async function updateRecipe(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const ctx = await currentContext()
+  const { supabase } = ctx
+
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) redirect(withNotice(here, 'A dish needs a name.'))
+  const batch = Number(formData.get('batch_yield_qty'))
+  if (!Number.isFinite(batch) || batch <= 0) {
+    redirect(withNotice(here, 'How much does one batch make? It must be more than zero.'))
+  }
+  const yieldUnit = String(formData.get('yield_unit_id') ?? '')
+  if (!yieldUnit) redirect(withNotice(here, 'Say what the batch is measured in.'))
+  const portionRaw = String(formData.get('portion_qty') ?? '').trim()
+  const portion = portionRaw === '' ? null : Number(portionRaw)
+  if (portion !== null && (!Number.isFinite(portion) || portion <= 0)) {
+    redirect(withNotice(here, 'A portion must be more than zero. Leave it blank if you sell this in sizes.'))
+  }
+  const cooking = Number(formData.get('cooking_yield_pct') || 100)
+  if (!Number.isFinite(cooking) || cooking <= 0 || cooking > 100) {
+    redirect(withNotice(here, 'What is left after cooking is a percentage between 1 and 100.'))
+  }
+
+  const { error } = await supabase.from('recipes').update({
+    name,
+    category: String(formData.get('category') ?? '').trim() || null,
+    batch_yield_qty: batch,
+    yield_unit_id: yieldUnit,
+    portion_qty: portion,
+    cooking_yield_pct: cooking,
+  }).eq('id', recipeId)
+  if (error) {
+    redirect(withNotice(here, error.code === '23505'
+      ? `You already have a dish called “${name}”. Give this one a different name.`
+      : describeWriteError(error)))
+  }
+
+  const failed = await recompute(supabase, recipeId)
+  revalidatePath(here)
+  revalidatePath('/recipes')
+  redirect(withNotice(here, failed ?? 'Dish updated.'))
+}
+
+/**
+ * Put a dish away. Never deleted: its snapshots, prices and sales keep
+ * pointing at it. It leaves every list and the sale picker (both filter on
+ * deleted_at), and its name is free for a new dish. Restored from the
+ * Recipes list.
+ */
+async function archiveRecipe(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const { data, error } = await supabase.from('recipes')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', recipeId)
+    .is('deleted_at', null).select('name').maybeSingle<{ name: string }>()
+  if (error) redirect(withNotice(`/recipes/${recipeId}`, describeWriteError(error)))
+  revalidatePath('/recipes')
+  redirect(withNotice('/recipes', `${data?.name ?? 'The dish'} has been put away. Find it under “Put away” to bring it back.`))
 }
 
 async function removeLine(formData: FormData) {
@@ -195,11 +268,14 @@ async function removeVariant(formData: FormData) {
   const here = `/recipes/${recipeId}`
   const ctx = await currentContext()
   const { supabase } = ctx
+  // Switched off, not deleted. recipe_variants has no DELETE policy (0021),
+  // so the delete this used to issue matched nothing and said "removed"
+  // anyway. Past sales and prices in this size keep their reference.
   const { error } = await supabase.from('recipe_variants')
-    .delete().eq('id', String(formData.get('id') ?? ''))
+    .update({ is_active: false }).eq('id', String(formData.get('id') ?? ''))
   if (!error) await recompute(supabase, recipeId)
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Format removed.'))
+  redirect(withNotice(here, describeWriteError(error) ?? 'Size removed from this dish.'))
 }
 
 async function addLabour(formData: FormData) {
@@ -234,6 +310,23 @@ async function removeLabour(formData: FormData) {
   if (!error) await recompute(supabase, recipeId)
   revalidatePath(here)
   redirect(withNotice(here, describeWriteError(error) ?? 'Work removed.'))
+}
+
+async function updateLabour(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const ctx = await currentContext()
+  const { supabase } = ctx
+  const hours = Number(formData.get('hours'))
+  if (!Number.isFinite(hours) || hours <= 0) {
+    redirect(withNotice(here, 'How many hours does one batch take? It must be more than zero.'))
+  }
+  const { error } = await supabase.from('recipe_labour')
+    .update({ hours }).eq('id', String(formData.get('id') ?? ''))
+  if (!error) await recompute(supabase, recipeId)
+  revalidatePath(here)
+  redirect(withNotice(here, describeWriteError(error) ?? 'Hours updated.'))
 }
 
 
@@ -399,10 +492,67 @@ export default async function RecipeDetail(props: {
       />
 
       {notice && (
-        <Notice tone={/could not|must be|does not allow|already/i.test(notice) ? 'warn' : 'info'}>
+        <Notice tone={/could not|must be|does not allow|already|needs a name/i.test(notice) ? 'warn' : 'info'}>
           {notice}
         </Notice>
       )}
+
+      {/* 1b. THE DISH ITSELF, editable. Name, batch, portion and cooking loss
+             were set once at creation and never again; the only way to fix a
+             typo was a new dish. */}
+      <Disclosure summary="Edit this dish">
+        <form action={updateRecipe} className="grid gap-3 sm:grid-cols-6 sm:items-end">
+          <input type="hidden" name="recipe_id" value={recipe.id} />
+          <div className="sm:col-span-3">
+            <Field label="Name">
+              <input name="name" required maxLength={120} defaultValue={recipe.name}
+                className={inputClass} style={inputStyle} />
+            </Field>
+          </div>
+          <div className="sm:col-span-3">
+            <Field label="Group (optional)">
+              <input name="category" maxLength={60} defaultValue={recipe.category ?? ''}
+                placeholder="e.g. Rice dishes" className={inputClass} style={inputStyle} />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="One batch makes">
+              <input name="batch_yield_qty" type="number" step="any" min="0" required inputMode="decimal"
+                defaultValue={batchYield ?? undefined} className={inputClass} style={inputStyle} />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Measured in">
+              <select name="yield_unit_id" required defaultValue={recipe.yield_unit_id}
+                className={inputClass} style={inputStyle}>
+                {(units ?? []).map((u) => (
+                  <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label={`One portion is (${yieldCode})`}>
+              <input name="portion_qty" type="number" step="any" min="0" inputMode="decimal"
+                defaultValue={portionQty ?? undefined}
+                placeholder={basis?.costing_basis === 'format' ? 'sold in sizes' : 'e.g. 500'}
+                className={inputClass} style={inputStyle} />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Left after cooking (%)">
+              <input name="cooking_yield_pct" type="number" step="any" min="1" max="100" inputMode="decimal"
+                defaultValue={cookingYield} className={inputClass} style={inputStyle} />
+            </Field>
+          </div>
+          <div className="sm:col-span-4 flex items-end"><Submit>Save changes</Submit></div>
+          <p className="sm:col-span-6 text-xs" style={{ color: 'var(--mm-muted)' }}>
+            Leave the portion blank if you sell this only in sizes. “Left after
+            cooking” is for evaporation and reduction — 5 litres of stock that
+            cooks down to 4.6 is 92%.
+          </p>
+        </form>
+      </Disclosure>
 
       {/* 2. THE NUMBERS ------------------------------------------------ */}
       <section className="space-y-3">
@@ -466,7 +616,7 @@ export default async function RecipeDetail(props: {
                         <>Cost incomplete — tell us how much one <strong>{b.unit_code ?? 'measure'}</strong> of{' '}
                           <strong>{b.ingredient_name ?? b.item}</strong> weighs.</>}
                       {b.problem === 'missing_portion_size' &&
-                        <>Cost incomplete — set how much one portion is, above.</>}
+                        <>Cost incomplete — say how much one portion is, under <strong>Edit this dish</strong> above.</>}
                       {!['missing_price','missing_conversion','missing_portion_size'].includes(b.problem) &&
                         <>Cost incomplete — {b.problem.replace(/_/g, ' ')}.</>}
                     </span>
@@ -552,9 +702,9 @@ export default async function RecipeDetail(props: {
           <Empty>Nothing in this recipe yet. Add what goes into one batch and the cost appears as you go.</Empty>
         ) : (
           <>
-            <LineGroup title={null} lines={[...cookLines].sort(byCost)} recipeId={recipe.id} pro={pro} />
+            <LineGroup title={null} lines={[...cookLines].sort(byCost)} recipeId={recipe.id} pro={pro} units={units ?? []} />
             {packLines.length > 0 && (
-              <LineGroup title="Packaging" lines={[...packLines].sort(byCost)} recipeId={recipe.id} pro={pro} />
+              <LineGroup title="Packaging" lines={[...packLines].sort(byCost)} recipeId={recipe.id} pro={pro} units={units ?? []} />
             )}
           </>
         )}
@@ -847,11 +997,24 @@ export default async function RecipeDetail(props: {
                         )}
                       </span>
                     </div>
-                    <form action={removeLabour} className="mt-2">
-                      <input type="hidden" name="recipe_id" value={recipe.id} />
-                      <input type="hidden" name="id" value={l.id} />
-                      <InlineSubmit>Remove</InlineSubmit>
-                    </form>
+                    <div className="mt-3 flex flex-wrap items-end gap-4">
+                      <form action={updateLabour} className="flex items-end gap-2">
+                        <input type="hidden" name="recipe_id" value={recipe.id} />
+                        <input type="hidden" name="id" value={l.id} />
+                        <label className="block">
+                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Hours a batch</span>
+                          <input name="hours" type="number" step="any" min="0" inputMode="decimal"
+                            defaultValue={Number(l.hours)}
+                            className="mt-1 w-28 rounded border px-2 py-2 text-base" />
+                        </label>
+                        <InlineSubmit>Update</InlineSubmit>
+                      </form>
+                      <form action={removeLabour}>
+                        <input type="hidden" name="recipe_id" value={recipe.id} />
+                        <input type="hidden" name="id" value={l.id} />
+                        <InlineSubmit>Remove</InlineSubmit>
+                      </form>
+                    </div>
                   </Card>
                 </li>
               ))}
@@ -941,6 +1104,17 @@ export default async function RecipeDetail(props: {
           ? ', plus a share of your running costs.'
           : '. Running costs such as rent, gas and light are switched off under Settings.'}
       </p>
+
+      <Disclosure summary="Put this dish away">
+        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+          It leaves your lists and the sale screen. Past sales and costs keep it,
+          and you can bring it back from the Recipes page any time.
+        </p>
+        <form action={archiveRecipe} className="mt-2">
+          <input type="hidden" name="recipe_id" value={recipe.id} />
+          <InlineSubmit>Put this dish away</InlineSubmit>
+        </form>
+      </Disclosure>
     </div>
   )
 }
@@ -949,11 +1123,12 @@ export default async function RecipeDetail(props: {
 // One ingredient. A card on a phone; the same card, wider, on a desktop.
 // Every figure comes from v_recipe_line_costs -- nothing is multiplied here.
 // ---------------------------------------------------------------------------
-function LineGroup({ title, lines, recipeId, pro }: {
+function LineGroup({ title, lines, recipeId, pro, units }: {
   title: string | null
   lines: LineCost[]
   recipeId: string
   pro: boolean
+  units: Unit[]
 }) {
   if (lines.length === 0) return null
   return (
@@ -1045,7 +1220,7 @@ function LineGroup({ title, lines, recipeId, pro }: {
                 )}
 
                 <div className="mt-3 flex flex-wrap items-end gap-4">
-                  <form action={updateLineQty} className="flex items-end gap-2">
+                  <form action={updateLine} className="flex flex-wrap items-end gap-2">
                     <input type="hidden" name="recipe_id" value={recipeId} />
                     <input type="hidden" name="line_id" value={l.line_id} />
                     <label className="block">
@@ -1054,6 +1229,15 @@ function LineGroup({ title, lines, recipeId, pro }: {
                         defaultValue={Number(l.recipe_qty)}
                         className="mt-1 w-28 rounded border px-2 py-2 text-base"
                         style={inputStyle} />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Unit</span>
+                      <select name="unit_id" className="mt-1 rounded border px-2 py-2 text-base"
+                        defaultValue={units.find((u) => u.code === l.recipe_unit)?.id ?? ''}>
+                        {units.map((u) => (
+                          <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                        ))}
+                      </select>
                     </label>
                     <InlineSubmit>Update</InlineSubmit>
                   </form>

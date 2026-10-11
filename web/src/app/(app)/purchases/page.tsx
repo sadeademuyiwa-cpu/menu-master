@@ -16,21 +16,35 @@ type Row = {
 
 export default async function PurchasesPage({
   searchParams,
-}: { searchParams: Promise<{ notice?: string }> }) {
-  const { notice } = await searchParams
+}: { searchParams: Promise<{ notice?: string; q?: string; all?: string }> }) {
+  const { notice, q = '', all = '' } = await searchParams
   const ctx = await currentContext()
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/purchases'))
 
-  const [{ data: purchases }] = await Promise.all([
+  const limit = all ? 1000 : 50
+  const [{ data: rows }, { data: twins }] = await Promise.all([
     // v_purchase_summary (0035). purchase_lines carries two foreign keys to
     // both ingredients and purchases, so an unhinted PostgREST embed returns
     // PGRST201 and the list silently renders zero items. The view resolves the
     // joins in SQL and sums the amounts in PostgreSQL, where money belongs.
     supabase.from('v_purchase_summary')
       .select('purchase_id,purchase_date,status,reference,supplier_name,line_count,total_amount')
-      .order('purchase_date', { ascending: false }).limit(50).returns<Row[]>(),
+      .order('purchase_date', { ascending: false }).limit(limit + 1).returns<Row[]>(),
+    // fn_reverse_purchase files its bookkeeping twin as a second, empty
+    // purchase. The cancelled original already says "Cancelled"; the twin
+    // only read as "Cancelled · 0 items" dated today, so it is not listed.
+    supabase.from('purchases').select('id').not('reverses', 'is', null)
+      .returns<{ id: string }[]>(),
   ])
+  const twinIds = new Set((twins ?? []).map((t) => t.id))
+  const term = q.trim().toLowerCase()
+  const listed = (rows ?? []).filter((p) => !twinIds.has(p.purchase_id))
+  const more = listed.length > limit
+  const purchases = listed.slice(0, limit).filter((p) => !term
+    || (p.supplier_name ?? '').toLowerCase().includes(term)
+    || (purchaseReference(p.reference) ?? '').toLowerCase().includes(term)
+    || formatDay(p.purchase_date).toLowerCase().includes(term))
 
   return (
     <div className="space-y-6">
@@ -52,8 +66,20 @@ export default async function PurchasesPage({
 
       <section className="space-y-3">
         <SectionHeading sub="Newest first.">Purchase history</SectionHeading>
+        {(listed.length > 6 || term) && (
+          <form method="get" className="flex gap-2">
+            {all && <input type="hidden" name="all" value="1" />}
+            <input name="q" defaultValue={q} placeholder="Find by supplier, reference or date"
+              aria-label="Find a purchase" className="mm-input flex-1" />
+            <button className="mm-btn mm-btn-secondary" type="submit">Find</button>
+          </form>
+        )}
         {!purchases?.length ? (
-          <Empty>No purchases yet. Tap New purchase after your next market run and your dish costs start working.</Empty>
+          <Empty>
+            {term
+              ? <>Nothing matches “{q}”. <Link href="/purchases" className="underline">Show all</Link></>
+              : 'No purchases yet. Tap New purchase after your next market run and your dish costs start working.'}
+          </Empty>
         ) : (
           <ul className="space-y-2">
             {purchases.map((p) => {
@@ -84,6 +110,13 @@ export default async function PurchasesPage({
               )
             })}
           </ul>
+        )}
+        {more && !all && (
+          <p className="text-sm">
+            <Link href={`/purchases?all=1${q ? `&q=${encodeURIComponent(q)}` : ''}`} className="mm-tap underline">
+              Show older purchases →
+            </Link>
+          </p>
         )}
       </section>
     </div>
