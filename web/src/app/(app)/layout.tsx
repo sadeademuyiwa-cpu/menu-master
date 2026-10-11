@@ -12,14 +12,26 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  // The header names the BUSINESS, not the login. The owner's email address
+  // was shown on every page: it wrapped on a 360px phone, and it is the one
+  // thing on the screen the owner did not need to be told. One small read,
+  // the same the pages make; a login with no business yet sees the app's name.
+  const { data: business } = await supabase
+    .from('businesses').select('name').is('deleted_at', null)
+    .order('created_at').limit(1).maybeSingle<{ name: string }>()
+  const businessName = business?.name?.trim() || null
+
   return (
     <div className="min-h-dvh flex flex-col">
       <header className="mm-app-header">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">
-          <Link href="/dashboard" className="flex min-h-[44px] min-w-0 items-center gap-2.5 font-semibold tracking-tight">
+          <Link
+            href="/dashboard"
+            className="flex min-h-[44px] min-w-0 items-center gap-2.5 font-semibold tracking-tight"
+            title="Menu Master NG"
+          >
             <span className="mm-brand-mark" aria-hidden>MM</span>
-            <span className="hidden sm:inline">Menu Master NG</span>
-            <span className="sm:hidden">Menu Master</span>
+            <span className="truncate">{businessName ?? 'Menu Master'}</span>
           </Link>
 
           <PrimaryNav variant="header" />
@@ -27,11 +39,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link
             href="/account"
             className="mm-account-chip"
-            title={user.email ?? 'Account'}
-            aria-label={`Account${user.email ? `: ${user.email}` : ''}`}
+            title="Your account"
+            aria-label="Your account"
           >
             <AppIcon name="account" size={19} />
-            <span className="hidden max-w-40 truncate text-xs lg:inline">{user.email}</span>
+            <span className="hidden text-xs lg:inline">Account</span>
           </Link>
         </div>
       </header>

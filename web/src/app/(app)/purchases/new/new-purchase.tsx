@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
 import type { CatalogItem } from '@/lib/data/purchase-catalog'
+import { formatDay } from '@/lib/dates'
 import type { PurchaseResult } from './actions'
 
 type Row = { key: number; ingredientId: string; qty: string; unitId: string; amount: string }
@@ -154,7 +155,7 @@ export function NewPurchase({
       <details className="mm-card">
         <summary className="mm-tap cursor-pointer list-none text-sm [&::-webkit-details-marker]:hidden">
           <span style={{ color: 'var(--mm-muted)' }}>Date, supplier and reference</span>
-          <span className="ml-auto truncate pl-3 font-medium">{date}{supplierName ? ` · ${supplierName}` : ''}{reference ? ` · ${reference}` : ''}</span>
+          <span className="ml-auto truncate pl-3 font-medium">{formatDay(date)}{supplierName ? ` · ${supplierName}` : ''}{reference ? ` · ${reference}` : ''}</span>
         </summary>
         <div className="grid gap-3 pt-2 sm:grid-cols-3">
           <label className="block">

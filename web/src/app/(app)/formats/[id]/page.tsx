@@ -96,7 +96,7 @@ export default async function FormatDetail({
       {notice && <Notice tone={/could not|must be|how many/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
       <section className="space-y-3">
-        <SectionHeading sub="What you use up for ONE of these — the container, the lid, the label. Counted once per serving, not per litre.">
+        <SectionHeading sub="What you use up for ONE of these — the container, the lid, the label. Counted once for each one you sell, not per litre.">
           Packaging
         </SectionHeading>
 
@@ -113,7 +113,7 @@ export default async function FormatDetail({
                       {!l.is_cost_bearing && <Badge tone="muted">Not counted</Badge>}
                     </span>
                     <span className="tabular-nums text-sm" style={{ color: 'var(--mm-muted)' }}>
-                      {Number(l.qty)} per serving
+                      {Number(l.qty)} for each one
                     </span>
                   </div>
                   <form action={removePackaging} className="mt-2">
@@ -144,7 +144,7 @@ export default async function FormatDetail({
                   {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
                 </select>
               </Field>
-              <Field label="How many per serving">
+              <Field label="How many for each one">
                 <input name="qty" type="number" step="any" min="0" defaultValue="1"
                   required className={inputClass} style={inputStyle} />
               </Field>

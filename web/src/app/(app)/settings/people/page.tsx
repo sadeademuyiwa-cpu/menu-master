@@ -81,7 +81,7 @@ export default async function PeoplePage(props: { searchParams: Promise<{ notice
       {notice && <Notice tone={/could not|cannot|only an owner|give |choose |already|not an email/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
       {members === null ? (
-        <Notice>Staff management is not available on this database yet (migration 0056).</Notice>
+        <Notice>Adding people is not switched on for this account yet. Everything else works as usual.</Notice>
       ) : (
         <section className="space-y-3">
           <SectionHeading>On the account</SectionHeading>

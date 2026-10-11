@@ -19,7 +19,7 @@ const GROUPS: Group[] = [
     title: 'Selling',
     links: [
       { href: '/customers', label: 'Customers', icon: 'customers' },
-      { href: '/formats', label: 'Selling sizes', icon: 'formats' },
+      { href: '/formats', label: 'Sizes', icon: 'formats' },
       { href: '/pricing', label: 'Prices', icon: 'pricing' },
     ],
   },
@@ -34,7 +34,7 @@ const GROUPS: Group[] = [
     title: 'Business',
     links: [
       { href: '/subscribe', label: 'Plans & billing', icon: 'card', meta: 'Your trial and your plan' },
-      { href: '/settings', label: 'Costs & targets', icon: 'settings' },
+      { href: '/settings', label: 'Wages & running costs', icon: 'settings' },
       { href: '/settings/people', label: 'People', icon: 'people' },
       { href: '/reports', label: 'Reports', icon: 'reports' },
       { href: '/account', label: 'Account', icon: 'account' },

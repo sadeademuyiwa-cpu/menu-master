@@ -3,7 +3,8 @@ import { redirect } from 'next/navigation'
 import { currentContext, contextRedirect } from '@/lib/data/context'
 import { PageHeader, Card, Notice, Empty, SectionHeading } from '@/components/ui'
 import { AppIcon } from '@/components/icons'
-import { money } from '@/lib/format'
+import { money, purchaseReference } from '@/lib/format'
+import { formatDay } from '@/lib/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,7 +63,7 @@ export default async function PurchasesPage({
                     <Card>
                       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                         <span className="font-medium">
-                          {p.purchase_date}
+                          {formatDay(p.purchase_date)}
                           {p.supplier_name ? ` · ${p.supplier_name}` : ''}
                         </span>
                         <span className="tabular-nums font-medium">
@@ -75,7 +76,7 @@ export default async function PurchasesPage({
                         {p.line_count} item{p.line_count === 1 ? '' : 's'}
                         {' · '}
                         <StatusWord status={p.status} />
-                        {p.reference ? ` · ${p.reference}` : ''}
+                        {purchaseReference(p.reference) ? ` · ${purchaseReference(p.reference)}` : ''}
                       </div>
                     </Card>
                   </Link>

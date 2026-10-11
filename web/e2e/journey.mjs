@@ -400,8 +400,8 @@ await page.waitForURL(/\/formats\/[0-9a-f-]{36}/, { timeout: 15000 })
 await page.waitForLoadState('networkidle').catch(() => {})
 await rendered(page)
 await page.evaluate(() => document.querySelectorAll('details.mm-info').forEach((d) => { d.open = true }))
-await must(page, 'the format explains that packaging is counted once per serving',
-  'Packaging', 'once per serving')
+await must(page, 'the size explains that packaging is counted once for each one sold',
+  'Packaging', 'once for each one')
 await page.screenshot({ path: 'e2e/shots/p4-format-detail.png', fullPage: true })
 
 await go(page, '/settings')

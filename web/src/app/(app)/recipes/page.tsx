@@ -52,7 +52,7 @@ export default async function RecipesPage(props: {
           <AppIcon name="plus" size={20} /> New dish
         </Link>
         <Link href="/formats" className="mm-btn mm-btn-secondary w-full">
-          <AppIcon name="formats" size={18} /> Sizes you sell
+          <AppIcon name="formats" size={18} /> Sizes
         </Link>
       </div>
 

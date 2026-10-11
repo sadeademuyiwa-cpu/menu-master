@@ -5,8 +5,8 @@ import { SalesLocked } from '@/components/sales-locked'
 import { isSalesLocked } from '@/lib/sales-gate'
 import { PageHeader, Card, Notice, Empty, SectionHeading, HeroStat, Badge } from '@/components/ui'
 import { AppIcon } from '@/components/icons'
-import { money, percent, coverageLabel } from '@/lib/format'
-import { localToday } from '@/lib/dates'
+import { money, percent, coverageLabel, saleLabel } from '@/lib/format'
+import { localToday, formatDay } from '@/lib/dates'
 import { loadPlanOffers } from '@/lib/data/plans'
 
 export const dynamic = 'force-dynamic'
@@ -151,7 +151,7 @@ export default async function SalesPage({
                   <Card>
                     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                       <span className="font-medium">
-                        {o.order_no ?? o.order_date}
+                        {saleLabel(o.order_no) ?? formatDay(o.order_date)}
                         {o.customer_name ? ` · ${o.customer_name}` : ''}
                       </span>
                       <Badge tone={attentionBadge(o.attention).tone}>
@@ -176,7 +176,7 @@ export default async function SalesPage({
             under Reports. The heading has to say what the list actually is. */}
         <SectionHeading sub={
           <>Newest first. Cancelled sales are kept under{' '}
-            <Link href="/reports" className="mm-inline-tap">Reports &rarr; Voided sales</Link>.</>
+            <Link href="/reports" className="mm-inline-tap">Reports &rarr; Cancelled sales</Link>.</>
         }>Active sales</SectionHeading>
         {!orders?.length ? (
           <Empty>
@@ -191,9 +191,9 @@ export default async function SalesPage({
                   <Card>
                     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                       <span className="font-medium">
-                        {o.order_date}
+                        {formatDay(o.order_date)}
                         {o.customer_name ? ` · ${o.customer_name}` : ''}
-                        {o.order_no ? ` · ${o.order_no}` : ''}
+                        {saleLabel(o.order_no) ? ` · ${saleLabel(o.order_no)}` : ''}
                       </span>
                       <span className="mm-num font-medium">
                         {o.line_count === 0

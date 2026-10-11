@@ -8,7 +8,8 @@ import {
 } from '@/components/ui'
 import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
-import { money, quantity, productState } from '@/lib/format'
+import { money, quantity, productState, purchaseReference } from '@/lib/format'
+import { formatDay } from '@/lib/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -206,10 +207,10 @@ export default async function PurchaseDetail({
     <div className="space-y-6">
       <BackLink href="/purchases">All purchases</BackLink>
       <PageHeader
-        title={`Purchase · ${purchase.purchase_date}`}
+        title={`Purchase of ${formatDay(purchase.purchase_date).toLowerCase()}`}
         sub={[
           draft ? 'Not recorded yet' : posted ? 'Recorded' : 'Cancelled',
-          purchase.reference ?? null,
+          purchaseReference(purchase.reference),
         ].filter(Boolean).join(' · ')}
       />
       {notice && (

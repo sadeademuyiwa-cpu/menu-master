@@ -184,7 +184,7 @@ test('F2. the false messages are gone from the application source', () => {
 // The /sales list is fed by v_orders_attention, which ends
 //   where o.voided_at is null and o.status <> 'cancelled'
 // so a cancelled sale is deliberately absent from it. It keeps its record, its
-// frozen cost and its reason, and is reachable under Reports -> Voided sales.
+// frozen cost and its reason, and is reachable under Reports -> Cancelled sales.
 // The heading must not claim otherwise. Certified Phase 6 behaviour; this
 // guards the WORDING, not the query.
 // ---------------------------------------------------------------------------
@@ -201,6 +201,6 @@ test('G. the sales list does not claim to show every sale', () => {
 
   // It must say where the cancelled ones went.
   assert.match(src, /Cancelled sales are kept under/,
-    'the heading must point at Reports -> Voided sales')
-  assert.match(src, /Voided sales/, 'it must name the destination')
+    'the heading must point at Reports -> Cancelled sales')
+  assert.match(src, /Cancelled sales<\/Link>/, 'it must name the destination')
 })

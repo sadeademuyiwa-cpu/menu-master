@@ -6,7 +6,8 @@ import {
   PageHeader, Card, Field, Submit, Notice, Empty, SectionHeading,
   BackLink, Stat, StatRow, Badge,
 } from '@/components/ui'
-import { money, percent } from '@/lib/format'
+import { money, percent, saleLabel } from '@/lib/format'
+import { formatDay } from '@/lib/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -117,8 +118,8 @@ export default async function CustomerDetail({
                     <Card>
                       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                         <span className="font-medium">
-                          {items[0].order_date}
-                          {items[0].order_no ? ` · ${items[0].order_no}` : ''}
+                          {formatDay(items[0].order_date)}
+                          {saleLabel(items[0].order_no) ? ` · ${saleLabel(items[0].order_no)}` : ''}
                         </span>
                         <span className="mm-num font-medium">{money(total)}</span>
                       </div>

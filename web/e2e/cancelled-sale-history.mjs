@@ -70,7 +70,7 @@ const draft = await page.locator('body').innerText()
 check('a live draft still uses the normal view and its own wording',
   /Nothing on this sale yet/i.test(draft) && !/The original cancelled sale/i.test(draft))
 
-// --- Reports -> Voided sales -----------------------------------------------
+// --- Reports -> Cancelled sales --------------------------------------------
 await page.goto(`${BASE}/reports`, { waitUntil: 'networkidle' })
 const reports = await page.locator('body').innerText()
 check('the voided sale is listed with its reason', /TEST-2/.test(reports) && /test/.test(reports))

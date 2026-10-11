@@ -81,7 +81,7 @@ async function DashboardPageBody() {
   ]
   // Optional detail that makes a cost more accurate. Never blocks anything.
   const extras: Step[] = [
-    { done: (setup?.serving_formats ?? 0) > 0, label: 'Sizes you sell', href: '/formats',
+    { done: (setup?.serving_formats ?? 0) > 0, label: 'Sizes', href: '/formats',
       hint: 'Plates, litres, packs or your own sizes.', icon: 'formats' },
     { done: (setup?.packaging_lines ?? 0) > 0, label: 'Packaging', href: '/formats',
       hint: 'Bowls, lids and labels.', icon: 'package' },
@@ -269,7 +269,7 @@ async function DashboardPageBody() {
         <SectionHeading>More shortcuts</SectionHeading>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <ActionTile href="/formats" icon="formats" label="Sizes" />
-          <ActionTile href="/settings" icon="settings" label="Costs & targets" />
+          <ActionTile href="/settings" icon="settings" label="Wages & running costs" />
           <ActionTile href="/reports" icon="reports" label="Reports" />
         </div>
       </section>

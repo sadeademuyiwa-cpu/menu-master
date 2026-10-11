@@ -70,7 +70,7 @@ export default async function FormatsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="How you sell it"
+      <PageHeader title="Sizes"
         sub="The sizes and containers your customers actually buy. You define these — Menu Master does not assume them." />
       {notice && <Notice tone={/could not|must be|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 

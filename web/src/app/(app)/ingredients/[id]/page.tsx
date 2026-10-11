@@ -9,7 +9,7 @@ import {
 } from '@/components/ui'
 import Link from 'next/link'
 import { money, quantity, NOT_ENTERED } from '@/lib/format'
-import { localToday } from '@/lib/dates'
+import { localToday, formatDay } from '@/lib/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,10 +64,10 @@ async function addPrice(formData: FormData) {
 
   if (qtyBase === null || qtyBase === undefined) {
     redirect(withNotice(here,
-      'Menu Master does not know how much of the base unit is in one of those ' +
-      'yet — and it will not guess, because a paint of rice and a paint of ' +
-      'garri are different weights. Add the conversion below, then record this ' +
-      'purchase again.'))
+      'Menu Master does not know how much one of those holds yet — and it ' +
+      'will not guess, because a paint of rice and a paint of garri are ' +
+      'different weights. Add the measure below, then record this purchase ' +
+      'again.'))
   }
 
   // THROUGH THE LEDGER, NOT AROUND IT.
@@ -103,7 +103,7 @@ async function addPrice(formData: FormData) {
   // The function reports refusals as data, not errors, so they must be read.
   if (posted && posted.posted === false) {
     redirect(withNotice(here, posted.reason === 'unresolved_conversions'
-      ? 'We still need to know how much of the base unit one of those is. Add the measurement below, then record this purchase again.'
+      ? 'We still need to know how much one of those holds. Add the measure below, then record this purchase again.'
       : 'That purchase could not be posted: ' + String(posted.reason).replace(/_/g, ' ') + '.'))
   }
 
@@ -122,7 +122,7 @@ async function addConversion(formData: FormData) {
 
   const qtyInBase = Number(formData.get('qty_in_base'))
   if (!Number.isFinite(qtyInBase) || qtyInBase <= 0) {
-    redirect(withNotice(here, 'Enter how much of the base unit one of these holds. It must be greater than zero.'))
+    redirect(withNotice(here, 'Enter how much one of these holds. It must be greater than zero.'))
   }
 
   const { error } = await supabase.from('ingredient_unit_conversions').insert({
@@ -162,6 +162,10 @@ export default async function IngredientDetail(props: {
       supabase.from('ingredient_prices')
         .select('id,qty_base,amount,unit_cost,effective_date,source,supplier_id')
         .eq('ingredient_id', id)
+        // A cancelled purchase keeps its price row with reversed_at set. The
+        // ingredients list already skipped those; this page did not, so a
+        // cancelled receipt could stand as "Latest price".
+        .is('reversed_at', null)
         .order('effective_date', { ascending: false })
         .order('created_at', { ascending: false })
         .returns<Price[]>(),
@@ -273,7 +277,7 @@ export default async function IngredientDetail(props: {
           keyOf={(p) => p.id}
           empty="No purchase recorded yet. Until one is, recipes using this item cannot be costed."
           render={(p) => [
-            { label: 'Date', value: p.effective_date },
+            { label: 'Date', value: formatDay(p.effective_date) },
             { label: 'Quantity', value: quantity(Number(p.qty_base), baseCode) },
             { label: 'Paid', value: money(Number(p.amount)) },
             { label: 'Unit cost', value: `${money(Number(p.unit_cost))} / ${baseCode}` },

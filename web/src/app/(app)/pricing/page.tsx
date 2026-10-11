@@ -64,9 +64,11 @@ async function PricingPageBody() {
               <Card>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="font-medium">{r.name}</p>
-                  <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
-                    {r.channel_name ?? 'default channel'}
-                  </p>
+                  {r.channel_name && (
+                    <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
+                      {r.channel_name}
+                    </p>
+                  )}
                 </div>
 
                 {r.is_complete ? (
@@ -81,12 +83,13 @@ async function PricingPageBody() {
                 ) : (
                   <div className="mt-3 space-y-2">
                     <p className="text-sm" style={{ color: 'var(--mm-warn)' }}>
-                      Incomplete — {r.priced_inputs} of {r.required_inputs} inputs priced.
-                      No margin and no recommended price.
+                      Not costed yet — {r.required_inputs - r.priced_inputs} of its{' '}
+                      {r.required_inputs} ingredients still {r.required_inputs - r.priced_inputs === 1 ? 'needs' : 'need'} a price.
+                      Until then there is no margin and no suggested price.
                     </p>
                     {r.cost_floor_per_portion !== null && (
                       <p className="text-sm">
-                        Known cost so far, a floor and not the cost:{' '}
+                        Known so far (the real cost is higher):{' '}
                         <span className="tabular-nums">{money(r.cost_floor_per_portion)}</span>
                       </p>
                     )}

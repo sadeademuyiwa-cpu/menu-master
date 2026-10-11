@@ -13,6 +13,34 @@ export const NOT_ENTERED = 'not entered'
 export const NOT_MEASURED = 'not measured'
 export const NOT_AVAILABLE = 'not available'
 
+/**
+ * A sale's number, said plainly.
+ *
+ * fn_reissue_order (0014) numbers a replacement by suffixing the original:
+ * S-0012-R, then -R2, -R3. That is a sound unique key and an unreadable
+ * label. The database keeps the key; the screen says what it means.
+ */
+export function saleLabel(orderNo: string | null | undefined): string | null {
+  if (!orderNo) return null
+  const m = /^(.*?)-R(\d*)$/.exec(orderNo)
+  if (!m) return orderNo
+  const nth = m[2] ? Number(m[2]) : 1
+  return `${m[1]} (replacement${nth > 1 ? ` ${nth}` : ''})`
+}
+
+/**
+ * A purchase reference without the database's own marker.
+ *
+ * fn_reverse_purchase (0016) files the reversing record under the original
+ * reference plus " (reversal)". The status column already says "Cancelled";
+ * the marker only told the owner something in a voice that was not theirs.
+ */
+export function purchaseReference(reference: string | null | undefined): string | null {
+  if (!reference) return null
+  const cleaned = reference.replace(/\s*\(reversal\)$/, '').trim()
+  return cleaned || null
+}
+
 const ngn = new Intl.NumberFormat('en-NG', {
   style: 'currency',
   currency: 'NGN',
@@ -156,9 +184,9 @@ export function lineStatus(problem: string | null | undefined): {
   switch (problem) {
     case 'ok':                 return { label: 'Costed',        tone: 'good' }
     case 'missing_price':      return { label: 'No price yet',  tone: 'warn' }
-    case 'missing_conversion': return { label: 'Needs measure', tone: 'warn' }
-    case 'excluded':           return { label: 'Not counted',   tone: 'muted' }
-    case 'sub_recipe':         return { label: 'Sub-recipe',    tone: 'muted' }
+    case 'missing_conversion': return { label: 'Needs a measure', tone: 'warn' }
+    case 'excluded':           return { label: 'Not counted',     tone: 'muted' }
+    case 'sub_recipe':         return { label: 'Made from another dish', tone: 'muted' }
     default:                   return { label: 'Unknown',       tone: 'warn' }
   }
 }

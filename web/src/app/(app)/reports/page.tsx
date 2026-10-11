@@ -3,7 +3,8 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { currentContext } from '@/lib/data/context'
 import { PageHeader, Card, Empty, DataList } from '@/components/ui'
-import { money, percent, coverageLabel, NOT_ENTERED } from '@/lib/format'
+import { money, percent, coverageLabel, saleLabel, NOT_ENTERED } from '@/lib/format'
+import { formatDay, formatMoment } from '@/lib/dates'
 import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
@@ -74,12 +75,12 @@ async function ReportsPageBody() {
             empty="No sales recorded yet."
             render={(r) => [
               { label: 'Period', value: r.period },
-              { label: 'Revenue', value: money(r.revenue) },
-              { label: 'Of that, costed', value: money(r.costed_revenue) },
-              { label: 'Gross profit', value: money(r.gross_profit) },
+              { label: 'Money in', value: money(r.revenue) },
+              { label: 'Of that, with a known cost', value: money(r.costed_revenue) },
+              { label: 'Money kept', value: money(r.gross_profit) },
               { label: 'Margin', value: percent(r.gross_margin_pct) },
-              { label: 'Coverage', value: coverageLabel(r.cost_coverage_pct) },
-              { label: 'Revenue without cost', value: money(r.revenue_without_cost) },
+              { label: 'Sales with a known cost', value: coverageLabel(r.cost_coverage_pct) },
+              { label: 'Money in with no known cost', value: money(r.revenue_without_cost) },
             ]}
           />
         </div>
@@ -96,17 +97,17 @@ async function ReportsPageBody() {
               { label: 'Product', value: r.name },
               // No `?? 0` here. An absent figure says so; it is never a zero.
               { label: 'Units sold', value: r.units_sold ?? NOT_ENTERED },
-              { label: 'Revenue', value: money(r.revenue) },
-              { label: 'Gross profit', value: money(r.gross_profit) },
+              { label: 'Money in', value: money(r.revenue) },
+              { label: 'Money kept', value: money(r.gross_profit) },
               { label: 'Margin', value: percent(r.gross_margin_pct) },
-              { label: 'Coverage', value: coverageLabel(r.cost_coverage_pct) },
+              { label: 'Sales with a known cost', value: coverageLabel(r.cost_coverage_pct) },
             ]}
           />
         </div>
       </section>
 
       <section>
-        <h2 className="text-base font-medium">Voided sales</h2>
+        <h2 className="text-base font-medium">Cancelled sales</h2>
         <p className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>
           Corrections are made by reversal, never by editing history.
         </p>
@@ -120,11 +121,11 @@ async function ReportsPageBody() {
                   <Card>
                       <p>
                         <Link href={`/sales/${v.record_id}`} className="mm-inline-tap">
-                          {v.reference ?? v.record_id}
+                          {saleLabel(v.reference) ?? `Sale of ${formatDay(v.sale_date).toLowerCase()}`}
                         </Link>
                       </p>
                       <p className="mm-absent">
-                        {v.sale_date} · voided {v.voided_at} · {v.void_reason ?? 'no reason given'}
+                        {formatDay(v.sale_date)} · cancelled {formatMoment(v.voided_at)} · {v.void_reason ?? 'no reason given'}
                       </p>
                       {/* v_voided_sales has always carried these two. Nothing
                           selected them, so the audit trail was thinner on

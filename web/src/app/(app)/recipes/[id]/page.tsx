@@ -9,7 +9,7 @@ import {
   Notice, SectionHeading, BackLink, Empty, Stat, StatRow, HeroStat, CostBar, Disclosure, Badge,
 } from '@/components/ui'
 import { money, percent, quantity, marginVerdict, lineStatus, NOT_ENTERED } from '@/lib/format'
-import { localToday } from '@/lib/dates'
+import { localToday, formatDay } from '@/lib/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -380,7 +380,7 @@ export default async function RecipeDetail(props: {
       <div className="flex items-center justify-between gap-3">
         <BackLink href="/recipes">All recipes</BackLink>
         <Link href={otherView} className="mm-tap text-sm underline" style={{ color: 'var(--mm-muted)' }}>
-          {pro ? 'Simple view' : 'Full costing view'}
+          {pro ? 'Hide the detail' : 'See every cost'}
         </Link>
       </div>
 
@@ -595,7 +595,7 @@ export default async function RecipeDetail(props: {
       {pro && costed && (
         <section className="space-y-4">
           <SectionHeading sub="Everything the batch costs you, and where it goes.">
-            Full costing
+            Every cost
           </SectionHeading>
 
           <StatRow>
@@ -621,8 +621,10 @@ export default async function RecipeDetail(props: {
               <p className="text-sm font-medium">Where the batch cost goes</p>
               <div className="mt-3"><CostBar parts={breakdown} /></div>
               <p className="mt-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                Only costs you have actually entered appear here. Gas, electricity
-                and water are not tracked yet and are not included.
+                Only costs you have actually entered appear here.{' '}
+                {bs?.overhead_enabled
+                  ? 'Your running costs (rent, gas, light) are added per portion, above, not to the batch.'
+                  : 'Running costs such as rent, gas and light are switched off under Settings.'}
               </p>
             </Card>
           )}
@@ -638,7 +640,7 @@ export default async function RecipeDetail(props: {
               <dd className="tabular-nums">{money(n(check?.selling_price ?? null))}</dd>
               <dt style={{ color: 'var(--mm-muted)' }}>You keep</dt>
               <dd className="tabular-nums">{money(n(check?.profit ?? null))}</dd>
-              <dt style={{ color: 'var(--mm-muted)' }}>Margin (share of the price)</dt>
+              <dt style={{ color: 'var(--mm-muted)' }}>Margin — what you keep, as a share of the price</dt>
               <dd className="tabular-nums">{percent(marginPct)}</dd>
               {bs?.show_markup_alongside && (
                 <>
@@ -687,8 +689,8 @@ export default async function RecipeDetail(props: {
       <section className="space-y-3">
         <SectionHeading sub={basis?.costing_basis === 'format'
           ? 'You sell this in your own sizes. Each one is costed from the same batch.'
-          : 'You sell this by the portion. Add a format below to sell it in sizes instead.'}>
-          How you sell this
+          : 'You sell this by the portion. Add a size below to sell it in sizes instead.'}>
+          Sizes you sell this in
         </SectionHeading>
 
         {(variants ?? []).filter((v) => v.is_active).length > 0 ? (
@@ -697,7 +699,7 @@ export default async function RecipeDetail(props: {
               <li key={v.id}>
                 <Card>
                   <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <span className="font-medium">{v.format?.name ?? 'Unknown format'}</span>
+                    <span className="font-medium">{v.format?.name ?? 'Unknown size'}</span>
                     <span className="tabular-nums text-sm" style={{ color: 'var(--mm-muted)' }}>
                       {v.format?.capacity_qty !== null && v.format?.capacity_unit
                         ? quantity(Number(v.format.capacity_qty), v.format.capacity_unit.code)
@@ -934,8 +936,10 @@ export default async function RecipeDetail(props: {
       )}
 
       <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
-        This cost covers the ingredients, packaging and labour you have entered.
-        Gas, electricity and water are not tracked yet.
+        This cost covers the ingredients, packaging and labour you have entered
+        {bs?.overhead_enabled
+          ? ', plus a share of your running costs.'
+          : '. Running costs such as rent, gas and light are switched off under Settings.'}
       </p>
     </div>
   )
@@ -1017,7 +1021,7 @@ function LineGroup({ title, lines, recipeId, pro }: {
                       <><span style={{ color: 'var(--mm-warn)' }}>Estimated price</span>
                         {' '}— not from a purchase. Record what you paid to cost this properly.</>
                     ) : (l.purchase_count ?? 0) > 1 ? (
-                      <>Based on {l.purchase_count} purchases in your costing window:{' '}
+                      <>Averaged over your last {l.purchase_count} purchases:{' '}
                         {pQty} {l.base_unit} for {money(pAmt)} · uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
                     ) : l.cost_basis === 'purchase_latest' ? (
                       /*
@@ -1029,12 +1033,12 @@ function LineGroup({ title, lines, recipeId, pro }: {
                       */
                       <><span style={{ color: 'var(--mm-warn)' }}>Old price</span> — your last
                         purchase was {pQty} {l.base_unit} for {money(pAmt)}
-                        {l.purchase_date ? ` on ${l.purchase_date}` : ''}, which is outside your
-                        costing window. Record what you pay now to keep this accurate.
+                        {l.purchase_date ? ` on ${formatDay(l.purchase_date)}` : ''}, which is
+                        a while ago. Record what you pay now to keep this accurate.
                         {' '}· uses {n(l.base_qty) ?? '?'} {l.base_unit} of it</>
                     ) : (
                       <>You bought {quantity(pQty, l.base_unit)} for {money(pAmt)}
-                        {l.purchase_date ? ` on ${l.purchase_date}` : ''}
+                        {l.purchase_date ? ` on ${formatDay(l.purchase_date)}` : ''}
                         {' '}· uses {quantity(n(l.base_qty), l.base_unit)} of it</>
                     )}
                   </p>

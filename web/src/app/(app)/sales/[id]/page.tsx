@@ -8,7 +8,8 @@ import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Stat, StatRow, Badge, Disclosure,
 } from '@/components/ui'
-import { money, percent } from '@/lib/format'
+import { money, percent, saleLabel } from '@/lib/format'
+import { formatDay } from '@/lib/dates'
 import { buildReceipt, whatsappLink, whatsappNumber } from '@/lib/receipt'
 import { ReceiptActions } from '@/components/receipt-actions'
 import { Button } from '@/components/button'
@@ -374,9 +375,9 @@ export default async function SaleDetail({
     <div className="space-y-6">
       <BackLink href="/sales">All sales</BackLink>
       <PageHeader
-        title={order.order_no ?? `Sale of ${order.order_date}`}
+        title={saleLabel(order.order_no) ?? `Sale of ${formatDay(order.order_date).toLowerCase()}`}
         sub={[
-          order.order_date,
+          formatDay(order.order_date),
           customerName,
           voided ? 'Cancelled' : confirmed ? 'Confirmed' : 'Draft — not confirmed yet',
         ].filter(Boolean).join(' · ')}
@@ -391,7 +392,7 @@ export default async function SaleDetail({
           {replacement && (
             <> It was replaced by{' '}
               <Link href={`/sales/${replacement.id}`} className="mm-inline-tap">
-                {replacement.order_no ?? 'a later sale'}
+                {saleLabel(replacement.order_no) ?? 'a later sale'}
               </Link>.</>
           )}
         </Notice>

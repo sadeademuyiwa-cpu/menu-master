@@ -6,6 +6,7 @@ import { Button } from '@/components/button'
 import { Sheet } from '@/components/sheet'
 import { AppIcon } from '@/components/icons'
 import type { MenuItem } from '@/lib/data/menu'
+import { formatDay } from '@/lib/dates'
 import type { OrderResult } from './actions'
 
 type Customer = { id: string; name: string; phone: string | null }
@@ -248,7 +249,7 @@ export function TakeOrder({
             <details>
               <summary className="mm-tap cursor-pointer list-none text-sm [&::-webkit-details-marker]:hidden">
                 <span style={{ color: 'var(--mm-muted)' }}>Date and reference</span>
-                <span className="ml-auto pl-3 font-medium">{date}{reference ? ` · ${reference}` : ''}</span>
+                <span className="ml-auto pl-3 font-medium">{formatDay(date)}{reference ? ` · ${reference}` : ''}</span>
               </summary>
               <div className="grid gap-3 pb-2 pt-1 sm:grid-cols-2">
                 <label className="block">
