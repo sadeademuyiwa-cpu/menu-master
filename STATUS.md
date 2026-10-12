@@ -88,22 +88,13 @@ permissive SELECT policies; 7 unused indexes.
 
 ## Proposed, not yet applied
 
-*(Section updated 11 October 2026. 0052–0059 were applied to production on
-2–3 October per commits `5f08f2f` and `f8d5022`; the rest of this file still
+*(Section updated 12 October 2026. Production is at **0062**: 0052–0059 were
+applied on 2–3 October (commits `5f08f2f`, `f8d5022`), and 0060–0062 on
+12 October over the session pooler (PRE/POST all PASS, 118 policies, 98
+`fn_*`, both paying subscriptions untouched). The rest of this file still
 describes 10 September and is older than those facts.)*
 
-| Migration | What | Gate |
-|---|---|---|
-| `0060_edit_and_correct.sql` | `fn_correct_purchase` (one-step correction of a recorded purchase), `fn_reissue_order` now copies the lines, `fn_recompute_business_recipes`, `customers.deleted_at`, `purchases.replaced_by`, base unit locked once used; 118 policies unchanged, `fn_*` 95 → 98 | `deploy/runbook/DEPLOY_0060.md` |
-| `0061_extras_cost.sql` (after 0060) | `order_lines.extra_unit_cost` — what a non-dish item (delivery, staff, drinks) cost the owner, frozen at confirmation by `fn_confirm_order`; `fn_reissue_order` copies it; `v_sale_lines` reads a costed extra as costed. 118 policies and 98 `fn_*` unchanged | `deploy/runbook/DEPLOY_0061.md` |
-| `0062_sub_recipe_lines.sql` (after 0061) | `v_recipe_line_costs` rebuilt (same 22 columns): no longer errors for a dish made from another dish, and costs that line from the other dish's batch. Fixes a latent 0034 fault the new "Add a dish you make" screen would have hit. Nothing else changes | `deploy/runbook/DEPLOY_0062.md` |
-
-Each has a rollback in `migrations/rollbacks/`, an acceptance suite
-(`tests/046`–`048`) and a rehearsal on a repository-built replica. The app's
-"Correct this purchase" says "not available yet" until 0060 is live; an
-extra's cost is simply not saved until 0061 is; a dish made from another dish
-shows an empty ingredient list (cost still right) until 0062 is. Everything
-else works on 0059. Phases 1 and 3 of `docs/PLAN_NATURAL_UX.md`.
+Nothing is proposed right now. `migrations/proposed/` is empty.
 
 ## What is not done
 
