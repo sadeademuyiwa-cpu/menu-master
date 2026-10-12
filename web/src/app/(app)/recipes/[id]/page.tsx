@@ -101,6 +101,84 @@ async function addLine(formData: FormData) {
   redirect(withNotice(here, failed ?? 'Ingredient added.'))
 }
 
+/**
+ * A dish made from another dish: the stew in the jollof, the dough in the
+ * meat pie. The engine (fn__recipe_cost_core, 0007) already costs a
+ * sub-recipe line from the other dish's cost per yield unit; what was missing
+ * was a way to add one. The quantity is in the other dish's measure.
+ */
+async function addSubRecipe(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) redirect(contextRedirect(ctx, here))
+
+  const qty = Number(formData.get('qty'))
+  if (!Number.isFinite(qty) || qty <= 0) {
+    redirect(withNotice(here, 'How much of that dish goes into one batch? It must be more than zero.'))
+  }
+  const subId = String(formData.get('sub_recipe_id') ?? '')
+  if (!subId || subId === recipeId) redirect(withNotice(here, 'Choose another dish.'))
+
+  const { error } = await supabase.from('recipe_lines').insert({
+    account_id: accountId, recipe_id: recipeId, sub_recipe_id: subId, qty,
+    unit_id: String(formData.get('unit_id') ?? ''),
+  })
+  if (error) {
+    redirect(withNotice(here, error.code === '23514' && /itself|cycle|reach/i.test(error.message)
+      ? 'That dish already contains this one, so it cannot also be made from it.'
+      : describeWriteError(error)))
+  }
+  const failed = await recompute(supabase, recipeId)
+  revalidatePath(here)
+  redirect(withNotice(here, failed ?? 'Dish added as an ingredient.'))
+}
+
+/**
+ * Scale the whole batch: a pot for 50 becomes a pot for 200 and every
+ * quantity and every hour of work scales with it. One snapshot after (F3).
+ */
+async function scaleRecipe(formData: FormData) {
+  'use server'
+  const recipeId = String(formData.get('recipe_id') ?? '')
+  const here = `/recipes/${recipeId}`
+  const ctx = await currentContext()
+  const { supabase } = ctx
+
+  const target = Number(formData.get('new_batch'))
+  if (!Number.isFinite(target) || target <= 0) {
+    redirect(withNotice(here, 'How much should one batch make now? It must be more than zero.'))
+  }
+  const { data: current } = await supabase.from('recipes').select('batch_yield_qty')
+    .eq('id', recipeId).maybeSingle<{ batch_yield_qty: string }>()
+  const from = Number(current?.batch_yield_qty ?? 0)
+  if (!(from > 0)) redirect(withNotice(here, 'This dish has no batch size to scale from.'))
+  const factor = target / from
+  if (Math.abs(factor - 1) < 1e-9) redirect(withNotice(here, 'That is the size it already makes.'))
+
+  const [{ data: lines }, { data: labour }] = await Promise.all([
+    supabase.from('recipe_lines').select('id,qty').eq('recipe_id', recipeId).returns<{ id: string; qty: string }[]>(),
+    supabase.from('recipe_labour').select('id,hours').eq('recipe_id', recipeId).returns<{ id: string; hours: string }[]>(),
+  ])
+  const round = (v: number, places: number) => Number(v.toFixed(places))
+  for (const l of lines ?? []) {
+    const { error } = await supabase.from('recipe_lines').update({ qty: round(Number(l.qty) * factor, 3) }).eq('id', l.id)
+    if (error) redirect(withNotice(here, describeWriteError(error)))
+  }
+  for (const l of labour ?? []) {
+    const { error } = await supabase.from('recipe_labour').update({ hours: round(Number(l.hours) * factor, 2) }).eq('id', l.id)
+    if (error) redirect(withNotice(here, describeWriteError(error)))
+  }
+  const { error } = await supabase.from('recipes').update({ batch_yield_qty: target }).eq('id', recipeId)
+  if (error) redirect(withNotice(here, describeWriteError(error)))
+
+  const failed = await recompute(supabase, recipeId)
+  revalidatePath(here)
+  redirect(withNotice(here, failed ?? `Scaled ×${round(factor, 2)}: every quantity and hour of work with it. The cost per portion is unchanged; the batch is bigger.`))
+}
+
 /** Quantity AND unit. Changing "4 kg" to "4 paint" used to mean remove and re-add. */
 async function updateLine(formData: FormData) {
   'use server'
@@ -416,6 +494,11 @@ export default async function RecipeDetail(props: {
         .returns<{ default_target_margin: string | null; overhead_enabled: boolean; price_rounding_to: string | null; show_markup_alongside: boolean }[]>(),
     ])
 
+  // Other dishes this one could be made from: the stew for the jollof.
+  const { data: otherRecipes } = await supabase.from('recipes').select('id,name,yield_unit_id')
+    .is('deleted_at', null).neq('id', id).order('name')
+    .returns<{ id: string; name: string; yield_unit_id: string }[]>()
+
   const unitById = new Map((units ?? []).map((u) => [u.id, u]))
   const yieldCode = unitById.get(recipe.yield_unit_id)?.code ?? NOT_ENTERED
   const s = snap?.[0]
@@ -553,6 +636,19 @@ export default async function RecipeDetail(props: {
             cooks down to 4.6 is 92%.
           </p>
         </form>
+        {batchYield !== null && (
+          <form action={scaleRecipe} className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-3 sm:items-end" style={{ borderColor: 'var(--mm-line)' }}>
+            <input type="hidden" name="recipe_id" value={recipe.id} />
+            <Field label={`Scale the batch: make this much ${yieldCode} instead of ${batchYield}`}>
+              <input name="new_batch" type="number" step="any" min="0" required inputMode="decimal"
+                placeholder={String(batchYield * 2)} className={inputClass} style={inputStyle} />
+            </Field>
+            <div className="flex items-end"><Submit>Scale everything</Submit></div>
+            <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
+              Every ingredient and every hour of work scales with it, so a pot for 50 becomes a pot for 200 in one step.
+            </p>
+          </form>
+        )}
       </Disclosure>
 
       {/* 2. THE NUMBERS ------------------------------------------------ */}
@@ -740,6 +836,39 @@ export default async function RecipeDetail(props: {
             </p>
           )}
         </Disclosure>
+
+        {(otherRecipes ?? []).length > 0 && (
+          <Disclosure summary="Add a dish you make (the stew in the jollof, the dough in the pie)">
+            <form action={addSubRecipe} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+              <input type="hidden" name="recipe_id" value={recipe.id} />
+              <Field label="Which dish">
+                <select name="sub_recipe_id" required className={inputClass} style={inputStyle}>
+                  {(otherRecipes ?? []).map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} (made in {unitById.get(r.yield_unit_id)?.code ?? '?'})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="How much of it">
+                <input name="qty" type="number" step="any" min="0" required inputMode="decimal"
+                  className={inputClass} style={inputStyle} />
+              </Field>
+              <Field label="Unit">
+                <select name="unit_id" required className={inputClass} style={inputStyle}>
+                  {(units ?? []).map((u) => (
+                    <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Submit>Add dish</Submit>
+              <p className="sm:col-span-4 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                Use a unit of the kind that dish is made in: litres of stew, grams of dough. Its cost
+                comes from its own batch, so a change to the stew re-costs every dish that uses it.
+              </p>
+            </form>
+          </Disclosure>
+        )}
       </section>
 
       {/* 7. PROFITABILITY + 5. OTHER COSTS + 8. BREAKDOWN (pro) --------- */}

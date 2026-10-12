@@ -4,7 +4,20 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildReceipt, whatsappNumber, whatsappLink } from '../src/lib/receipt.ts'
+import { buildReceipt, buildQuote, whatsappNumber, whatsappLink } from '../src/lib/receipt.ts'
+
+test('a quote says it is a quote, how long it holds, and never a receipt', () => {
+  const q = buildQuote({
+    businessName: 'Adaeze Kitchen', date: '30 Aug 2026', customerName: 'Mrs Adeyemi',
+    lines: [{ name: 'Party Jollof', qty: 20, unitPrice: 1500, gross: 30000 }],
+    discount: 0, total: 30000, validDays: 7,
+  })
+  assert.match(q, /^\*Adaeze Kitchen\*\nQuote · 30 Aug 2026\nFor: Mrs Adeyemi/)
+  assert.match(q, /20 × Party Jollof/)
+  assert.match(q, /\*Total: ₦30,000\.00\*/)
+  assert.match(q, /Prices hold for 7 days\. Reply to confirm\./)
+  assert.doesNotMatch(q, /Receipt|Thank you for your order/)
+})
 import { localToday } from '../src/lib/dates.ts'
 
 test('just after midnight in Lagos it is already the new day', () => {

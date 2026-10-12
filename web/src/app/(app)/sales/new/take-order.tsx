@@ -15,6 +15,8 @@ type Line = {
   qty: number; price: number | null
   /** Taken off this item only, in naira. */
   discount: number
+  /** What one of a NON-DISH item costs the owner, if they said. */
+  cost?: number | null
 }
 type Who =
   | { kind: 'none' }
@@ -106,6 +108,7 @@ export function TakeOrder({
     lines: lines.map((l) => ({
       product: l.product, description: l.product ? null : l.name,
       qty: l.qty, price: l.price, discount: l.discount,
+      cost: l.product ? null : (l.cost ?? null),
     })),
     customerId: who.kind === 'existing' ? who.id : null,
     newCustomer: who.kind === 'new' ? { name: who.name, phone: who.phone } : null,
@@ -321,8 +324,8 @@ export function TakeOrder({
       <OtherItemSheet
         open={otherOpen}
         onClose={() => setOtherOpen(false)}
-        onSave={(name, qty, price) => {
-          setLines((all) => [...all, { key: `other-${all.length}-${name}`, product: null, name, qty, price, discount: 0 }])
+        onSave={(name, qty, price, cost) => {
+          setLines((all) => [...all, { key: `other-${all.length}-${name}`, product: null, name, qty, price, discount: 0, cost }])
           setOtherOpen(false)
         }}
       />
@@ -406,13 +409,14 @@ function ItemSheet({ editing, line, onClose, onSave }: {
 function OtherItemSheet({ open, onClose, onSave }: {
   open: boolean
   onClose: () => void
-  onSave: (name: string, qty: number, price: number) => void
+  onSave: (name: string, qty: number, price: number, cost: number | null) => void
 }) {
   const [name, setName] = useState('')
   const [qty, setQty] = useState('1')
   const [price, setPrice] = useState('')
+  const [cost, setCost] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const reset = () => { setName(''); setQty('1'); setPrice(''); setError(null) }
+  const reset = () => { setName(''); setQty('1'); setPrice(''); setCost(''); setError(null) }
   return (
     <Sheet open={open} onClose={() => { reset(); onClose() }} title="Something not on the menu">
       <form
@@ -420,10 +424,12 @@ function OtherItemSheet({ open, onClose, onSave }: {
         onSubmit={(e) => {
           e.preventDefault()
           const q = Number(qty), p = amount(price)
+          const c = cost.trim() === '' ? null : amount(cost)
           if (!name.trim()) { setError('Say what it is, e.g. Delivery.'); return }
           if (!Number.isFinite(q) || q <= 0) { setError('How many? It must be more than zero.'); return }
           if (p === null) { setError('Enter what you charged for one, in naira.'); return }
-          reset(); onSave(name.trim(), q, p)
+          if (cost.trim() !== '' && c === null) { setError('What it costs you is an amount in naira, or leave it empty.'); return }
+          reset(); onSave(name.trim(), q, p, c)
         }}
       >
         <label className="block">
@@ -440,6 +446,13 @@ function OtherItemSheet({ open, onClose, onSave }: {
             <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="e.g. 500" className="mm-input mt-1" />
           </label>
         </div>
+        <label className="block">
+          <span className="text-sm font-medium">What one costs you (₦, optional)</span>
+          <input inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="e.g. 300" className="mm-input mt-1" />
+          <span className="mt-1 block text-xs" style={{ color: 'var(--mm-muted)' }}>
+            The driver's fare, the serving staff's pay, what you paid for the drinks. With it, this item counts in your profit.
+          </span>
+        </label>
         {error && <p className="text-sm" style={{ color: 'var(--mm-warn)' }}>{error}</p>}
         <button type="submit" className="mm-btn mm-btn-primary w-full">Add to sale</button>
       </form>

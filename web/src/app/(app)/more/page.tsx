@@ -19,6 +19,7 @@ const GROUPS: Group[] = [
     title: 'Selling',
     links: [
       { href: '/customers', label: 'Customers', icon: 'customers' },
+      { href: '/quote', label: 'Price per head', icon: 'pricing', meta: 'For an event or a party' },
       { href: '/formats', label: 'Sizes', icon: 'formats' },
       { href: '/pricing', label: 'Prices', icon: 'pricing' },
     ],

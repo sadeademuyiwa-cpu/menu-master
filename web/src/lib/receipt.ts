@@ -49,6 +49,32 @@ export function buildReceipt(r: Receipt): string {
   return out.join('\n')
 }
 
+export type Quote = Omit<Receipt, 'reference'> & {
+  /** How long the prices hold, in days. */
+  validDays: number
+}
+
+/**
+ * A quote: the same lines as a receipt, said before the sale. Caterers and
+ * bakers price per event; the draft order is the quote, and confirming it
+ * later is the sale. Prices are the owner's own; nothing is suggested here.
+ */
+export function buildQuote(q: Quote): string {
+  const rule = '────────────'
+  const out = [`*${q.businessName}*`, `Quote · ${q.date}`]
+  if (q.customerName) out.push(`For: ${q.customerName}`)
+  out.push(rule)
+  for (const l of q.lines) {
+    out.push(`${qtyText(l.qty)} × ${l.name}`)
+    out.push(`   ${fmt(l.unitPrice)} each = ${fmt(l.gross)}`)
+  }
+  out.push(rule)
+  if (q.discount > 0) out.push(`Discount: −${fmt(q.discount)}`)
+  out.push(`*Total: ${fmt(q.total)}*`)
+  out.push('', `Prices hold for ${q.validDays} day${q.validDays === 1 ? '' : 's'}. Reply to confirm.`)
+  return out.join('\n')
+}
+
 /**
  * A Nigerian phone number in the international form wa.me expects: digits
  * only, country code first. "0803 123 4567" -> "2348031234567". Returns null

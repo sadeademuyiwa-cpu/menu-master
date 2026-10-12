@@ -255,6 +255,55 @@ s = await section(page, 'Edit this dish')
 mark('exactly as it was', (await s.locator('input[name=batch_yield_qty]').inputValue()) === '1000'
   && (await s.locator('input[name=portion_qty]').inputValue()) === '100')
 
+// ---- 9. made from another dish, and scaled -----------------------------------
+await openDetails(page, 'Add a dish you make')
+const subForm = page.locator('form:has(select[name=sub_recipe_id])')
+// The only other dish on this account is the setup dish.
+await subForm.locator('select[name=sub_recipe_id]').selectOption({ index: 0 })
+await subForm.locator('input[name=qty]').fill('2')
+await subForm.locator('select[name=unit_id]').selectOption({ label: 'portion — Portion' }).catch(() =>
+  subForm.locator('select[name=unit_id]').selectOption({ index: 0 }))
+await submit(page, subForm.locator('button:has-text("Add dish")'))
+await must(page, 'a dish can be made from another dish', 'Dish added as an ingredient.', 'Made from another dish')
+
+s = await section(page, 'Edit this dish')
+await s.locator('input[name=new_batch]').fill('2000')
+await submit(page, s.locator('button:has-text("Scale everything")'))
+await must(page, 'a batch scales in one step', 'Scaled ×2')
+s = await section(page, 'Edit this dish')
+mark('and the batch size follows', (await s.locator('input[name=batch_yield_qty]').inputValue()) === '2000')
+
+// ---- 10. an extra with a cost, a quote, then the sale -----------------------
+await go(page, '/sales/new')
+await page.locator('button[aria-label^="Add Setup pepper soup"]').first().click()
+await page.locator('button:has-text("Something not on the menu")').click()
+const other = page.locator('dialog[open]').first()
+await other.locator('input').nth(0).fill('Delivery')
+await other.locator('input').nth(2).fill('1000')
+await other.locator('input').nth(3).fill('400')
+await other.locator('button:has-text("Add to sale")').click()
+await page.locator('button:has-text("Next")').click()
+await must(page, 'an extra sits on the sale with its price', 'Delivery', '₦1,000.00')
+await submit(page, page.locator('button:has-text("Save for later")'))
+await page.waitForURL(/\/sales\/[0-9a-f-]{36}/, { timeout: 30000 })
+await must(page, 'a saved draft offers itself as a quote', 'Send as a quote', 'prices hold for 7 days')
+await openDetails(page, 'See the quote')
+await must(page, 'the quote carries the items and the total', 'Quote ·', '1 × Delivery', 'Prices hold for 7 days')
+await submit(page, page.locator('button:has-text("Confirm sale")'))
+await must(page, 'after confirming, the extra has a known cost', 'Confirmed', 'Cost known', 'cost ₦400.00')
+const deliveryRow = page.locator('li:has-text("Delivery")').first()
+mark('the delivery line reads "Cost known", not "Not a dish"',
+  /Cost known/.test(await deliveryRow.innerText()) && !/Not a dish/.test(await deliveryRow.innerText()),
+  (await deliveryRow.innerText()).replace(/\s+/g, ' ').slice(0, 120))
+
+// ---- 11. price per head ------------------------------------------------------
+await go(page, '/quote')
+await must(page, 'the per-head calculator lists the dishes', 'Price per head', 'How many guests?', 'Setup pepper soup deluxe')
+await page.fill('input[aria-label="How many guests?"], input[inputmode=numeric]', '50')
+await page.locator('input[aria-label="Setup pepper soup deluxe per guest"]').fill('1')
+await must(page, 'and works out cost and price per guest and for the event',
+  'Food costs you, per guest', 'At your prices, per guest', 'for 50 guests', 'Send the quote on WhatsApp')
+
 await browser.close()
 const failed = results.filter((r) => !r.ok).length
 console.log(`\n${results.length - failed}/${results.length} checks passed`)

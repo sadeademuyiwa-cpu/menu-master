@@ -113,8 +113,8 @@ export default async function SalesPage({
         <Link href="/sales/new" className="mm-btn mm-btn-primary w-full text-base">
           <AppIcon name="plus" size={20} /> New sale
         </Link>
-        <Link href="/customers" className="mm-btn mm-btn-secondary w-full">
-          <AppIcon name="customers" size={18} /> Customers
+        <Link href="/quote" className="mm-btn mm-btn-secondary w-full">
+          <AppIcon name="pricing" size={18} /> Price per head
         </Link>
       </div>
 

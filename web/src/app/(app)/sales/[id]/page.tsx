@@ -10,7 +10,7 @@ import {
 } from '@/components/ui'
 import { money, percent, saleLabel } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
-import { buildReceipt, whatsappLink, whatsappNumber } from '@/lib/receipt'
+import { buildReceipt, buildQuote, whatsappLink, whatsappNumber } from '@/lib/receipt'
 import { ReceiptActions } from '@/components/receipt-actions'
 import { ConfirmSubmit } from '@/components/confirm-submit'
 import { Button } from '@/components/button'
@@ -84,7 +84,15 @@ async function addLine(formData: FormData) {
   // "recipe:variant" so one control chooses the product and the size together.
   const [recipeId, variantId] = String(formData.get('product') ?? '').split(':')
 
-  const { error } = await supabase.from('order_lines').insert({
+  // What one of a NON-DISH item cost the owner (0061). A dish's cost is its
+  // snapshot, so the figure is dropped for a dish even if typed.
+  const costRaw = String(formData.get('extra_unit_cost') ?? '').trim()
+  const cost = costRaw === '' || recipeId ? null : Number(costRaw)
+  if (cost !== null && (!Number.isFinite(cost) || cost < 0)) {
+    redirect(withNotice(here, 'What an item costs you is an amount in naira, and cannot be negative.'))
+  }
+
+  const row: Record<string, string | number | null> = {
     account_id: accountId,
     order_id: id,
     recipe_id: recipeId || null,
@@ -93,9 +101,16 @@ async function addLine(formData: FormData) {
     qty,
     unit_price: price,
     discount_amount: discount,
-  })
+  }
+  let { error } = await supabase.from('order_lines').insert(cost !== null ? { ...row, extra_unit_cost: cost } : row)
+  let note = ''
+  if (error && cost !== null && /extra_unit_cost/.test(error.message)) {
+    // Before 0061: record the item as before, without its cost.
+    ;({ error } = await supabase.from('order_lines').insert(row))
+    note = ' What it costs you could not be saved on this account yet.'
+  }
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Added.'))
+  redirect(withNotice(here, describeWriteError(error) ?? `Added.${note}`))
 }
 
 async function removeLine(formData: FormData) {
@@ -130,11 +145,24 @@ async function updateLine(formData: FormData) {
   if (!Number.isFinite(discount) || discount < 0) {
     redirect(withNotice(here, 'A discount is an amount in naira, and cannot be negative.'))
   }
+  const patch: Record<string, number | null> = { qty, unit_price: price, discount_amount: discount }
+  // Only a non-dish line carries a typed cost; the field is only shown there.
+  if (formData.has('extra_unit_cost')) {
+    const raw = String(formData.get('extra_unit_cost') ?? '').trim()
+    const cost = raw === '' ? null : Number(raw)
+    if (cost !== null && (!Number.isFinite(cost) || cost < 0)) {
+      redirect(withNotice(here, 'What an item costs you is an amount in naira, and cannot be negative.'))
+    }
+    patch.extra_unit_cost = cost
+  }
   const { error } = await supabase.from('order_lines')
-    .update({ qty, unit_price: price, discount_amount: discount })
-    .eq('id', String(formData.get('line_id') ?? ''))
+    .update(patch).eq('id', String(formData.get('line_id') ?? ''))
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Item updated.'))
+  redirect(withNotice(here, error
+    ? (/extra_unit_cost/.test(error.message)
+        ? 'What it costs you cannot be saved on this account yet; the rest was not changed.'
+        : describeWriteError(error))
+    : 'Item updated.'))
 }
 
 /** The draft's date and customer. */
@@ -258,6 +286,7 @@ function costWords(status: string): { label: string; tone: 'good' | 'warn' | 'mu
     case 'costed':            return { label: 'Cost known',       tone: 'good' }
     case 'not_costed_yet':    return { label: 'Not locked in yet', tone: 'muted' }
     case 'sold_without_cost': return { label: 'Cost not known',   tone: 'warn' }
+    case 'no_product':        return { label: 'Not a dish',        tone: 'muted' }
     default:                  return { label: 'No product',        tone: 'muted' }
   }
 }
@@ -301,6 +330,12 @@ export default async function SaleDetail({
   const rows = lines ?? []
   const confirmed = order.finalised_at !== null
   const voided = order.voided_at !== null
+
+  // The typed cost of each non-dish line (0061). Before the column exists the
+  // query errors and every line simply has none.
+  const { data: extraCosts } = await supabase.from('order_lines').select('id,extra_unit_cost')
+    .eq('order_id', id).returns<{ id: string; extra_unit_cost: string | null }[]>()
+  const extraCostOf = new Map((extraCosts ?? []).map((l) => [l.id, l.extra_unit_cost]))
 
   // A cancelled sale keeps everything: fn_void_order writes only voided_at,
   // voided_by and void_reason, and trg_order_lines_revenue refuses any edit or
@@ -388,6 +423,25 @@ export default async function SaleDetail({
       })
     : null
 
+  // A draft is a quote until it is confirmed: the same lines, said before the
+  // sale, for a caterer or baker pricing an event.
+  const quote = !confirmed && !voided && rows.length > 0
+    ? buildQuote({
+        businessName: ctx.businessName ?? 'Menu Master NG',
+        date: formatDay(order.order_date),
+        customerName,
+        lines: rows.map((r) => ({
+          name: r.product_name
+            ? `${r.product_name}${r.format_name ? ` (${r.format_name})` : ''}`
+            : (r.description ?? 'Item'),
+          qty: Number(r.qty), unitPrice: Number(r.unit_price), gross: Number(r.gross_revenue),
+        })),
+        discount: discounts,
+        total: net,
+        validDays: 7,
+      })
+    : null
+
   const byRecipe = new Map<string, Variant[]>()
   for (const v of variants ?? []) {
     const list = byRecipe.get(v.recipe_id) ?? []
@@ -450,6 +504,28 @@ export default async function SaleDetail({
           will be worked out from your prices at the moment you confirm — not from when you
           typed it.
         </Notice>
+      )}
+      {quote && (
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-semibold">Send as a quote</div>
+              <div className="text-sm" style={{ color: 'var(--mm-muted)' }}>{money(net)} · {rows.length} item{rows.length === 1 ? '' : 's'} · prices hold for 7 days</div>
+            </div>
+          </div>
+          <div className="mt-3">
+            <ReceiptActions
+              text={quote}
+              whatsappHref={whatsappLink(customer?.phone, quote)}
+              toName={whatsappNumber(customer?.phone) ? customerName : null}
+            />
+          </div>
+          <div className="mt-3">
+            <Disclosure summary="See the quote">
+              <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed">{quote}</pre>
+            </Disclosure>
+          </div>
+        </Card>
       )}
       {receipt && (
         <Card>
@@ -629,6 +705,14 @@ export default async function SaleDetail({
                           <input name="discount_amount" type="number" step="0.01" min="0" inputMode="decimal"
                             defaultValue={Number(r.line_discount)} className="mt-1 w-24 rounded border px-2 py-2 text-base" />
                         </label>
+                        {r.recipe_id === null && (
+                          <label className="block">
+                            <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Costs you (₦)</span>
+                            <input name="extra_unit_cost" type="number" step="0.01" min="0" inputMode="decimal"
+                              defaultValue={extraCostOf.get(r.line_id) ?? ''} placeholder="optional"
+                              className="mt-1 w-28 rounded border px-2 py-2 text-base" />
+                          </label>
+                        )}
                         <InlineSubmit>Update</InlineSubmit>
                       </form>
                       <form action={removeLine}>
@@ -674,12 +758,16 @@ export default async function SaleDetail({
                 <input name="discount_amount" type="number" step="0.01" min="0"
                        inputMode="decimal" defaultValue="0" className="mm-input mt-1" />
               </Field>
-              <div className="sm:col-span-4">
+              <div className="sm:col-span-3">
                 <Field label="Note (only if it is not on your menu)">
                   <input name="description" placeholder="e.g. Delivery, Extra small chops"
                          className="mm-input mt-1" />
                 </Field>
               </div>
+              <Field label="What one costs you (₦, not for dishes)">
+                <input name="extra_unit_cost" type="number" step="0.01" min="0" inputMode="decimal"
+                       placeholder="e.g. 300" className="mm-input mt-1" />
+              </Field>
               <div className="flex items-end"><Submit>Add</Submit></div>
             </form>
           </Disclosure>

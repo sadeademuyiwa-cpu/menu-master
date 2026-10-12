@@ -13,6 +13,8 @@ type PayloadLine = {
   qty: number; price: number | null
   /** Taken off this item only. */
   discount?: number
+  /** What one of a NON-DISH item cost the owner (0061). Ignored for a dish. */
+  cost?: number | null
 }
 type Payload = {
   lines: PayloadLine[]
@@ -56,7 +58,14 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
     const d = l.discount ?? 0
     if (!isAmount(d)) return { error: 'A discount is an amount in naira, and cannot be negative.' }
     if (d > l.qty * l.price) return { error: 'A discount on an item cannot be more than that item comes to.' }
+    if (l.cost !== undefined && l.cost !== null && !isAmount(l.cost)) {
+      return { error: 'What an item costs you is an amount in naira, and cannot be negative.' }
+    }
   }
+  // Before 0061 the column does not exist; sending it would refuse the whole
+  // sale. Send it only when something was typed, and if that is refused for
+  // being unknown, record the sale without it.
+  const anyCost = lines.some((l) => !l.product && l.cost !== undefined && l.cost !== null)
   // "Save for later" keeps it as a draft: an order taken now, served and
   // confirmed another day. Nothing counts as a sale until it is confirmed.
   const asDraft = String(formData.get('mode') ?? 'confirm') === 'draft'
@@ -95,15 +104,22 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
     return { error: describeWriteError(oErr) ?? 'We could not start that sale.' }
   }
 
-  const { error: lErr } = await supabase.from('order_lines').insert(lines.map((l) => {
+  const rowsFor = (withCost: boolean) => lines.map((l) => {
     const [recipeId, variantId] = String(l.product ?? '').split(':')
     return {
       account_id: accountId, order_id: order.id,
       recipe_id: recipeId || null, variant_id: variantId || null,
       description: (l.description ?? '').trim() || null,
       qty: l.qty, unit_price: l.price, discount_amount: l.discount ?? 0,
+      ...(withCost && !recipeId && l.cost !== undefined && l.cost !== null ? { extra_unit_cost: l.cost } : {}),
     }
-  }))
+  })
+  let { error: lErr } = await supabase.from('order_lines').insert(rowsFor(anyCost))
+  let costNote = ''
+  if (lErr && anyCost && /extra_unit_cost/.test(lErr.message)) {
+    ;({ error: lErr } = await supabase.from('order_lines').insert(rowsFor(false)))
+    costNote = ' What your extras cost you could not be saved on this account yet.'
+  }
   if (lErr) {
     await undo(order.id)
     return { error: describeWriteError(lErr) ?? 'We could not save the items on that sale.' }
@@ -119,7 +135,7 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
 
   if (asDraft) {
     revalidatePath('/sales')
-    redirect(`/sales/${order.id}?notice=${encodeURIComponent('Saved for later. It does not count as a sale until you confirm it.')}`)
+    redirect(`/sales/${order.id}?notice=${encodeURIComponent('Saved for later. It does not count as a sale until you confirm it. You can send it as a quote from here.' + costNote)}`)
   }
 
   const { data: confirmed, error: cErr } = await supabase.rpc('fn_confirm_order', { p_order_id: order.id })
@@ -147,6 +163,6 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
   revalidatePath('/dashboard')
   const notice = (without > 0
     ? `Sale recorded. ${without} item${without === 1 ? ' has' : 's have'} no known cost, so ${without === 1 ? 'it is' : 'they are'} left out of your profit.`
-    : 'Sale recorded.') + paymentNote
+    : 'Sale recorded.') + paymentNote + costNote
   redirect(`/sales/${order.id}?notice=${encodeURIComponent(notice)}`)
 }

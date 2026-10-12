@@ -237,6 +237,26 @@ option folded away. Not done: a percentage or per-plate overhead shortcut
 
 ### Phase 3: use-case flows (1 to 2 weeks)
 
+**Built 12 Oct 2026, awaiting the production gates for 0061 and 0062 (after 0060).**
+Two migrations. `0062_sub_recipe_lines` fixes a latent fault the new
+sub-recipe screen exposed: `v_recipe_line_costs` (0034) called the purchase-
+evidence function with a null ingredient for a sub-recipe line and raised, so
+the whole ingredient list vanished for any dish made from another dish; the
+view is rebuilt (same 22 columns), and such a line now shows its cost from the
+other dish's batch. `0061_extras_cost`: `order_lines.extra_unit_cost`, frozen into
+`unit_cost_at_sale` by `fn_confirm_order` for non-dish lines only, copied by
+`fn_reissue_order`, and `v_sale_lines` reading a costed extra as `costed`.
+Policies and function count unchanged. Screens: "What one costs you" on a
+not-on-the-menu item (order screen and draft page); "Send as a quote" on any
+draft sale, with the same WhatsApp and copy buttons as the receipt;
+`/quote`, the per-head calculator (guests × what each gets → food cost per
+guest, price at your list, price to keep your margin, WhatsApp text) linked
+from Sales and More; "Add a dish you make" on the recipe page (sub-recipes,
+which the engine already costed); "Scale the batch" under Edit this dish
+(every quantity and hour of work scales, one snapshot). Not done: a quote as
+its own record with a validity date (the draft is the quote; it converts by
+confirming), and prefilling the order screen from the per-head calculator.
+
 - **Extras on a sale**: lines that are not dishes, with a cost and a price (serving staff, delivery, crockery, drinks bought in). They count in money in and money kept; they never touch recipe costs. Replaces the current "Something not on your menu" note with a real line.
 - **Quote**: a sale saved as a quote (status before draft) with a shareable WhatsApp text and link, converting to a sale on confirmation. Covers caterers and bakers. Uses the existing WhatsApp receipt code path.
 - **Per-head view for a menu**: pick several dishes and a head count; see cost per head and suggested price per head with the owner's margin. Read-only calculator over existing data.
