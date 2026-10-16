@@ -98,7 +98,11 @@ export function PerHead({ items, targetMargin, businessName }: {
                 inputMode="decimal" aria-label={`${i.name} per guest`}
                 value={perHead[i.key] ?? ''} placeholder="0"
                 onChange={(e) => setPerHead((all) => ({ ...all, [i.key]: e.target.value }))}
-                className="mm-input w-20 text-center"
+                // .mm-input is width:100% and sits outside Tailwind's utility
+                // layer, so a plain w-20 loses and the input swallowed the row,
+                // squeezing the dish name to nothing. Force the width and keep
+                // the input from shrinking.
+                className="mm-input w-20! shrink-0 text-center"
               />
             </li>
           ))}
