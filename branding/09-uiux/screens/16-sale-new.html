@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="widths" content="390,1280">
+<title>New sale — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .menu { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .item { border: 1.5px solid var(--mm-line); border-radius: var(--mm-radius-sm); background: var(--mm-surface); padding: 10px 12px; display: grid; gap: 4px; min-height: 72px; }
+  .item.on { border-color: var(--mm-accent); background: var(--mm-accent-soft); }
+  .item b { font: 600 14px/1.2 var(--font-ui); }
+  .item span { font: 600 13px/1 var(--font-ui); color: var(--mm-muted); font-variant-numeric: tabular-nums; }
+  .qty { display: inline-flex; align-items: center; gap: 10px; }
+  .qty i { width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--mm-line); background: var(--mm-surface); display: grid; place-items: center; }
+  .qty b { min-width: 20px; text-align: center; }
+  @media (min-width: 1024px) { .two { display: grid; grid-template-columns: 1fr 380px; gap: 18px; align-items: start; } .menu { grid-template-columns: repeat(3, 1fr); } }
+</style></head>
+<body data-section="sales" data-business="Ada Kitchen" data-fab="0">
+<main class="page">
+  <a class="back"><i data-i="back"></i> Sales</a>
+  <div class="page-h"><h1>New sale</h1><p>Tap what they're buying. Nothing is saved until you confirm.</p></div>
+  <div class="two">
+  <div style="display:grid;gap:12px">
+    <div class="input ph"><i data-i="search" style="margin-right:8px"></i>Find a dish…</div>
+    <div class="menu">
+      <div class="item on"><b>Jollof rice</b><span>₦3,000 · plate</span><span class="qty"><i><i data-i="minus"></i></i><b>2</b><i><i data-i="plus"></i></i></span></div>
+      <div class="item on"><b>Grilled chicken</b><span>₦1,500 · piece</span><span class="qty"><i><i data-i="minus"></i></i><b>2</b><i><i data-i="plus"></i></i></span></div>
+      <div class="item"><b>Fried rice</b><span>₦2,800 · plate</span></div>
+      <div class="item"><b>Moi moi</b><span>₦600 · wrap</span></div>
+      <div class="item"><b>Puff puff</b><span>₦800 · pack of 6</span></div>
+      <div class="item"><b>Egusi soup</b><span>₦3,500 · litre</span></div>
+      <div class="item"><b>Chapman</b><span class="absent">no price yet</span></div>
+      <div class="item"><b>Party tray</b><span class="absent">no price yet</span></div>
+    </div>
+  </div>
+  <div style="display:grid;gap:12px">
+    <section class="card" style="display:grid;gap:12px">
+      <div class="kv">
+        <div><span class="k">Jollof rice × 2</span><span class="v">₦6,000</span></div>
+        <div><span class="k">Grilled chicken × 2</span><span class="v">₦3,000</span></div>
+        <div><span class="k">Discount</span><span class="v" style="color:var(--mm-accent)">+ add</span></div>
+        <div class="total"><span class="k">Total</span><span class="v">₦9,000<small style="color:var(--mm-accent)">you keep about ₦3,240</small></span></div>
+      </div>
+      <div class="field"><label>Customer <span class="muted" style="font-weight:400">(optional)</span></label><div class="input">Mrs Bello · 0803…<span class="suf"><i data-i="close"></i></span></div></div>
+      <div class="field"><label>Paid by</label><div class="seg"><span>Cash</span><span class="on">Transfer</span><span>POS</span><span>Later</span></div></div>
+    </section>
+    <div class="sticky-cta"><a class="btn primary full">Confirm sale · ₦9,000</a><a class="btn secondary full"><i data-i="whatsapp"></i> Confirm and send receipt</a></div>
+  </div>
+  </div>
+</main>
+<script src="_shell.js"></script>
+</body></html>

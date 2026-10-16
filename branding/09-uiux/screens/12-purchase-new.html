@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="widths" content="390,1280">
+<title>New purchase — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .pline { display: grid; grid-template-columns: 1fr 72px 92px; gap: 8px; }
+  .pline .input { padding: 0 10px; font-size: 15px; }
+  .pline2 { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+  @media (min-width: 1024px) { .two { display: grid; grid-template-columns: 1fr 360px; gap: 18px; align-items: start; } }
+</style></head>
+<body data-section="purchases" data-business="Ada Kitchen" data-fab="0">
+<main class="page">
+  <a class="back"><i data-i="back"></i> Purchases</a>
+  <div class="page-h"><h1>New purchase</h1><p>A market run, a delivery, a supplier. Record it the way you bought it.</p></div>
+  <div class="two">
+  <div style="display:grid;gap:14px">
+    <section class="card" style="display:grid;gap:12px">
+      <div class="grid-2"><div class="field"><label>When</label><div class="input"><i data-i="calendar" style="margin-right:8px;color:var(--mm-muted)"></i>Today</div></div><div class="field"><label>Where / who <span class="muted" style="font-weight:400">(optional)</span></label><div class="input">Mile 12</div></div></div>
+    </section>
+    <section class="card" style="display:grid;gap:12px">
+      <div class="sec-h"><div><h2 style="font-size:16px">What you bought</h2></div></div>
+      <div style="display:grid;gap:6px"><div class="pline"><div class="input">Rice</div><div class="input">1</div><div class="input select">paint</div></div><div class="pline2"><div class="input"><span class="pre">₦</span>9,500</div><span class="badge good">1 paint ≈ 4 kg</span></div></div>
+      <div style="display:grid;gap:6px"><div class="pline"><div class="input">Tomato</div><div class="input">1</div><div class="input select">basket</div></div><div class="pline2"><div class="input"><span class="pre">₦</span>4,000</div><span class="badge good">basket ≈ 25 kg</span></div></div>
+      <div style="display:grid;gap:6px"><div class="pline"><div class="input focus">Pepper</div><div class="input">½</div><div class="input select">basket</div></div><div class="pline2"><div class="input ph"><span class="pre">₦</span>what you paid</div><span class="badge warn">New unit</span></div><p class="hint">We'll ask how much a basket of pepper weighs when you first cost a dish with it.</p></div>
+      <div style="display:grid;gap:6px"><div class="pline"><div class="input ph">Item</div><div class="input ph">0</div><div class="input select ph">unit</div></div></div>
+      <a class="btn ghost" style="justify-self:start"><i data-i="plus"></i> Add another line</a>
+    </section>
+    <section class="card" style="display:grid;gap:10px">
+      <div class="sec-h"><div><h2 style="font-size:16px">Receipt photo <span class="muted" style="font-weight:400">(optional)</span></h2><p>So you can check the figure later</p></div></div>
+      <a class="btn secondary"><i data-i="camera"></i> Take or choose a photo</a>
+    </section>
+  </div>
+  <div style="display:grid;gap:14px">
+    <section class="card kv">
+      <div><span class="k">Lines</span><span class="v">3</span></div>
+      <div><span class="k">Rice</span><span class="v">₦9,500</span></div>
+      <div><span class="k">Tomato</span><span class="v">₦4,000</span></div>
+      <div><span class="k">Pepper</span><span class="v absent">not entered</span></div>
+      <div class="total"><span class="k">Total</span><span class="v">₦13,500<small>so far</small></span></div>
+    </section>
+    <div class="notice info"><i data-i="info"></i><span>Saving recosts <b>4 dishes</b> that use rice and tomato. Old sales keep the cost they were sold at.</span></div>
+    <div class="sticky-cta"><a class="btn primary full">Save purchase</a></div>
+  </div>
+  </div>
+</main>
+<script src="_shell.js"></script>
+</body></html>

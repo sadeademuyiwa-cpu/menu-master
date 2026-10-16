@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="widths" content="390,1280">
+<title>Reports — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 120px; }
+  .chart div { display: grid; gap: 4px; align-items: end; height: 100%; }
+  .chart i { display: block; border-radius: 6px 6px 2px 2px; background: var(--mm-accent-soft); position: relative; }
+  .chart i b { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 6px 6px 2px 2px; background: var(--mm-accent); }
+  .chart small { text-align: center; color: var(--mm-muted); font-size: 11px; }
+  @media (min-width: 1024px) { .two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; } }
+</style></head>
+<body data-section="more" data-business="Ada Kitchen" data-fab="0">
+<main class="page">
+  <a class="back"><i data-i="back"></i> More</a>
+  <div class="page-h"><h1>Reports</h1><p>What you sold, what it cost, what you kept</p></div>
+  <div class="seg"><span>Week</span><span class="on">Month</span><span>Quarter</span><span>Custom</span></div>
+  <section class="card" style="display:grid;gap:14px">
+    <div class="sec-h"><div><h2 style="font-size:16px">October so far</h2><p>1–12 Oct, from recorded sales</p></div></div>
+    <div class="stats">
+      <div class="stat"><span class="eyebrow">Sold</span><strong class="num">₦412,300</strong><small>142 sales</small></div>
+      <div class="stat"><span class="eyebrow">Cost of what you sold</span><strong class="num">₦262,100</strong><small>94% of sales had a known cost</small></div>
+      <div class="stat good"><span class="eyebrow">Kept</span><strong class="num">₦150,200</strong><small>36%</small></div>
+      <div class="stat"><span class="eyebrow">Monthly bills so far</span><strong class="num">₦48,000</strong><small>rent, gas, light (12 of 31 days)</small></div>
+    </div>
+    <div class="chart">
+      <div><i style="height:55%"><b style="height:40%"></b></i><small>Mon</small></div><div><i style="height:70%"><b style="height:38%"></b></i><small>Tue</small></div><div><i style="height:62%"><b style="height:36%"></b></i><small>Wed</small></div><div><i style="height:80%"><b style="height:37%"></b></i><small>Thu</small></div><div><i style="height:100%"><b style="height:35%"></b></i><small>Fri</small></div><div><i style="height:90%"><b style="height:33%"></b></i><small>Sat</small></div><div><i style="height:30%"><b style="height:36%"></b></i><small>Sun</small></div>
+    </div>
+    <p class="hint">Light bar: sold. Dark bar: kept. This is last week; Friday and Saturday carry the month.</p>
+  </section>
+  <div class="two">
+  <section style="display:grid;gap:10px">
+    <div class="sec-h"><div><h2>By dish</h2><p>Sorted by what you kept</p></div></div>
+    <div class="card pad-0"><table class="table"><thead><tr><th>Dish</th><th class="n">Sold</th><th class="n">Kept</th></tr></thead><tbody>
+      <tr><td>Jollof rice</td><td class="n">₦168,000</td><td class="n"><b>₦64,960</b> <span class="muted">39%</span></td></tr>
+      <tr><td>Grilled chicken</td><td class="n">₦84,000</td><td class="n"><b>₦40,320</b> <span class="muted">48%</span></td></tr>
+      <tr><td>Fried rice</td><td class="n">₦61,600</td><td class="n"><b>₦26,180</b> <span class="muted">43%</span></td></tr>
+      <tr><td>Moi moi</td><td class="n">₦27,000</td><td class="n"><b>₦13,050</b> <span class="muted">48%</span></td></tr>
+      <tr><td>Party jollof</td><td class="n">₦46,000</td><td class="n"><b>₦6,900</b> <span class="badge warn">15%</span></td></tr>
+      <tr><td>Egusi soup</td><td class="n">₦25,700</td><td class="n absent">cost unknown</td></tr>
+    </tbody></table></div>
+  </section>
+  <section style="display:grid;gap:10px">
+    <div class="sec-h"><div><h2>By day</h2></div><a>Export CSV</a></div>
+    <div class="card pad-0"><table class="table"><thead><tr><th>Day</th><th class="n">Sales</th><th class="n">Sold</th><th class="n">Kept</th></tr></thead><tbody>
+      <tr><td>Mon 12</td><td class="n">9</td><td class="n">₦27,300</td><td class="n">₦9,860</td></tr>
+      <tr><td>Sun 11</td><td class="n">4</td><td class="n">₦11,200</td><td class="n">₦4,030</td></tr>
+      <tr><td>Sat 10</td><td class="n">19</td><td class="n">₦58,400</td><td class="n">₦20,440</td></tr>
+      <tr><td>Fri 9</td><td class="n">21</td><td class="n">₦64,100</td><td class="n">₦22,430</td></tr>
+      <tr><td>Thu 8</td><td class="n">14</td><td class="n">₦41,800</td><td class="n">₦15,050</td></tr>
+    </tbody></table></div>
+    <div class="sec-h"><div><h2>Cancelled sales</h2><p>3 this month · ₦7,900 · all reissued</p></div><a>See <i data-i="next"></i></a></div>
+  </section>
+  </div>
+</main>
+<script src="_shell.js"></script>
+</body></html>

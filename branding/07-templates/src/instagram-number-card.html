@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="render" content="1080x1080">
+<title>Instagram post — the number card</title>
+<link rel="stylesheet" href="../../_brand.css">
+<style>
+  body { width: 1080px; height: 1080px; overflow: hidden; background: #f7f8f6; padding: 80px; display: flex; flex-direction: column; }
+  .top { display: flex; justify-content: space-between; align-items: center; }
+  .top img { height: 56px; }
+  .pill { font: 600 24px/1 var(--font-ui); color: #1f7a52; background: #e8f5ee; border-radius: 999px; padding: 16px 24px; }
+  .dish { margin-top: 90px; font: 600 30px/1 var(--font-ui); color: #66706a; }
+  h1 { font-size: 72px; font-weight: 800; margin-top: 18px; }
+  .rows { margin-top: 56px; display: grid; gap: 22px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #dde3de; padding-bottom: 18px; }
+  .row span { font: 500 32px/1 var(--font-ui); color: #66706a; }
+  .row strong { font: 700 44px/1 var(--font-ui); font-variant-numeric: tabular-nums; }
+  .keep { margin-top: 40px; background: #1f7a52; color: #fff; border-radius: 28px; padding: 44px 48px; display: flex; justify-content: space-between; align-items: center; }
+  .keep span { font: 600 32px/1.2 var(--font-ui); max-width: 420px; }
+  .keep strong { font: 800 84px/1 var(--font-ui); font-variant-numeric: tabular-nums; color: #d4a020; }
+  .foot { margin-top: auto; display: flex; justify-content: space-between; font: 500 24px/1 var(--font-ui); color: #66706a; }
+  .foot b { color: #8a6a0e; font-weight: 600; }
+</style></head>
+<body>
+  <div class="top"><img src="../../03-logo/svg/lockup-horizontal.svg" alt="Menu Master NG"><div class="pill">Example dish</div></div>
+  <div class="dish">One plate of</div>
+  <h1>Jollof rice &amp; chicken</h1>
+  <div class="rows">
+    <div class="row"><span>What it costs you</span><strong class="num">₦1,840</strong></div>
+    <div class="row"><span>What you charge</span><strong class="num">₦3,000</strong></div>
+  </div>
+  <div class="keep"><span>What you keep on every plate</span><strong class="num">₦1,160</strong></div>
+  <div class="foot"><span>Your own receipts, not averages.</span><span><b>Example figures.</b> menumasterng.com</span></div>
+</body></html>

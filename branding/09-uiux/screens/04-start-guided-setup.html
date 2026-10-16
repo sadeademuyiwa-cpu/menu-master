@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Your first dish — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .setup { max-width: 520px; margin: 0 auto; padding: 20px 16px 40px; display: grid; gap: 18px; }
+  .setup .logo { height: 36px; width: auto; }
+  .line { display: grid; grid-template-columns: 1fr 86px 96px; gap: 8px; align-items: end; }
+  .line .input { padding: 0 10px; font-size: 15px; }
+</style></head>
+<body data-section="none">
+<div class="setup">
+  <img class="logo" src="../../03-logo/svg/lockup-horizontal.svg" alt="Menu Master NG">
+  <div class="progress"><div class="bar"><span style="width:66%"></span></div><p class="hint">Step 2 of 3 · the dish you cook most</p></div>
+  <div><h1 style="font-size:26px">What goes into one pot?</h1><p class="hint" style="font-size:15px;margin-top:6px">Use what you really paid at the market. Menu Master will tell you what one plate costs.</p></div>
+  <div class="field"><label>The dish</label><div class="input">Jollof rice</div></div>
+  <div class="grid-2">
+    <div class="field"><label>One pot makes</label><div class="input">20<span class="suf">plates</span></div></div>
+    <div class="field"><label>You sell a plate for</label><div class="input ph"><span class="pre">₦</span>0</div></div>
+  </div>
+  <div class="card" style="display:grid;gap:12px">
+    <div class="sec-h"><div><h2 style="font-size:16px">What you bought for it</h2><p>As you buy it: a bag, a paint, a crate, a derica</p></div></div>
+    <div class="line"><div class="field"><label>Item</label><div class="input">Rice</div></div><div class="field"><label>How much</label><div class="input">1</div></div><div class="field"><label>Unit</label><div class="input select">paint</div></div></div>
+    <div class="field"><label>You paid</label><div class="input"><span class="pre">₦</span>9,500</div></div>
+    <div class="line"><div class="field"><div class="input">Tomato</div></div><div class="field"><div class="input">1</div></div><div class="field"><div class="input select">basket</div></div></div>
+    <div class="field"><div class="input"><span class="pre">₦</span>4,000</div></div>
+    <div class="line"><div class="field"><div class="input ph">Chicken</div></div><div class="field"><div class="input ph">2</div></div><div class="field"><div class="input select">kg</div></div></div>
+    <div class="field"><div class="input ph"><span class="pre">₦</span>what you paid</div></div>
+    <a class="btn ghost" style="justify-self:start"><i data-i="plus"></i> Add another item</a>
+  </div>
+  <div class="notice info"><i data-i="info"></i><span>A unit we don't know (paint, derica, mudu) is fine: you'll tell us how much of it goes into the pot on the next step.</span></div>
+  <div class="actions row2"><a class="btn secondary"><i data-i="back"></i> Back</a><a class="btn primary">See my cost <i data-i="arrow"></i></a></div>
+</div>
+<script src="_shell.js"></script>
+</body></html>

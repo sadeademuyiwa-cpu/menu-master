@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="render" content="1200x630">
+<title>Open Graph / link preview image</title>
+<link rel="stylesheet" href="../../_brand.css">
+<style>
+  body { width: 1200px; height: 630px; overflow: hidden; display: grid; grid-template-columns: 1.15fr .85fr; background: #f7f8f6; }
+  .left { padding: 64px 48px 64px 72px; display: flex; flex-direction: column; }
+  .left img { height: 48px; width: auto; align-self: flex-start; }
+  h1 { font-size: 60px; font-weight: 800; margin-top: 56px; }
+  h1 em { font-style: normal; color: #1f7a52; }
+  p { font-size: 24px; color: #66706a; margin: 22px 0 0; max-width: 560px; }
+  .trust { margin-top: auto; display: flex; gap: 28px; font: 600 20px/1 var(--font-ui); color: #1f7a52; }
+  .right { position: relative; background: url('../../06-imagery/samples/pexels-17952748.jpg') center/cover; }
+  .right::before { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, #f7f8f6 0, rgb(247 248 246 / 0) 30%); }
+  .chip { position: absolute; left: 32px; bottom: 48px; background: #fff; border-radius: 20px; padding: 20px 24px; box-shadow: 0 20px 40px -20px rgb(0 0 0 / .4); }
+  .chip .eyebrow { margin-bottom: 6px; }
+  .chip strong { font: 700 36px/1 var(--font-ui); font-variant-numeric: tabular-nums; color: #1f7a52; }
+  .chip small { display: block; font: 500 15px/1.2 var(--font-ui); color: #66706a; margin-top: 6px; }
+</style></head>
+<body>
+  <div class="left">
+    <img src="../../03-logo/svg/lockup-horizontal.svg" alt="Menu Master NG">
+    <h1>Know what every plate <em>really costs.</em></h1>
+    <p>Cost, price and profit for Nigerian food businesses, from your own market receipts. On your phone.</p>
+    <div class="trust"><span>✓ 14 days free</span><span>✓ No card needed</span><span>✓ Any phone</span></div>
+  </div>
+  <div class="right"><div class="chip"><div class="eyebrow">Profit per plate</div><strong class="num">₦1,160</strong><small>Example figures</small></div></div>
+</body></html>

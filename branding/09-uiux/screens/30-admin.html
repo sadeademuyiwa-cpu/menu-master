@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="widths" content="1280">
+<title>Administration — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>.two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }</style>
+</head>
+<body data-section="more" data-business="Menu Master NG" data-fab="0">
+<main class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center"><a class="back"><i data-i="back"></i> More</a><span class="badge gold"><i data-i="admin"></i> Platform admin · you only</span></div>
+  <div class="page-h"><h1>Administration</h1><p>The platform, not a business. Read-only figures from production.</p></div>
+  <div class="stats">
+    <div class="stat"><span class="eyebrow">Signups</span><strong class="num">212</strong><small>+18 this week</small></div>
+    <div class="stat good"><span class="eyebrow">Paying</span><strong class="num">38</strong><small>₦262,500 / month</small></div>
+    <div class="stat"><span class="eyebrow">Founder slots</span><strong class="num">97 left</strong><small>of 100</small></div>
+    <div class="stat warn"><span class="eyebrow">Alerts</span><strong class="num">2</strong><small>1 webhook retry · 1 failed charge</small></div>
+  </div>
+  <div class="tiles">
+    <a class="tile"><span class="ic"><i data-i="people"></i></span><span><b>Signups</b><small>Who joined, activation</small></span></a>
+    <a class="tile"><span class="ic"><i data-i="card"></i></span><span><b>Subscriptions</b><small>Status, renewals</small></span></a>
+    <a class="tile"><span class="ic"><i data-i="receipt"></i></span><span><b>Billing events</b><small>Paystack, reconciled</small></span></a>
+    <a class="tile"><span class="ic"><i data-i="bell"></i></span><span><b>Alerts</b><small>Mailer, retries</small></span></a>
+    <a class="tile"><span class="ic"><i data-i="site"></i></span><span><b>Website</b><small>Logo, hero image, WhatsApp, company details</small></span></a>
+  </div>
+  <div class="two">
+    <section style="display:grid;gap:10px"><div class="sec-h"><h2>Latest signups</h2></div>
+      <div class="card pad-0"><table class="table"><thead><tr><th>Business</th><th>Kind</th><th>Signed up</th><th>Reached</th></tr></thead><tbody>
+        <tr><td>Mama Nkechi Foods</td><td>Buka</td><td>Today</td><td><span class="badge good">First cost</span></td></tr>
+        <tr><td>Kemi Bakes</td><td>Bakery</td><td>Yesterday</td><td><span class="badge good">Priced a dish</span></td></tr>
+        <tr><td>Tunde Catering</td><td>Catering</td><td>Sat</td><td><span class="badge warn">Signed up only</span></td></tr>
+        <tr><td>Chop Life Kitchen</td><td>Buka</td><td>Fri</td><td><span class="badge good">First sale</span></td></tr>
+      </tbody></table></div></section>
+    <section style="display:grid;gap:10px"><div class="sec-h"><h2>Needs you</h2></div>
+      <div class="card pad-0 list">
+        <div class="row"><div class="t">Webhook retry pending <span class="badge warn">3rd attempt</span></div><div class="m">charge.success for sub 0a9f… · Paystack will retry in 2 h</div><div class="r"><i data-i="next"></i></div></div>
+        <div class="row"><div class="t">Failed renewal <span class="badge bad">Card declined</span></div><div class="m">Chop Life Kitchen · grace period ends 15 Oct · owner emailed</div><div class="r"><i data-i="next"></i></div></div>
+      </div></section>
+  </div>
+</main>
+<script src="_shell.js"></script>
+</body></html>

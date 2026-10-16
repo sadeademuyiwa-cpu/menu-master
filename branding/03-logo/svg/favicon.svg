@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32.0 32.0" width="32" height="32" role="img" aria-label="Menu Master NG">
+  <title>Menu Master NG</title>
+  <rect width="32" height="32" rx="7" fill="#0F5E3C"/>
+  <g transform="translate(4.08 6.30) scale(0.03846) translate(-230 -218)">
+    <g fill="#D4A020">
+      <path d="M400 330a14 14 0 0 1 14-14h52a14 14 0 0 1 14 14v80h-80z"/>
+      <path d="M500 282a14 14 0 0 1 14-14h52a14 14 0 0 1 14 14v98l-40 75l-40-75z"/>
+      <path d="M600 232a14 14 0 0 1 14-14h52a14 14 0 0 1 14 14v178h-80z"/>
+    </g>
+    <g fill="#FFFFFF">
+      <path fill-rule="evenodd" d="M230 405h620a310 290 0 0 1-620 0z M292 432h128v191a250 232 0 0 1-128-191z M788 432h-128v191a250 232 0 0 0 128-191z M495 405l45 80l45-80v245h-90z"/>
+      <path d="M420 690V405h75l45 80l45-80h75v285h-75V540l-45 70l-45-70v150z"/>
+      <rect x="395" y="700" width="290" height="38" rx="14"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Feedback states — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>.demo { display: grid; gap: 10px; } .demo h2 { font-size: 15px; } .toast.inline, .sheet.inline { position: static; } .sheet.inline { border-radius: 22px; border: 1px solid var(--mm-line); }</style>
+</head>
+<body data-section="recipes" data-business="Ada Kitchen" data-fab="0">
+<main class="page">
+  <div class="page-h"><h1>Feedback states</h1><p>What every submit, wait, refusal and empty page looks like</p></div>
+  <section class="demo"><h2>1 · Busy button (every submit)</h2><a class="btn primary busy full">Saving…</a><p class="hint">Disabled, spinner, label changes. Never a silent tap.</p></section>
+  <section class="demo"><h2>2 · Toast on every outcome</h2>
+    <div class="toast inline"><i data-i="check" class="ok"></i><span><b>Purchase saved.</b> 4 dishes recosted.</span></div>
+    <div class="toast inline" style="background:var(--mm-bad)"><i data-i="alert"></i><span><b>That didn't save.</b> Check your connection and try again.</span></div>
+    <div class="toast inline" style="background:var(--mm-warn)"><i data-i="info"></i><span><b>Not allowed.</b> Only the owner can change prices.</span></div>
+  </section>
+  <section class="demo"><h2>3 · Loading a read-only page (skeleton)</h2>
+    <div class="card" style="display:grid;gap:12px"><div class="skel" style="width:40%;height:22px"></div><div class="skel" style="width:70%"></div><div class="stats"><div class="stat"><div class="skel" style="width:50%;height:10px"></div><div class="skel" style="width:70%;height:22px"></div></div><div class="stat"><div class="skel" style="width:50%;height:10px"></div><div class="skel" style="width:70%;height:22px"></div></div></div></div>
+    <p class="hint">A 2px progress bar also runs along the top of the header on every link and submit.</p>
+  </section>
+  <section class="demo"><h2>4 · Confirm before anything irreversible (bottom sheet)</h2>
+    <div class="sheet inline">
+      <h3 style="font-size:18px">Cancel sale #0229?</h3>
+      <p class="hint" style="font-size:14.5px">It stays on record as cancelled. You can reissue it with the right lines straight after.</p>
+      <div class="field"><label>Why? <span class="muted" style="font-weight:400">(optional)</span></label><div class="input ph">Wrong quantity</div></div>
+      <div class="actions row2"><a class="btn secondary">Keep it</a><a class="btn danger">Cancel sale</a></div>
+    </div>
+  </section>
+  <section class="demo"><h2>5 · Empty page, first visit</h2>
+    <div class="empty"><span class="ill"><i data-i="purchases"></i></span><h3>No purchases yet</h3><p>Record what you bought at the market and every dish that uses it gets its cost.</p><a class="btn primary"><i data-i="plus"></i> Record a purchase</a></div>
+  </section>
+  <section class="demo"><h2>6 · A missing number is a word</h2>
+    <div class="card kv"><div><span class="k">Cost per plate</span><span class="v absent">not known yet</span></div><div><span class="k">Suggested price</span><span class="v absent">needs the cost</span></div><div><span class="k">You keep</span><span class="v absent">—</span></div></div>
+    <p class="hint">Never ₦0.00. Zero is a real number and would be wrong.</p>
+  </section>
+  <section class="demo"><h2>7 · Offline</h2>
+    <div class="notice warn"><i data-i="alert"></i><span><b>You're offline.</b> You can read everything. Saving will work again when you're back on data.</span></div>
+  </section>
+</main>
+<script src="_shell.js"></script>
+</body></html>

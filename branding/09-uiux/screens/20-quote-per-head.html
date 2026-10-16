@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Price per head — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>.ph-line { display: grid; grid-template-columns: 1fr 90px; gap: 8px; align-items: center; } .ph-line .input { padding: 0 10px; }</style>
+</head>
+<body data-section="more" data-business="Tunde Catering" data-fab="0">
+<main class="page">
+  <a class="back"><i data-i="back"></i> More</a>
+  <div class="page-h"><h1>Price per head</h1><p>For an event or a party. From your costed dishes, nothing guessed.</p></div>
+  <section class="card" style="display:grid;gap:12px">
+    <div class="grid-2"><div class="field"><label>Guests</label><div class="input">100</div></div><div class="field"><label>You want to keep</label><div class="input">40<span class="suf">%</span></div></div></div>
+    <div class="field"><label>Find a dish</label><div class="input ph"><i data-i="search" style="margin-right:8px"></i>Find a dish…</div></div>
+  </section>
+  <section class="card" style="display:grid;gap:10px">
+    <div class="sec-h"><div><h2 style="font-size:16px">What each guest gets</h2></div></div>
+    <div class="ph-line"><div><b style="font:600 15px/1.2 var(--font-ui)">Party jollof</b><br><small class="muted">₦850 a plate</small></div><div class="input">1<span class="suf">plate</span></div></div>
+    <div class="ph-line"><div><b style="font:600 15px/1.2 var(--font-ui)">Grilled chicken</b><br><small class="muted">₦780 a piece</small></div><div class="input">1<span class="suf">pc</span></div></div>
+    <div class="ph-line"><div><b style="font:600 15px/1.2 var(--font-ui)">Moi moi</b><br><small class="muted">₦310 a wrap</small></div><div class="input">1<span class="suf">wrap</span></div></div>
+    <div class="ph-line"><div><b style="font:600 15px/1.2 var(--font-ui)">Chapman</b> <span class="badge bad">Incomplete</span><br><small class="muted">no price for grenadine</small></div><div class="input">1<span class="suf">cup</span></div></div>
+  </section>
+  <section class="card kv">
+    <div><span class="k">Cost per head (3 of 4 dishes)</span><span class="v">₦1,940<small>Chapman not counted</small></span></div>
+    <div><span class="k">Serving, packs &amp; transport</span><span class="v" style="color:var(--mm-accent)">+ add</span></div>
+    <div class="total"><span class="k">Charge per head to keep 40%</span><span class="v absent" style="font-weight:600">not until Chapman is costed</span></div>
+    <div><span class="k">For 100 guests</span><span class="v absent">—</span></div>
+  </section>
+  <div class="notice bad"><i data-i="alert"></i><span>A quote with a hole in it is worse than no quote. Cost Chapman, or remove it, and the figures appear.</span></div>
+  <div class="actions row2"><a class="btn secondary">Remove Chapman</a><a class="btn primary">Cost Chapman</a></div>
+</main>
+<script src="_shell.js"></script>
+</body></html>

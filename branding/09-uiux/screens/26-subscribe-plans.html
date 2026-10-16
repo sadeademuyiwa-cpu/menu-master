@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Choose your plan — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .plan { display: grid; gap: 12px; }
+  .plan.hi { border-color: var(--mm-accent); box-shadow: 0 0 0 3px var(--mm-accent-soft); }
+  .price { font: 800 32px/1 var(--font-ui); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .price small { font: 500 14px/1 var(--font-ui); color: var(--mm-muted); }
+  .was { color: var(--mm-muted); text-decoration: line-through; font-weight: 500; font-size: 16px; margin-left: 6px; }
+  .plan ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14.5px; }
+  .plan li { display: flex; gap: 8px; } .plan li svg { color: var(--mm-accent); margin-top: 3px; width: 16px; height: 16px; }
+</style></head>
+<body data-section="more" data-business="Ada Kitchen" data-fab="0">
+<main class="page">
+  <a class="back"><i data-i="back"></i> More</a>
+  <div class="page-h"><h1>Choose your plan</h1><p>Monthly billing in naira. Cancel whenever you like.</p></div>
+  <div class="notice gold"><i data-i="star"></i><span><b>Trial: 13 days left.</b> Nothing is deleted when it ends; you just can't add new records until you choose a plan.</span></div>
+  <section class="card plan">
+    <div><span class="badge neutral">Costing</span></div>
+    <div class="price num">₦5,000<small> / month</small><span class="was">₦7,500</span></div>
+    <ul><li><i data-i="check"></i> What every dish really costs, from what you paid</li><li><i data-i="check"></i> Prices update every dish when you record a purchase</li><li><i data-i="check"></i> Suggested selling price and your profit per plate</li><li><i data-i="check"></i> Sizes, packaging, labour and monthly bills</li></ul>
+    <a class="btn secondary full">Choose Costing</a>
+  </section>
+  <section class="card plan hi">
+    <div><span class="badge gold"><i data-i="star"></i> Founding price · 97 places left</span></div>
+    <div class="price num">₦7,500<small> / month</small><span class="was">₦12,000</span></div>
+    <ul><li><i data-i="check"></i> Everything in Costing</li><li><i data-i="check"></i> Take orders and record sales in a few taps</li><li><i data-i="check"></i> WhatsApp receipts for your customers</li><li><i data-i="check"></i> Customers, payments and what each one is worth</li><li><i data-i="check"></i> Daily takings, profit and reports</li></ul>
+    <a class="btn primary full">Choose Costing + Sales</a>
+    <p class="hint" style="text-align:center">You keep the founding price for as long as your subscription stays active.</p>
+  </section>
+  <p class="hint" style="display:flex;gap:8px;align-items:center"><i data-i="lock"></i> Payment is handled by Paystack. Menu Master never sees or stores your card details.</p>
+  <section style="display:grid;gap:8px">
+    <div class="sec-h"><h2>Questions</h2></div>
+    <div class="card pad-0 list">
+      <div class="row"><div class="t">What happens when my free trial ends?</div><div class="r"><i data-i="next"></i></div></div>
+      <div class="row"><div class="t">Can I cancel?</div><div class="r"><i data-i="next"></i></div></div>
+      <div class="row"><div class="t">Can I change plan later?</div><div class="r"><i data-i="next"></i></div></div>
+      <div class="row"><div class="t">What is the founding price?</div><div class="r"><i data-i="next"></i></div></div>
+    </div>
+  </section>
+  <p class="hint">Example prices; the live page reads them from the plans table.</p>
+</main>
+<script src="_shell.js"></script>
+</body></html>

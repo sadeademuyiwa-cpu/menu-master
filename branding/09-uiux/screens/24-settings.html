@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wages & running costs — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+</head>
+<body data-section="more" data-business="Ada Kitchen" data-fab="0">
+<main class="page">
+  <a class="back"><i data-i="back"></i> More</a>
+  <div class="page-h"><h1>Your business settings</h1><p>Name, wages, monthly bills and your target</p></div>
+  <section class="card" style="display:grid;gap:12px">
+    <div class="sec-h"><div><h2 style="font-size:16px">Business</h2><p>Its name is on your receipts and at the top of every page</p></div></div>
+    <div class="field"><label>Name</label><div class="input">Ada Kitchen</div></div>
+    <div class="field"><label>What kind of business</label><div class="input select">Buka / canteen</div></div>
+    <a class="btn secondary" style="justify-self:start">Save</a>
+  </section>
+  <section class="card" style="display:grid;gap:12px">
+    <div class="sec-h"><div><h2 style="font-size:16px">Paid work</h2><p>What you pay per hour for cooking, prep or decorating. Leave blank if you don't know it yet: the dish is reported as incomplete, never as if the work were free.</p></div></div>
+    <div class="kv"><div><span class="k">Cooking</span><span class="v">₦1,500 / hr</span></div><div><span class="k">Prep (washing, cutting)</span><span class="v">₦1,000 / hr</span></div></div>
+    <a class="btn ghost" style="justify-self:start"><i data-i="plus"></i> Add a kind of work</a>
+  </section>
+  <section class="card" style="display:grid;gap:12px">
+    <div class="sec-h"><div><h2 style="font-size:16px">Monthly bills</h2><p>Rent, gas, light, airtime: the bills you pay whether you cook or not. Spread over what you make in a month, so each plate carries its share.</p></div></div>
+    <div class="grid-2"><div class="field"><label>You make in a month</label><div class="input">3,200</div></div><div class="field"><label>Measured in</label><div class="input select">plates</div></div></div>
+    <div class="kv"><div><span class="k">Rent</span><span class="v">₦80,000<small>₦25 a plate</small></span></div><div><span class="k">Gas</span><span class="v">₦29,000<small>₦9 a plate</small></span></div><div><span class="k">Electricity</span><span class="v">₦15,000<small>₦5 a plate</small></span></div><div class="total"><span class="k">Per plate</span><span class="v">₦39</span></div></div>
+    <a class="btn ghost" style="justify-self:start"><i data-i="plus"></i> Add a bill</a>
+  </section>
+  <section class="card" style="display:grid;gap:12px">
+    <div class="sec-h"><div><h2 style="font-size:16px">Your target</h2><p>What you aim to keep from each sale, and how suggested prices are rounded</p></div></div>
+    <div class="grid-2"><div class="field"><label>Target margin</label><div class="input">40<span class="suf">%</span></div></div><div class="field"><label>Round prices up to</label><div class="input"><span class="pre">₦</span>50</div></div></div>
+    <div class="field"><label>Use purchases from the last</label><div class="input">90<span class="suf">days</span></div><p class="hint">Older purchases stop counting toward an ingredient's price.</p></div>
+    <a class="btn primary" style="justify-self:start">Save</a>
+  </section>
+</main>
+<script src="_shell.js"></script>
+</body></html>

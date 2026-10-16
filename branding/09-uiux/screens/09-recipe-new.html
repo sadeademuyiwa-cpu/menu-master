@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>New dish — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+</head>
+<body data-section="recipes" data-business="Ada Kitchen" data-fab="0">
+<main class="page">
+  <a class="back"><i data-i="back"></i> Recipes</a>
+  <div class="page-h"><h1>New dish</h1><p>Name it and say how much one batch makes. Ingredients come next.</p></div>
+  <section class="card" style="display:grid;gap:14px">
+    <div class="field"><label>What do you call it?</label><div class="input focus">Egusi soup</div></div>
+    <div class="field"><label>One batch makes</label>
+      <div class="grid-2"><div class="input">5</div><div class="input select">litres</div></div>
+      <p class="hint">After cooking, not before. Evaporation is why 6 litres of water becomes 5 of soup.</p></div>
+    <div class="field"><label>You sell it by the</label>
+      <div class="seg"><span>plate</span><span class="on">litre</span><span>piece</span><span>pack</span></div></div>
+    <div class="field"><label>One portion is</label><div class="input">1<span class="suf">litre</span></div><p class="hint">So one batch is about 5 portions.</p></div>
+  </section>
+  <section class="card" style="display:grid;gap:12px">
+    <div class="sec-h"><div><h2 style="font-size:16px">Time it takes <span class="muted" style="font-weight:400">(optional)</span></h2><p>Cooking and prep for one batch</p></div></div>
+    <div class="grid-2"><div class="input ph">1<span class="suf">hours</span></div><div class="input select">Cooking · ₦1,500/hr</div></div>
+    <p class="hint">Rates live under Wages &amp; running costs. Leave blank if nobody is paid for this.</p>
+  </section>
+  <label class="check"><i class="on"><i data-i="check"></i></i><span>This is also used inside other dishes (a stew base, a dough)</span></label>
+  <div class="sticky-cta"><a class="btn primary full">Save and add ingredients <i data-i="arrow"></i></a></div>
+</main>
+<script src="_shell.js"></script>
+</body></html>

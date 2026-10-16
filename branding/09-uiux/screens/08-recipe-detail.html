@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="widths" content="390,1280">
+<title>Dish — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .hero3 { display: grid; gap: 0; }
+  .hero3 > div { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--mm-line); }
+  .hero3 > div:last-child { border: 0; }
+  .hero3 strong { font: 700 28px/1 var(--font-ui); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .hero3 small { display: block; text-align: right; color: var(--mm-muted); font-size: 12.5px; margin-top: 4px; }
+  .try { display: grid; gap: 10px; }
+  .try .input { font: 600 20px/1 var(--font-ui); }
+  @media (min-width: 1024px) { .two { display: grid; grid-template-columns: 1.1fr .9fr; gap: 18px; align-items: start; } }
+</style></head>
+<body data-section="recipes" data-business="Ada Kitchen" data-fab="0">
+<main class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center"><a class="back"><i data-i="back"></i> Recipes</a><a class="btn ghost"><i data-i="edit"></i> Edit</a></div>
+  <div class="page-h"><h1>Party jollof &amp; chicken</h1><p>One pot makes 4.5 kg · one plate is 500 g · about 9 plates</p></div>
+  <div class="two">
+  <div style="display:grid;gap:18px">
+    <section class="card hero3">
+      <div><span class="eyebrow">Cost per plate</span><div><strong class="num">₦850</strong><small>for 500 g · updated today</small></div></div>
+      <div><span class="eyebrow">You sell it for</span><div><strong class="num">₦1,000</strong><small>per plate</small></div></div>
+      <div><span class="eyebrow">You keep</span><div><strong class="num" style="color:var(--mm-warn)">₦150</strong><small>15% · your target is 40%</small></div></div>
+    </section>
+    <div class="notice warn"><i data-i="alert"></i><span><b>Below your target.</b> Charging <b>₦1,450</b> would reach 40%. Try a price below to see what you would keep.</span></div>
+    <section class="card try">
+      <div class="sec-h"><div><h2 style="font-size:16px">Try a price</h2><p>Nothing changes until you save</p></div></div>
+      <div class="input focus"><span class="pre">₦</span>1,300</div>
+      <div class="inset" style="display:flex;justify-content:space-between;align-items:baseline"><span>At ₦1,300 you keep</span><strong class="num" style="font-size:20px;color:var(--mm-accent-strong)">₦450 <small style="font-weight:500;color:var(--mm-muted)">35%</small></strong></div>
+      <a class="btn primary full">Save ₦1,300 as the price</a>
+    </section>
+  </div>
+  <div style="display:grid;gap:18px">
+    <section style="display:grid;gap:10px">
+      <div class="sec-h"><div><h2>What goes in</h2><p>Per pot, from your own purchases</p></div><a>Add <i data-i="plus"></i></a></div>
+      <div class="card pad-0 list">
+        <div class="row"><div class="t">Ofada rice <span class="badge good">Costed</span></div><div class="m">4,500 g · ₦1.70 per g · bought 50 kg for ₦85,000 on 30 Aug</div><div class="r"><span>₦7,650</span></div></div>
+        <div class="row"><div class="t">Chicken <span class="badge good">Costed</span></div><div class="m">2 kg · ₦2,800 per kg · 70% usable after cleaning</div><div class="r"><span>₦8,000</span></div></div>
+        <div class="row"><div class="t">Pepper stew (base) <span class="badge neutral">A dish you make</span></div><div class="m">1.5 litres · ₦1,120 per litre</div><div class="r"><span>₦1,680</span></div></div>
+        <div class="row"><div class="t">Vegetable oil <span class="badge good">Costed</span></div><div class="m">500 ml · ₦2.40 per ml</div><div class="r"><span>₦1,200</span></div></div>
+        <div class="row"><div class="t">Gas, packaging &amp; cooking time</div><div class="m">From your settings · 45 min at ₦1,500/hr</div><div class="r"><span>₦1,625</span></div></div>
+        <div class="row" style="background:var(--mm-surface-2)"><div class="t">One pot</div><div class="m">9 plates of 500 g</div><div class="r"><span>₦7,655</span><small>₦850 a plate</small></div></div>
+      </div>
+    </section>
+    <section style="display:grid;gap:10px">
+      <div class="sec-h"><div><h2>How you sell it</h2><p>By the plate. Add a size to sell it other ways</p></div><a>Sizes <i data-i="next"></i></a></div>
+      <div class="card pad-0 list">
+        <div class="row"><div class="t">1 plate, 500 g</div><div class="m">Costs ₦850 · you keep ₦150</div><div class="r"><span>₦1,000</span></div></div>
+        <div class="row"><div class="t">Party tray, 20 plates <span class="badge neutral">No price</span></div><div class="m">Costs ₦17,000 · with tray ₦17,600</div><div class="r"><span class="absent">set a price</span></div></div>
+      </div>
+    </section>
+    <p class="hint">This cost covers the ingredients, packaging and labour you have entered. Rent and electricity are spread from your monthly bills.</p>
+  </div>
+  </div>
+</main>
+<script src="_shell.js"></script>
+</body></html>

@@ -1,0 +1,50 @@
+/* Menu Master NG — colour tokens.
+   The first block mirrors web/src/app/globals.css exactly; the second adds
+   the brand's colours from the logo. Add the second block to globals.css
+   when rolling out; never rename the first. */
+
+:root {
+  /* product (live) */
+  --mm-bg: #f7f8f6;
+  --mm-fg: #171b18;
+  --mm-muted: #66706a;
+  --mm-line: #dde3de;
+  --mm-accent: #1f7a52;
+  --mm-accent-strong: #0f5e3c;   /* was #17633f; now the logo's Forest Green */
+  --mm-accent-soft: #e8f5ee;
+  --mm-warn: #a06300;
+  --mm-warn-soft: #fff6df;
+  --mm-bad: #b42318;
+  --mm-bad-soft: #fdecea;
+  --mm-surface: #ffffff;
+  --mm-surface-2: #f0f3f0;
+
+  /* brand additions (from the logo), shipped in globals.css on 16 Oct 2026 */
+  --mm-forest: #0f5e3c;      /* logo green: dark blocks, headings, hover */
+  --mm-gold: #d4a020;        /* logo gold: fills, display text 24px+, badges */
+  --mm-gold-text: #8a6a0e;   /* gold for body-size text (AA on white) */
+  --mm-gold-soft: #fbf3dc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mm-bg: #101411;
+    --mm-fg: #f2f6f3;
+    --mm-muted: #98a39d;
+    --mm-line: #29322c;
+    --mm-accent: #5ac58f;
+    --mm-accent-strong: #70d8a4;
+    --mm-accent-soft: #173426;
+    --mm-warn: #e3b14e;
+    --mm-warn-soft: #33290f;
+    --mm-bad: #f08c7d;
+    --mm-bad-soft: #3b1512;
+    --mm-surface: #171d19;
+    --mm-surface-2: #1d251f;
+
+    --mm-forest: #0f5e3c;
+    --mm-gold: #d4a020;
+    --mm-gold-text: #e6b94a;
+    --mm-gold-soft: #2e2510;
+  }
+}

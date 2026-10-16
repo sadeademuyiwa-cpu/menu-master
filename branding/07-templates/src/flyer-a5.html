@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="render" content="874x1240@2">
+<title>A5 flyer for markets and food fairs</title>
+<link rel="stylesheet" href="../../_brand.css">
+<style>
+  body { width: 874px; height: 1240px; overflow: hidden; background: #fff; display: flex; flex-direction: column; }
+  .hero { position: relative; height: 520px; background: url('../../06-imagery/samples/pexels-34772940.jpg') center/cover; }
+  .hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgb(15 94 60 / .1), rgb(15 94 60 / .85)); }
+  .hero img { position: absolute; top: 40px; left: 48px; height: 48px; z-index: 1; }
+  .hero h1 { position: absolute; left: 48px; right: 48px; bottom: 40px; z-index: 1; color: #fff; font-size: 56px; font-weight: 800; line-height: 1; }
+  .hero h1 em { font-style: normal; color: #d4a020; }
+  .body { padding: 40px 48px; display: flex; flex-direction: column; flex: 1; }
+  .lead { font-size: 22px; line-height: 1.4; color: #171b18; margin: 0; }
+  ol { margin: 28px 0 0; padding: 0; list-style: none; display: grid; gap: 16px; }
+  li { display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; }
+  li b { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 999px; background: #e8f5ee; color: #1f7a52; font: 800 20px/1 var(--font-display); }
+  li strong { display: block; font: 700 20px/1.3 var(--font-ui); }
+  li span { font: 400 17px/1.4 var(--font-ui); color: #66706a; }
+  .offer { margin-top: auto; display: grid; grid-template-columns: 1fr 180px; gap: 20px; align-items: center; background: #0f5e3c; color: #fff; border-radius: 20px; padding: 24px 28px; }
+  .offer strong { display: block; font: 800 30px/1.1 var(--font-display); letter-spacing: -.02em; }
+  .offer span { font: 500 17px/1.4 var(--font-ui); color: rgb(255 255 255 / .85); }
+  .qr { width: 180px; height: 180px; border-radius: 14px; background: #fff; display: grid; place-items: center; color: #66706a; font: 600 13px/1.3 var(--font-ui); text-align: center; padding: 12px; }
+  .foot { margin-top: 20px; display: flex; justify-content: space-between; font: 600 15px/1 var(--font-ui); color: #66706a; }
+</style></head>
+<body>
+  <div class="hero">
+    <img src="../../03-logo/svg/lockup-horizontal-reversed.svg" alt="Menu Master NG">
+    <h1>What does one plate <em>really</em> cost you?</h1>
+  </div>
+  <div class="body">
+    <p class="lead">Menu Master turns your market receipts into the true cost of every dish, the right price, and the profit on every sale. On your phone.</p>
+    <ol>
+      <li><b>1</b><div><strong>Record what you bought</strong><span>A bag of rice, a crate of eggs, a paint of pepper, the way you buy them.</span></div></li>
+      <li><b>2</b><div><strong>Build your dish</strong><span>Add what goes into it. See the cost of one plate from your own prices.</span></div></li>
+      <li><b>3</b><div><strong>Price it and sell</strong><span>See your profit at any price before you change the board. Send receipts on WhatsApp.</span></div></li>
+    </ol>
+    <div class="offer">
+      <div><strong>14 days free. No card needed.</strong><span>Founding price for the first 100 businesses. Works on any phone.</span></div>
+      <div class="qr">QR code to<br>menumasterng.com<br>(paste here)</div>
+    </div>
+    <div class="foot"><span>menumasterng.com</span><span>WhatsApp +234 000 000 0000</span></div>
+  </div>
+</body></html>

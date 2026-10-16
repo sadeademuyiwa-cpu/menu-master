@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Menu Master NG — Brand Guidelines</title>
+<link rel="stylesheet" href="../_brand.css">
+<style>
+  body { background: #fff; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px 80px; }
+  header.top { background: var(--mm-forest); color: #fff; padding: 56px 20px; }
+  header.top .in { max-width: 1080px; margin: 0 auto; display: grid; gap: 18px; }
+  header.top img { height: 170px; width: auto; }
+  header.top h1 { font-size: 40px; font-weight: 800; }
+  header.top p { margin: 0; color: rgb(255 255 255 / .85); font-size: 18px; max-width: 60ch; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 18px 0; border-bottom: 1px solid var(--mm-line); font: 600 14px/1 var(--font-ui); position: sticky; top: 0; background: #fff; z-index: 5; }
+  nav.toc a { color: var(--mm-muted); }
+  section { padding: 44px 0; border-bottom: 1px solid var(--mm-line); display: grid; gap: 18px; }
+  section h2 { font-size: 28px; font-weight: 800; }
+  section h2 small { display: block; font: 600 12px/1 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--mm-gold-text); margin-bottom: 8px; }
+  section p { margin: 0; max-width: 70ch; }
+  .g2 { display: grid; gap: 16px; } .g3 { display: grid; gap: 16px; } .g4 { display: grid; gap: 12px; }
+  @media (min-width: 760px) { .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); } }
+  .tile { border: 1px solid var(--mm-line); border-radius: 16px; padding: 18px; background: #fff; }
+  .tile h3 { font: 700 16px/1.3 var(--font-ui); margin-bottom: 6px; }
+  .tile p { font-size: 14.5px; color: var(--mm-muted); }
+  .logo-box { display: grid; place-items: center; min-height: 160px; border-radius: 16px; border: 1px solid var(--mm-line); padding: 24px; }
+  .logo-box img { max-width: 100%; max-height: 120px; }
+  .logo-box.green { background: var(--mm-forest); } .logo-box.ink { background: #171b18; } .logo-box.photo { background: url('../06-imagery/samples/pexels-36707708.jpg') center/cover; position: relative; }
+  .logo-box.photo::before { content: ''; position: absolute; inset: 0; background: rgb(15 94 60 / .75); border-radius: 16px; } .logo-box.photo img { position: relative; }
+  .cap { font: 600 13px/1.3 var(--font-ui); color: var(--mm-muted); margin-top: 8px; }
+  .sw { border-radius: 14px; overflow: hidden; border: 1px solid var(--mm-line); }
+  .sw .c { height: 84px; } .sw .t { padding: 10px 12px; font: 600 13px/1.4 var(--font-ui); } .sw .t small { display: block; color: var(--mm-muted); font-weight: 500; font-family: ui-monospace, monospace; }
+  .type-sample { display: grid; gap: 10px; }
+  .type-sample .d { font: 800 48px/1 var(--font-display); letter-spacing: -.02em; }
+  .type-sample .h { font: 700 26px/1.1 var(--font-display); letter-spacing: -.02em; }
+  .type-sample .b { font: 400 16px/1.5 var(--font-ui); }
+  .type-sample .n { font: 700 34px/1 var(--font-ui); font-variant-numeric: tabular-nums; }
+  .dont { border-color: color-mix(in srgb, var(--mm-bad) 40%, transparent); } .dont h3 { color: var(--mm-bad); }
+  .do h3 { color: var(--mm-accent-strong); }
+  .voice td { vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--mm-line); font-size: 14.5px; }
+  .voice th { text-align: left; padding: 8px 12px; font: 600 11px/1 var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--mm-muted); background: var(--mm-surface-2); }
+  table { width: 100%; border-collapse: collapse; }
+  .photos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  @media (min-width: 760px) { .photos { grid-template-columns: repeat(4, 1fr); } }
+  .photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; display: block; }
+  .shots { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; }
+  .shots img { width: 220px; border-radius: 18px; border: 1px solid var(--mm-line); flex: none; }
+  code { font-family: ui-monospace, monospace; font-size: 13px; background: var(--mm-surface-2); padding: 2px 6px; border-radius: 6px; }
+</style></head>
+<body>
+<header class="top"><div class="in">
+  <img src="../03-logo/svg/lockup-stacked-reversed.svg" alt="Menu Master NG">
+  <h1>Brand guidelines</h1>
+  <p>How Menu Master NG looks and sounds, on one page. For anyone making a screen, a post, a flyer or a sentence in the product. Version 1.0 · 12 October 2026.</p>
+</div></header>
+<div class="wrap">
+<nav class="toc"><a href="#idea">The idea</a><a href="#logo">Logo</a><a href="#colour">Colour</a><a href="#type">Type</a><a href="#voice">Voice</a><a href="#imagery">Imagery</a><a href="#product">Product</a><a href="#dont">Don't</a></nav>
+
+<section id="idea">
+  <h2><small>01</small>The idea</h2>
+  <p><b>Nigerian food businesses should never lose money without knowing it.</b> Menu Master turns an owner's own market receipts into the true cost of every dish, the right price, and the profit on every sale. On a phone, in plain language, from their numbers and nobody else's.</p>
+  <div class="g3">
+    <div class="tile"><h3>Positioning</h3><p>The money-truth app for Nigerian food businesses.</p></div>
+    <div class="tile"><h3>Brand line</h3><p>Know your cost. Know your price. Know your profit.</p></div>
+    <div class="tile"><h3>Personality</h3><p>The sharp, warm friend who used to work at a bank and now runs her own kitchen. Straight-talking, practical, calm about money.</p></div>
+  </div>
+  <div class="g3">
+    <div class="tile"><h3>Ada · buka / rice seller</h3><p>Sells plates daily. Buys by the paint and the basket. Needs: what one plate costs, today.</p></div>
+    <div class="tile"><h3>Tunde · caterer</h3><p>Quotes per head on WhatsApp. Needs: a price for 100 guests that doesn't lose money.</p></div>
+    <div class="tile"><h3>Kemi · baker</h3><p>Cakes and small chops by the order. Needs: the cost of one cake with box and labour.</p></div>
+  </div>
+</section>
+
+<section id="logo">
+  <h2><small>02</small>Logo: the Rising Bowl</h2>
+  <p>A bowl whose inside is the letter M, on a plinth, with three gold bars rising from it. The bowl is the food; the bars are the money going up. Supplied by the owner and rebuilt as vector so it works from a 16 px favicon to a shop sign.</p>
+  <div class="g2">
+    <div><div class="logo-box"><img src="../03-logo/svg/lockup-stacked.svg" alt=""></div><div class="cap">Primary · stacked lockup, on white</div></div>
+    <div><div class="logo-box"><img src="../03-logo/svg/lockup-horizontal.svg" alt="" style="max-height:80px"></div><div class="cap">Horizontal lockup · headers, email, letterhead</div></div>
+    <div><div class="logo-box green"><img src="../03-logo/svg/lockup-stacked-reversed.svg" alt=""></div><div class="cap">Reversed · on Forest Green</div></div>
+    <div><div class="logo-box photo"><img src="../03-logo/svg/lockup-horizontal-white.svg" alt="" style="max-height:80px"></div><div class="cap">All-white · on a photo with a Forest tint</div></div>
+  </div>
+  <div class="g4">
+    <div><div class="logo-box"><img src="../03-logo/svg/mark.svg" alt="" style="max-height:90px"></div><div class="cap">Mark alone</div></div>
+    <div><div class="logo-box"><img src="../03-logo/svg/mark-mono.svg" alt="" style="max-height:90px"></div><div class="cap">Mono · receipts, one-colour print</div></div>
+    <div><div class="logo-box"><img src="../03-logo/png/app-icon-192.png" alt="" style="max-height:90px;border-radius:22px"></div><div class="cap">App icon · stores, WhatsApp</div></div>
+    <div><div class="logo-box" style="gap:10px;grid-auto-flow:column"><img src="../03-logo/png/favicon-32.png" alt="" style="width:32px;height:32px"><img src="../03-logo/png/favicon-16.png" alt="" style="width:16px;height:16px"></div><div class="cap">Favicon · 32 and 16 px</div></div>
+  </div>
+  <div class="g3">
+    <div class="tile do"><h3>Do</h3><p>Use the stacked lockup wherever there is room. Keep clear space of two-thirds of the mark's height around it. Minimum 24 px tall on screen, 8 mm in print.</p></div>
+    <div class="tile do"><h3>Do</h3><p>On green or a photo, use the reversed or all-white version. On receipts, the mono version.</p></div>
+    <div class="tile dont"><h3>Don't</h3><p>Recolour, rotate, outline, add a shadow or gradient, change the bar heights, set the wordmark in another face, or put the colour lockup on a photo.</p></div>
+  </div>
+</section>
+
+<section id="colour">
+  <h2><small>03</small>Colour</h2>
+  <p>From the logo: Forest Green and Harvest Gold. Kitchen Green, the slightly lighter green already live in the product, stays as the button and link colour. Mostly white, a solid green, a little gold.</p>
+  <div class="g4">
+    <div class="sw"><div class="c" style="background:#0F5E3C"></div><div class="t">Forest Green<small>#0F5E3C · logo, dark blocks, headings</small></div></div>
+    <div class="sw"><div class="c" style="background:#1F7A52"></div><div class="t">Kitchen Green<small>#1F7A52 · buttons, links, active nav</small></div></div>
+    <div class="sw"><div class="c" style="background:#E8F5EE"></div><div class="t">Mint<small>#E8F5EE · soft fills, badges</small></div></div>
+    <div class="sw"><div class="c" style="background:#D4A020"></div><div class="t">Harvest Gold<small>#D4A020 · NG, bars, one highlight</small></div></div>
+    <div class="sw"><div class="c" style="background:#8A6A0E"></div><div class="t">Gold Text<small>#8A6A0E · gold at body size</small></div></div>
+    <div class="sw"><div class="c" style="background:#FBF3DC"></div><div class="t">Gold Soft<small>#FBF3DC · warm fills, warnings</small></div></div>
+    <div class="sw"><div class="c" style="background:#A06300"></div><div class="t">Amber<small>#A06300 · below target, stale</small></div></div>
+    <div class="sw"><div class="c" style="background:#B42318"></div><div class="t">Pepper<small>#B42318 · missing, loss, error</small></div></div>
+    <div class="sw"><div class="c" style="background:#171B18"></div><div class="t">Ink<small>#171B18 · text</small></div></div>
+    <div class="sw"><div class="c" style="background:#66706A"></div><div class="t">Stone<small>#66706A · secondary text</small></div></div>
+    <div class="sw"><div class="c" style="background:#DDE3DE"></div><div class="t">Line<small>#DDE3DE · borders</small></div></div>
+    <div class="sw"><div class="c" style="background:#F7F8F6;border-bottom:1px solid #dde3de"></div><div class="t">Canvas<small>#F7F8F6 · page background</small></div></div>
+  </div>
+  <div class="g3">
+    <div class="tile"><h3>Proportions</h3><p>60% white and canvas · 25% ink and stone · 10% greens · 5% gold.</p></div>
+    <div class="tile"><h3>Gold is an accent</h3><p>One gold thing per screen: a badge, the NG, an emphasised word, a chart's second series. Never body text on white. Never next to an amber warning.</p></div>
+    <div class="tile"><h3>Accessibility</h3><p>Every text colour here passes WCAG AA on white (Forest 7.8, Kitchen 5.3, Gold Text 5.1, Stone 5.1). Gold on Forest is for large text only.</p></div>
+  </div>
+</section>
+
+<section id="type">
+  <h2><small>04</small>Type</h2>
+  <p>Two free Google Fonts. <b>Plus Jakarta Sans</b> (600–800) for display and headings: confident and friendly. <b>Inter</b> (400–700) for everything else: the most legible UI face on a cheap Android screen, with tabular figures and the Naira sign.</p>
+  <div class="g2">
+    <div class="tile type-sample">
+      <div class="d">Know what every plate really costs.</div>
+      <div class="h">Needs your attention</div>
+      <div class="b">Record a new purchase and every dish that uses it is costed again. Old sales keep the cost they were sold at.</div>
+      <div class="n">₦1,450.00 · 39%</div>
+    </div>
+    <div class="tile"><h3>Rules</h3><p>Sentence case everywhere, including buttons. No exclamation marks. Tabular numbers for money. The ₦ is tight to the number, thousands separated, two decimals only where kobo matter. A missing number is a word ("not known yet"), never 0. Minimum 15 px in the app, 16 px in marketing. Max 65 characters a line.</p></div>
+  </div>
+</section>
+
+<section id="voice">
+  <h2><small>05</small>Voice and tone</h2>
+  <p>Second person, present tense, plain Nigerian English. Dish, not recipe variant. What you keep, not gross margin. A paint of rice, not 4.0 kg. The owner is running a business; never "cheap", "poor" or "struggling".</p>
+  <table class="voice">
+    <thead><tr><th>Moment</th><th>Tone</th><th>Say</th><th>Don't say</th></tr></thead>
+    <tbody>
+      <tr><td>Good news</td><td>Warm, specific</td><td>At ₦3,300 you keep ₦1,460 a plate.</td><td>Great job! You're crushing it 🎉</td></tr>
+      <tr><td>Needs attention</td><td>Calm, names the fix</td><td>You are making money, but less than you planned. Charging ₦1,450 would reach your target.</td><td>WARNING: margin below threshold.</td></tr>
+      <tr><td>Missing data</td><td>Honest, no guess</td><td>Cost unknown: no price for pepper yet.</td><td>Estimated cost: ₦0.00</td></tr>
+      <tr><td>Error</td><td>What happened, what to do</td><td>That didn't save. Check your connection and try again.</td><td>Error 500. Something went wrong.</td></tr>
+      <tr><td>Billing</td><td>Short, no hedging</td><td>Nothing is deleted. You can still open and read everything you entered.</td><td>Your access may be restricted subject to plan terms.</td></tr>
+    </tbody>
+  </table>
+  <div class="g3">
+    <div class="tile"><h3>Headline</h3><p>Know what every plate really costs, and price it to profit.</p></div>
+    <div class="tile"><h3>Short lines</h3><p>Every plate, priced to profit. · Busy is not the same as profitable. · Tomatoes went up. Did your price? · Your receipts already know your price.</p></div>
+    <div class="tile"><h3>Proof points (only these)</h3><p>14 days free · No card needed · Works on any phone · Payments by Paystack · Founding price for the first 100 businesses.</p></div>
+  </div>
+</section>
+
+<section id="imagery">
+  <h2><small>06</small>Imagery</h2>
+  <p>The owner's world as it is: pots, plates, markets, hands, phones. Natural light and warm food colours. No stock business people, no laptops on marble, no chef hats. Overlay with Forest Green at 70–85%, never a black gradient. Verified free sources and licences are in <code>06-imagery/free-image-sources.md</code>.</p>
+  <div class="photos">
+    <img src="../06-imagery/samples/pexels-36707708.jpg" alt=""><img src="../06-imagery/samples/pexels-23490764.jpg" alt=""><img src="../06-imagery/samples/pexels-17952748.jpg" alt=""><img src="../06-imagery/samples/pexels-34772940.jpg" alt="">
+  </div>
+  <div class="g3">
+    <div class="tile"><h3>Photos</h3><p>Pexels and Unsplash, free for commercial use, no attribution required. Credit anyway. Skip "editorial only" and Unsplash+.</p></div>
+    <div class="tile"><h3>Illustration and icons</h3><p>unDraw tinted #1F7A52 for marketing illustration. Lucide line icons (1.75 px stroke) in the product.</p></div>
+    <div class="tile"><h3>Templates</h3><p>Instagram post and number card, WhatsApp status, link preview, business card, A5 flyer, email signature, deck cover, letterhead: <code>07-templates/</code>.</p></div>
+  </div>
+  <div class="shots">
+    <img src="../07-templates/png/instagram-post.png" alt=""><img src="../07-templates/png/instagram-number-card.png" alt=""><img src="../07-templates/png/og-image.png" alt="" style="width:420px"><img src="../07-templates/png/whatsapp-status.png" alt="" style="width:124px">
+  </div>
+</section>
+
+<section id="product">
+  <h2><small>07</small>The product</h2>
+  <p>Phone first, one primary action per screen, numbers as the hero, every state designed. Tokens, components and rules in <code>09-uiux/00-design-system.md</code>; every screen in <code>09-uiux/renders/index.html</code>.</p>
+  <div class="shots">
+    <img src="../09-uiux/renders/05-home-dashboard-390.png" alt=""><img src="../09-uiux/renders/08-recipe-detail-390.png" alt=""><img src="../09-uiux/renders/16-sale-new-390.png" alt=""><img src="../09-uiux/renders/10-recipe-incomplete-390.png" alt=""><img src="../09-uiux/renders/23-reports-390.png" alt="">
+  </div>
+</section>
+
+<section id="dont" style="border-bottom:0">
+  <h2><small>08</small>Never</h2>
+  <div class="g3">
+    <div class="tile dont"><h3>Never show ₦0 for a missing number</h3><p>The governing rule of the product is the first rule of the brand: the owner's own data, or nothing.</p></div>
+    <div class="tile dont"><h3>Never imply a real person endorses us</h3><p>Stock photos set the mood; they are not testimonials. Real customers only with written consent.</p></div>
+    <div class="tile dont"><h3>Never look like a spreadsheet or a bank</h3><p>No dense grids on phones, no navy, no gradients, no "fintech bro". Warm food colours, calm green, one gold.</p></div>
+  </div>
+  <p class="cap">Owner of this guide: the founder. Review after the three usability sessions and again in April 2027. Source files: <code>branding/</code> in the MenuMasterNG repository.</p>
+</section>
+</div>
+</body></html>

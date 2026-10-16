@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tell us about your business — Menu Master NG</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .setup { max-width: 520px; margin: 0 auto; padding: 20px 16px 40px; display: grid; gap: 18px; }
+  .setup .logo { height: 36px; width: auto; }
+  .kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kind { display: grid; gap: 6px; border: 1.5px solid var(--mm-line); border-radius: var(--mm-radius-sm); padding: 14px; background: var(--mm-surface); min-height: 86px; }
+  .kind.on { border-color: var(--mm-accent); background: var(--mm-accent-soft); }
+  .kind b { font: 600 15px/1.2 var(--font-ui); }
+  .kind small { color: var(--mm-muted); font-size: 12.5px; }
+  .kind .ic { color: var(--mm-accent); }
+</style></head>
+<body data-section="none">
+<div class="setup">
+  <img class="logo" src="../../03-logo/svg/lockup-horizontal.svg" alt="Menu Master NG">
+  <div class="progress"><div class="bar"><span style="width:33%"></span></div><p class="hint">Step 1 of 3 · about a minute</p></div>
+  <div><h1 style="font-size:26px">Welcome! Tell us about your business</h1><p class="hint" style="font-size:15px;margin-top:6px">Its name goes on your receipts and at the top of every page. You can change it later.</p></div>
+  <div class="field"><label>Business name</label><div class="input focus">Ada Kitchen</div></div>
+  <div class="field"><label>What kind of business</label>
+    <div class="kinds">
+      <div class="kind on"><span class="ic"><i data-i="recipes"></i></span><b>Buka / canteen</b><small>Plates sold daily</small></div>
+      <div class="kind"><span class="ic"><i data-i="people"></i></span><b>Catering</b><small>Events, trays, per head</small></div>
+      <div class="kind"><span class="ic"><i data-i="star"></i></span><b>Bakery / snacks</b><small>Cakes, pies, small chops</small></div>
+      <div class="kind"><span class="ic"><i data-i="more"></i></span><b>Something else</b><small>Drinks, packaged food</small></div>
+    </div>
+    <p class="hint">This only changes the examples we show you. It never changes a cost.</p>
+  </div>
+  <div class="field"><label>Where are you?</label><div class="input select">Lagos</div><p class="hint">Sets your time zone for daily takings.</p></div>
+  <div class="field"><label>WhatsApp number <span class="muted" style="font-weight:400">(optional)</span></label><div class="input ph"><span class="pre">+234</span>80 0000 0000</div><p class="hint">Shown on the receipts you send customers.</p></div>
+  <a class="btn primary full">Continue <i data-i="arrow"></i></a>
+</div>
+<script src="_shell.js"></script>
+</body></html>
