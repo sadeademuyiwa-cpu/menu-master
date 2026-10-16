@@ -67,7 +67,7 @@ async function ReportsPageBody() {
       />
 
       <section>
-        <h2 className="text-base font-medium">By period</h2>
+        <h2 className="text-base font-semibold">By period</h2>
         <div className="mt-3">
           <DataList
             rows={byPeriod ?? []}
@@ -87,7 +87,7 @@ async function ReportsPageBody() {
       </section>
 
       <section>
-        <h2 className="text-base font-medium">By product</h2>
+        <h2 className="text-base font-semibold">By product</h2>
         <div className="mt-3">
           <DataList
             rows={byProduct ?? []}
@@ -107,7 +107,7 @@ async function ReportsPageBody() {
       </section>
 
       <section>
-        <h2 className="text-base font-medium">Cancelled sales</h2>
+        <h2 className="text-base font-semibold">Cancelled sales</h2>
         <p className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>
           Corrections are made by reversal, never by editing history.
         </p>

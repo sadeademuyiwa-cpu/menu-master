@@ -39,5 +39,5 @@ test('a prefix does not leak: /termsandconditions is not /terms', () => {
 test('the list is exactly what the product decided', () => {
   assert.deepEqual([...PUBLIC_PATHS],
     ['/', '/login', '/signup', '/verify-email', '/forgot-password', '/auth/callback', '/auth/confirm',
-     '/terms', '/refunds', '/privacy'])
+     '/terms', '/refunds', '/privacy', '/manifest.webmanifest'])
 })

@@ -13,7 +13,7 @@ export default async function VerifyEmailPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-medium">Confirm your email</h2>
+      <h2 className="text-lg font-semibold">Confirm your email</h2>
       <p className="text-sm">
         We sent a link to <strong>{user.email}</strong>. Open it to finish
         setting up. You cannot create a business until your email is confirmed.

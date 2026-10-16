@@ -63,7 +63,7 @@ export function PlanChooser({ rows }: { rows: PlanRow[] }) {
                 <span className="mm-page-icon"><AppIcon name={r.tier === 'trading' ? 'sales' : 'recipes'} size={20} /></span>
                 <div>
                   <div className="font-semibold">{r.name}</div>
-                  {r.isFounding && <div className="text-xs font-medium" style={{ color: 'var(--mm-accent)' }}>Founding price</div>}
+                  {r.isFounding && <div className="text-xs font-semibold" style={{ color: 'var(--mm-gold-text)' }}>Founding price</div>}
                 </div>
               </div>
             </div>

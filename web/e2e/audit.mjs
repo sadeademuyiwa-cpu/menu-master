@@ -62,7 +62,9 @@ await pick(line, 'select[name=ingredient_id]', 'Ofada Rice')
 await line.locator('input[name=qty]').fill('4500')
 await pick(line, 'select[name=unit_id]', 'g — Gram')
 await line.locator('button[type=submit]').click(); await page.waitForTimeout(1500)
-const priceForm = page.locator('form').last()
+// The selling-price form by its field, not by position: the dish page has
+// grown forms below it (scaling, sizes, labour, archive) since this was written.
+const priceForm = page.locator('form:has(input[name=price])').first()
 await priceForm.locator('input[name=price]').fill('1000')
 await priceForm.locator('button[type=submit]').click(); await page.waitForTimeout(1200)
 await ctx.close()

@@ -42,7 +42,7 @@ export default function ResetPasswordPage() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div>
-        <h2 className="text-lg font-medium">Choose a new password</h2>
+        <h2 className="text-lg font-semibold">Choose a new password</h2>
         <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
           At least 8 characters. You will stay logged in on this device.
         </p>

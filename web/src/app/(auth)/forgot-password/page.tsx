@@ -42,7 +42,7 @@ export default function ForgotPasswordPage() {
   if (sent) {
     return (
       <div className="space-y-4">
-        <h2 className="text-lg font-medium">Check your email</h2>
+        <h2 className="text-lg font-semibold">Check your email</h2>
         <p className="text-sm">
           If <strong>{email}</strong> has a Menu Master account, a link to choose
           a new password is on its way. It works once, for one hour.
@@ -62,7 +62,7 @@ export default function ForgotPasswordPage() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div>
-        <h2 className="text-lg font-medium">Reset your password</h2>
+        <h2 className="text-lg font-semibold">Reset your password</h2>
         <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
           Enter the email you signed up with. We will send you a link to choose a new password.
         </p>

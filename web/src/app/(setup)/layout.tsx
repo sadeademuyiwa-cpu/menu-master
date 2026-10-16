@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Toaster } from '@/components/toaster'
 import { Button } from '@/components/button'
 import { signOut } from '@/lib/auth-actions'
+import { BrandLockup } from '@/components/brand-mark'
 
 /**
  * First-run setup has no app navigation on purpose: every destination would
@@ -18,10 +19,7 @@ export default async function SetupLayout({ children }: { children: React.ReactN
     <div className="min-h-dvh flex flex-col">
       <header className="mm-app-header">
         <div className="mx-auto flex h-16 max-w-2xl items-center justify-between gap-3 px-4">
-          <span className="flex min-w-0 items-center gap-2.5 font-semibold tracking-tight">
-            <span className="mm-brand-mark" aria-hidden>MM</span>
-            <span>Menu Master NG</span>
-          </span>
+          <BrandLockup size={44} />
           <form action={signOut}>
             <Button variant="quiet" busyLabel="Signing out…">Sign out</Button>
           </form>

@@ -79,7 +79,7 @@ export function SignupForm({ google }: { google: boolean }) {
   if (sent) {
     return (
       <div className="space-y-4">
-        <h2 className="text-lg font-medium">Check your email</h2>
+        <h2 className="text-lg font-semibold">Check your email</h2>
         <p className="text-sm">
           We sent a confirmation link to <strong>{email}</strong>. Open it on
           this phone or computer to start your free trial.
@@ -102,7 +102,7 @@ export function SignupForm({ google }: { google: boolean }) {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-medium">Start your free trial</h2>
+        <h2 className="text-lg font-semibold">Start your free trial</h2>
         <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
           14 days free. No card needed.
         </p>

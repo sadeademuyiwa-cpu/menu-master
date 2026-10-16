@@ -1,22 +1,30 @@
-import type { Metadata } from 'next'
+import type { Metadata, ResolvingMetadata } from 'next'
 import Link from 'next/link'
 import { loadSiteSettings, loadPublicPlans } from '@/lib/data/site'
 import { COSTING_FEATURES, TRADING_FEATURES, PLAN_FAQ } from '@/lib/site/plan-features'
 import { AppIcon, type IconName } from '@/components/icons'
+import { BrandLockup } from '@/components/brand-mark'
 import { TrackOnce } from '@/components/track-once'
 import { money } from '@/lib/format'
 import { LEGAL } from '@/lib/legal'
 import './landing.css'
 
-export const metadata: Metadata = {
-  title: 'Menu Master NG — know what every plate really costs',
-  description:
-    'Turn your market receipts into the true cost of every dish, the right selling price and the profit on every sale. Built for Nigerian food businesses. 14 days free.',
-  openGraph: {
-    title: 'Know what every plate really costs',
-    description: 'Cost, price and profit for Nigerian food businesses — on your phone. 14 days free, no card needed.',
-    type: 'website',
-  },
+export async function generateMetadata(_props: unknown, parent: ResolvingMetadata): Promise<Metadata> {
+  // Setting openGraph here replaces the parent's whole block, which is where
+  // app/opengraph-image.jpg (with its content-hashed URL) arrives from; carry
+  // the images over so the link preview survives and stays cache-correct.
+  const images = (await parent).openGraph?.images ?? []
+  return {
+    title: 'Menu Master NG — know what every plate really costs',
+    description:
+      'Turn your market receipts into the true cost of every dish, the right selling price and the profit on every sale. Built for Nigerian food businesses. 14 days free.',
+    openGraph: {
+      title: 'Know what every plate really costs',
+      description: 'Cost, price and profit for Nigerian food businesses — on your phone. 14 days free, no card needed.',
+      type: 'website',
+      images,
+    },
+  }
 }
 
 // Static, rebuilt at most every minute: ads send people here, so it must be
@@ -133,7 +141,7 @@ export default async function LandingPage() {
             {L.logoUrl
               // eslint-disable-next-line @next/next/no-img-element
               ? <img src={L.logoUrl} alt={LEGAL.productName} className="h-8 w-auto" />
-              : <><span className="mm-brand-mark" aria-hidden>MM</span><span>Menu Master NG</span></>}
+              : <BrandLockup size={44} />}
           </Link>
           <nav className="flex items-center gap-1 sm:gap-3">
             <a href="#pricing" className="mm-tap lp-desk px-2 text-sm font-medium" style={{ color: 'var(--mm-muted)' }}>Pricing</a>

@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic'
 export default function CheckoutCallbackPage() {
   return (
     <main className="mx-auto max-w-lg px-4 py-16">
-      <h1 className="text-xl font-medium">Thank you — we are confirming your payment</h1>
+      <h1 className="text-xl font-semibold">Thank you — we are confirming your payment</h1>
 
       <p className="mt-4 text-sm" style={{ color: 'var(--mm-muted)' }}>
         Paystack has sent us back here. Your subscription starts the moment we

@@ -7,6 +7,7 @@ import { PrimaryNav } from '@/components/primary-nav'
 import { QuickAdd } from '@/components/quick-add'
 import { Toaster } from '@/components/toaster'
 import { AppIcon } from '@/components/icons'
+import { BrandMark } from '@/components/brand-mark'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -29,7 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           bottom bar carry the same five. */}
       <aside className="mm-sidebar">
         <Link href="/dashboard" className="mb-3 flex min-h-[44px] items-center gap-2.5 px-2 font-semibold tracking-tight" title="Menu Master NG">
-          <span className="mm-brand-mark" aria-hidden>MM</span>
+          <BrandMark />
           <span className="truncate">{businessName ?? 'Menu Master'}</span>
         </Link>
         <PrimaryNav variant="sidebar" />
@@ -47,7 +48,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               className="flex min-h-[44px] min-w-0 items-center gap-2.5 font-semibold tracking-tight lg:invisible"
               title="Menu Master NG"
             >
-              <span className="mm-brand-mark" aria-hidden>MM</span>
+              <BrandMark />
               <span className="truncate">{businessName ?? 'Menu Master'}</span>
             </Link>
 

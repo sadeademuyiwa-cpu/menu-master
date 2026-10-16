@@ -19,6 +19,10 @@ export const PUBLIC_PATHS = [
   '/terms',
   '/refunds',
   '/privacy',
+  // The web app manifest (app/manifest.ts): the browser fetches it without
+  // cookies when someone adds Menu Master to their home screen, and a
+  // redirect to /login makes the install silently fail.
+  '/manifest.webmanifest',
 ] as const
 
 export function isPublicPath(pathname: string): boolean {
