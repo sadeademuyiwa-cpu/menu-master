@@ -8,6 +8,9 @@
   --mm-accent: #1f7a52;
   --mm-accent-strong: #0f5e3c;
   --mm-accent-soft: #e8f5ee;
+  /* Text and icons on an accent fill (primary buttons, the "+", the plan
+     button). White on Kitchen Green; dark in dark mode, see below. */
+  --mm-on-accent: #fff;
   --mm-warn: #a06300;
   --mm-warn-soft: #fff6df;
   --mm-bad: #b42318;
@@ -40,6 +43,9 @@
     --mm-accent: #5ac58f;
     --mm-accent-strong: #70d8a4;
     --mm-accent-soft: #173426;
+    /* The dark accent is light Leaf: white on it is about 2.1:1, the page's
+       own near-black about 8.6:1. */
+    --mm-on-accent: #101411;
     --mm-warn: #e3b14e;
     --mm-warn-soft: #33290f;
     --mm-bad: #f08c7d;
@@ -108,18 +114,26 @@ a { -webkit-tap-highlight-color: transparent; }
   white-space: nowrap;
 }
 .mm-brand-ng { color: var(--mm-brand-gold); font-size: .82em; margin-left: -.1em; }
-.mm-account-chip {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  gap: .5rem;
-  border: 1px solid var(--mm-line);
-  border-radius: 999px;
-  padding: .35rem .65rem;
-  background: var(--mm-surface);
-  color: var(--mm-muted);
+/* In the components layer, not loose like its neighbours. Tailwind v4 puts
+   every utility in @layer utilities, and a rule outside any layer beats every
+   layered rule whatever its specificity. Loose, this display: inline-flex
+   beat the header's lg:hidden, so a desktop showed the account circle twice:
+   once in the header and once at the foot of the sidebar. In the layer, the
+   utility wins as it reads. */
+@layer components {
+  .mm-account-chip {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    gap: .5rem;
+    border: 1px solid var(--mm-line);
+    border-radius: 999px;
+    padding: .35rem .65rem;
+    background: var(--mm-surface);
+    color: var(--mm-muted);
+  }
+  .mm-account-chip:hover { color: var(--mm-fg); border-color: var(--mm-muted); }
 }
-.mm-account-chip:hover { color: var(--mm-fg); border-color: var(--mm-muted); }
 .mm-bottom-nav {
   position: fixed;
   inset: auto 0 0;
@@ -342,13 +356,14 @@ summary:focus-visible {
 .mm-btn:active:not(:disabled) { transform: scale(.98); }
 .mm-btn:disabled { cursor: not-allowed; opacity: .55; }
 .mm-btn[aria-busy="true"] { cursor: progress; opacity: .85; }
-.mm-btn-primary { background: var(--mm-accent); color: #fff; box-shadow: 0 6px 16px -10px var(--mm-accent); }
+.mm-btn-primary { background: var(--mm-accent); color: var(--mm-on-accent); box-shadow: 0 6px 16px -10px var(--mm-accent); }
 .mm-btn-primary:hover:not(:disabled) { background: var(--mm-accent-strong); }
 .mm-btn-secondary { background: var(--mm-surface); color: var(--mm-fg); border-color: var(--mm-line); }
 .mm-btn-secondary:hover:not(:disabled) { background: var(--mm-surface-2); }
 /* A small bordered pill, not grey text: "Update", "Remove" and "Hide" read as
-   buttons an owner can press, and sit apart from the sentence beside them. */
-.mm-btn-quiet { min-height: 40px; padding: 0 .8rem; font-size: .8125rem; font-weight: 600; color: var(--mm-fg); background: var(--mm-surface); border-color: var(--mm-line); border-radius: 999px; }
+   buttons an owner can press, and sit apart from the sentence beside them.
+   Still 44px tall: small to the eye, not to a thumb. */
+.mm-btn-quiet { min-height: 44px; padding: 0 .8rem; font-size: .8125rem; font-weight: 600; color: var(--mm-fg); background: var(--mm-surface); border-color: var(--mm-line); border-radius: 999px; }
 .mm-btn-quiet:hover:not(:disabled) { background: var(--mm-surface-2); border-color: var(--mm-muted); }
 .mm-spinner { width: 1em; height: 1em; flex: none; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: mm-spin .7s linear infinite; }
 @keyframes mm-spin { to { transform: rotate(360deg); } }
@@ -505,10 +520,10 @@ summary:focus-visible {
 .mm-access-cta {
   display: inline-flex; flex: none; align-items: center; min-height: 44px;
   padding: 0 .95rem; border-radius: 999px;
-  background: var(--mm-accent); color: #fff; font-weight: 700; font-size: .875rem; white-space: nowrap;
+  background: var(--mm-accent); color: var(--mm-on-accent); font-weight: 700; font-size: .875rem; white-space: nowrap;
 }
 .mm-access-bar[data-tone="last"] .mm-access-cta,
-.mm-access-bar[data-tone="ended"] .mm-access-cta { background: #b91c1c; }
+.mm-access-bar[data-tone="ended"] .mm-access-cta { background: #b91c1c; color: #fff; }
 @media (prefers-color-scheme: dark) {
   .mm-access-bar[data-tone="last"] { background: #3a1a0c; color: #fdba74; border-color: #9a3412; }
   .mm-access-bar[data-tone="ended"] { background: #3b1111; color: #fca5a5; border-color: #991b1b; }
@@ -578,7 +593,7 @@ summary:focus-visible {
   border: 0;
   border-radius: 19px;
   background: var(--mm-accent);
-  color: #fff;
+  color: var(--mm-on-accent);
   box-shadow: 0 12px 26px -10px var(--mm-accent);
   cursor: pointer;
   transition: transform var(--mm-motion-fast) var(--mm-ease);
@@ -587,7 +602,295 @@ summary:focus-visible {
 @media (min-width: 768px) { .mm-fab { display: none; } }
 .mm-quick-list { display: grid; gap: .5rem; }
 
+/* The page's own room at the bottom, (app)/layout.tsx <main>. Below md the
+   bottom bar and the "+" float over the page: the "+" stands 86px up and is
+   58px tall, so its top is 144px above the screen's edge. 160px of padding
+   lets the last card scroll 16px clear of it, so the "+" never sits on a
+   card's button. It used to be pb-28 (112px), and from 640px sm:py-7 cut it to
+   28px while the bar and the "+" were still showing. From md both are gone. */
+@layer components {
+  .mm-main { padding-bottom: calc(160px + env(safe-area-inset-bottom)); }
+  @media (min-width: 768px) { .mm-main { padding-bottom: 2rem; } }
+}
+
 /* Setup steps as tabs: each a full-height tap target. */
 .mm-setup-tab { display: block; min-height: var(--mm-touch); padding: 6px 4px; border-radius: 10px; }
 a.mm-setup-tab:hover { background: var(--mm-surface-2); }
 a.mm-setup-tab:focus-visible { outline: 2px solid var(--mm-accent); outline-offset: 2px; }
+
+/* ===========================================================================
+   DISHES, PHOTOS AND CHARTS
+   components/dish-tile.tsx, photo-preference.tsx, charts.tsx, use-price.tsx.
+
+   Everything here is in @layer components, so a utility a page passes in
+   (className="w-24", "rounded-none") still wins, as it reads. Loose rules beat
+   every Tailwind utility; that is how the account circle came to show twice
+   (see .mm-account-chip above). Add new component rules inside the layer.
+   =========================================================================== */
+@layer components {
+  /* --- The dish tile: initials and a faint bowl, her photo laid over it --- */
+
+  /* Brand greens only (branding/04-colour/palette.md, lib/dish-photo.ts
+     dishTileTone): never gold, amber, red or mint, so a grid of dishes never
+     reads as a grid of warnings or badges. Kitchen Green is written as its
+     hex, not var(--mm-accent): in dark mode the accent turns light Leaf, and
+     white letters on it would not read. */
+  .mm-dish-tile {
+    --mm-tile-bg: var(--mm-forest);
+    --mm-tile-fg: #fff;
+    --mm-tile-line: transparent;
+    position: relative;
+    display: grid;
+    flex: none;
+    place-items: center;
+    overflow: hidden;
+    width: 56px;
+    height: 56px;
+    border: 1px solid var(--mm-tile-line);
+    border-radius: 12px;
+    background: var(--mm-tile-bg);
+    color: var(--mm-tile-fg);
+    font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: .02em;
+    user-select: none;
+  }
+  .mm-dish-tile[data-tone="forest"]  { --mm-tile-bg: #0f5e3c; --mm-tile-fg: #fff; }
+  .mm-dish-tile[data-tone="kitchen"] { --mm-tile-bg: #1f7a52; --mm-tile-fg: #fff; }
+  .mm-dish-tile[data-tone="soft"]    { --mm-tile-bg: var(--mm-surface-2); --mm-tile-fg: #0f5e3c; }
+  .mm-dish-tile[data-tone="outline"] { --mm-tile-bg: #fff; --mm-tile-fg: #1f7a52; --mm-tile-line: #1f7a52; }
+
+  .mm-dish-tile[data-size="xs"] { width: 32px; height: 32px; border-radius: 8px; font-size: 12px; }
+  .mm-dish-tile[data-size="sm"] { width: 40px; height: 40px; border-radius: 10px; font-size: 14px; }
+  .mm-dish-tile[data-size="md"] { width: 56px; height: 56px; border-radius: 12px; font-size: 18px; }
+  /* The Home grid: fills its box, 4:3. */
+  .mm-dish-tile[data-size="card"] {
+    width: 100%; height: auto; aspect-ratio: 4 / 3;
+    border-radius: var(--mm-radius-sm); font-size: 30px;
+  }
+  /* The dish page header: the full width, 16:9, never taller than 240px. */
+  .mm-dish-tile[data-size="lg"] {
+    width: 100%; height: auto; aspect-ratio: 16 / 9; max-height: 240px;
+    border-radius: var(--mm-radius); font-size: 44px;
+  }
+
+  /* The bowl, in the tile's own letter colour, faint behind the initials. */
+  .mm-dish-tile-mark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    height: 72%;
+    width: auto;
+    aspect-ratio: 620 / 520;
+    transform: translate(-50%, -46%);
+    fill: currentColor;
+    opacity: .12;
+    pointer-events: none;
+  }
+  /* A name with no letters to show: the bowl alone, a little stronger. */
+  .mm-dish-tile[data-blank="true"] .mm-dish-tile-mark { opacity: .4; height: 56%; }
+  .mm-dish-tile-initials { position: relative; z-index: 1; }
+
+  /* Her photo, over the tile. If it is slow or fails, the tile shows through. */
+  .mm-dish-photo {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    object-fit: cover;
+  }
+  /* A photo that fails to load. Chromium then draws its broken-image icon in
+     the corner, alt="" or not. A failed <img> takes ::before and ::after and a
+     loaded one does not, so these repaint the tile over the icon: its colour
+     and letters (data-initials, set by DishTile), then the faint bowl. While
+     a photo is still on its way it is transparent and the tile shows through.
+     Safari draws nothing for a failed alt="" image, so needs neither. */
+  .mm-dish-photo::before {
+    content: attr(data-initials);
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--mm-tile-bg);
+    color: var(--mm-tile-fg);
+  }
+  .mm-dish-photo::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    height: 72%;
+    aspect-ratio: 620 / 520;
+    transform: translate(-50%, -46%);
+    background: var(--mm-tile-fg);
+    opacity: .12;
+    /* The Rising Bowl as a mask: the same paths as .mm-dish-tile-mark. */
+    --mm-bowl: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='230 218 620 520'%3E%3Cpath d='M400 330a14 14 0 0 1 14-14h52a14 14 0 0 1 14 14v80h-80z'/%3E%3Cpath d='M500 282a14 14 0 0 1 14-14h52a14 14 0 0 1 14 14v98l-40 75l-40-75z'/%3E%3Cpath d='M600 232a14 14 0 0 1 14-14h52a14 14 0 0 1 14 14v178h-80z'/%3E%3Cpath fill-rule='evenodd' d='M230 405h620a310 290 0 0 1-620 0z M292 432h128v191a250 232 0 0 1-128-191z M788 432h-128v191a250 232 0 0 0 128-191z M495 405l45 80l45-80v245h-90z'/%3E%3Cpath d='M420 690V405h75l45 80l45-80h75v285h-75V540l-45 70l-45-70v150z'/%3E%3Crect x='395' y='700' width='290' height='38' rx='14'/%3E%3C/svg%3E");
+    -webkit-mask: var(--mm-bowl) center / contain no-repeat;
+    mask: var(--mm-bowl) center / contain no-repeat;
+  }
+  /* "Hide photos to save data" (components/photo-preference.tsx). Set on
+     <html> before the first paint by the script in app/layout.tsx. A lazy
+     photo that is not displayed is never fetched, so this saves the data too. */
+  html[data-photos="off"] .mm-dish-photo { display: none; }
+
+  /* --- The on/off switch ------------------------------------------------- */
+  .mm-switch {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    min-width: 54px;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+  /* Off is Stone, not Line: a switch's state must read at 3:1 (WCAG 1.4.11). */
+  .mm-switch-track {
+    position: relative;
+    width: 46px;
+    height: 28px;
+    border-radius: 999px;
+    background: var(--mm-muted);
+    transition: background var(--mm-motion-fast) var(--mm-ease);
+  }
+  .mm-switch-knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / .3);
+    transition: transform var(--mm-motion-fast) var(--mm-ease);
+  }
+  .mm-switch[aria-checked="true"] .mm-switch-track { background: var(--mm-accent); }
+  .mm-switch[aria-checked="true"] .mm-switch-knob { transform: translateX(18px); }
+
+  /* --- Charts (components/charts.tsx) ------------------------------------
+     Sold is light green, kept is Forest; a figure not known yet is a dashed
+     outline or a hatch in Stone, never a bar that pretends to be zero. No
+     gold, no amber, no red: a chart is not a warning. */
+  /* The tokens sit on both roots: a sparkline lives inline in a sentence,
+     outside any .mm-chart. */
+  .mm-chart, .mm-spark {
+    --mm-chart-sold: color-mix(in srgb, var(--mm-accent) 32%, var(--mm-surface));
+    --mm-chart-kept: var(--mm-forest);
+    --mm-chart-unknown: var(--mm-muted);
+    --mm-chart-gap: var(--mm-surface);
+  }
+  .mm-chart { margin: 0; font-variant-numeric: tabular-nums; }
+  .mm-chart-plot { display: block; width: 100%; overflow: visible; }
+  .mm-chart-sold { fill: var(--mm-chart-sold); }
+  .mm-chart-kept { fill: var(--mm-chart-kept); }
+  .mm-chart-unknown {
+    fill: none;
+    stroke: var(--mm-chart-unknown);
+    stroke-width: 1.5px;
+    stroke-dasharray: 3 3;
+  }
+  .mm-chart-axis { stroke: var(--mm-line); stroke-width: 1px; }
+  .mm-chart-days {
+    display: grid;
+    grid-template-columns: repeat(var(--mm-chart-n, 7), minmax(0, 1fr));
+    margin-top: .35rem;
+    font-size: 12px;
+    color: var(--mm-muted);
+    text-align: center;
+  }
+  .mm-chart-days > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mm-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .3rem 1rem;
+    margin-top: .6rem;
+    font-size: 13px;
+    color: var(--mm-muted);
+  }
+  .mm-chart-key { display: inline-flex; align-items: center; gap: .4rem; }
+  .mm-chart-swatch {
+    display: inline-block;
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .mm-chart-swatch[data-kind="sold"] { background: var(--mm-chart-sold); }
+  .mm-chart-swatch[data-kind="kept"] { background: var(--mm-chart-kept); }
+  .mm-chart-swatch[data-kind="unknown"] { border: 1.5px dashed var(--mm-chart-unknown); }
+  .mm-chart-swatch[data-kind="hatch"] {
+    border: 1px solid var(--mm-chart-unknown);
+    background: repeating-linear-gradient(135deg, var(--mm-chart-unknown) 0 1.5px, transparent 1.5px 4px);
+  }
+  .mm-chart-caption { margin-top: .5rem; font-size: 13px; color: var(--mm-muted); }
+
+  /* The sparkline's own colour, set by its tone. */
+  .mm-spark { display: inline-block; vertical-align: middle; overflow: visible; }
+  .mm-spark-line { fill: none; stroke: currentColor; stroke-width: 2px; stroke-linecap: round; stroke-linejoin: round; }
+  .mm-spark-dot { fill: none; stroke: currentColor; stroke-width: 6px; stroke-linecap: round; }
+  .mm-spark[data-tone="forest"] { color: var(--mm-chart-kept); }
+  .mm-spark[data-tone="kitchen"] { color: var(--mm-accent); }
+  .mm-spark[data-tone="muted"] { color: var(--mm-muted); }
+
+  /* What a plate is made of: one bar, segments in greens and neutrals. */
+  .mm-cost-bar { display: block; width: 100%; height: 14px; overflow: hidden; border-radius: 999px; background: var(--mm-surface-2); }
+  .mm-cost-bar > svg { display: block; }
+  .mm-cost-seg { stroke: var(--mm-chart-gap); stroke-width: 2px; }
+  .mm-cost-seg[data-shade="0"] { fill: var(--mm-chart-kept); }
+  .mm-cost-seg[data-shade="1"] { fill: #1f7a52; }
+  .mm-cost-seg[data-shade="2"] { fill: color-mix(in srgb, var(--mm-accent) 52%, var(--mm-surface)); }
+  .mm-cost-seg[data-shade="3"] { fill: var(--mm-muted); }
+  .mm-cost-seg[data-shade="4"] { fill: color-mix(in srgb, var(--mm-accent) 24%, var(--mm-surface)); }
+  .mm-cost-seg[data-shade="5"] { fill: color-mix(in srgb, var(--mm-muted) 40%, var(--mm-surface)); }
+  .mm-cost-hatch-bg { fill: var(--mm-surface-2); }
+  .mm-cost-hatch-line { stroke: var(--mm-chart-unknown); stroke-width: 1.5px; }
+  /* One column on a phone. Two 141 px columns at 360 px left a part not
+     known yet about 30 px for its name ("Pa… not known yet"), and that is
+     the one row the owner has to read to finish the costing. */
+  .mm-cost-legend {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: .3rem 1rem;
+    margin-top: .6rem;
+    font-size: 13px;
+  }
+  @media (min-width: 480px) {
+    .mm-cost-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .mm-cost-legend li { display: flex; min-width: 0; align-items: center; gap: .4rem; }
+  .mm-cost-legend .mm-chart-swatch[data-shade="0"] { background: var(--mm-chart-kept); }
+  .mm-cost-legend .mm-chart-swatch[data-shade="1"] { background: #1f7a52; }
+  .mm-cost-legend .mm-chart-swatch[data-shade="2"] { background: color-mix(in srgb, var(--mm-accent) 52%, var(--mm-surface)); }
+  .mm-cost-legend .mm-chart-swatch[data-shade="3"] { background: var(--mm-muted); }
+  .mm-cost-legend .mm-chart-swatch[data-shade="4"] { background: color-mix(in srgb, var(--mm-accent) 24%, var(--mm-surface)); }
+  .mm-cost-legend .mm-chart-swatch[data-shade="5"] { background: color-mix(in srgb, var(--mm-muted) 40%, var(--mm-surface)); }
+}
+
+@media (prefers-color-scheme: dark) {
+  @layer components {
+    /* Forest letters and Forest bars vanish on a dark card; Leaf (the dark
+       accent) carries them instead. Forest and Kitchen tiles keep their own
+       fills: white on them reads in both schemes. */
+    .mm-dish-tile[data-tone="soft"]    { --mm-tile-fg: var(--mm-accent); }
+    .mm-dish-tile[data-tone="outline"] { --mm-tile-bg: var(--mm-surface); --mm-tile-fg: var(--mm-accent); --mm-tile-line: var(--mm-accent); }
+    .mm-chart, .mm-spark { --mm-chart-kept: var(--mm-accent); --mm-chart-sold: color-mix(in srgb, var(--mm-accent) 30%, var(--mm-surface)); }
+    .mm-cost-seg[data-shade="1"] { fill: color-mix(in srgb, var(--mm-accent) 70%, var(--mm-surface)); }
+    .mm-cost-legend .mm-chart-swatch[data-shade="1"] { background: color-mix(in srgb, var(--mm-accent) 70%, var(--mm-surface)); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @layer components {
+    .mm-switch-track, .mm-switch-knob { transition: none; }
+  }
+}

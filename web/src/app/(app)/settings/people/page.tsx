@@ -8,6 +8,7 @@ import {
 } from '@/components/ui'
 import { ROLES, ROLE_WORDS, roleLabel, statusWords, inviteLink, inviteMessage, canManage } from '@/lib/people/format'
 import { NOT_ENTERED } from '@/lib/format'
+import { roleHint } from './role-hints'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,7 +76,7 @@ export default async function PeoplePage(props: { searchParams: Promise<{ notice
   ])
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <BackLink href="/settings">Settings</BackLink>
       <PageHeader title="People" sub="Who works in this business on Menu Master, and what each of them can see." />
       {notice && <Notice tone={/could not|cannot|only an owner|give |choose |already|not an email/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
@@ -96,7 +97,7 @@ export default async function PeoplePage(props: { searchParams: Promise<{ notice
                       {m.is_you && <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>you</span>}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>{ROLE_WORDS[m.role]?.hint}</p>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>{roleHint(m.role)}</p>
                   {canManage(role, m.is_you) && (
                     <div className="mt-2 flex flex-wrap items-end gap-3">
                       <form action={setRole} className="flex items-end gap-2">
@@ -147,7 +148,7 @@ export default async function PeoplePage(props: { searchParams: Promise<{ notice
                 <Submit>Invite</Submit>
               </form>
               <ul className="mt-3 space-y-1 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                {ROLES.map((r) => <li key={r}><strong>{ROLE_WORDS[r].label}</strong> — {ROLE_WORDS[r].hint}</li>)}
+                {ROLES.map((r) => <li key={r}><strong>{ROLE_WORDS[r].label}</strong> — {roleHint(r)}</li>)}
               </ul>
             </Card>
           </section>

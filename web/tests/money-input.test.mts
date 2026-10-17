@@ -78,9 +78,12 @@ test('the sale line price is read with requiredAmount, not Number()', () => {
 })
 
 test('a blank recipe selling price cannot silently become zero', () => {
-  const s = src('src/app/(app)/recipes/[id]/page.tsx')
-  assert.match(s, /requiredAmount\(formData, 'price'\)/)
-  assert.doesNotMatch(s, /Number\(formData\.get\('price'\)\)/)
+  // Every selling price -- the dish page, Home's "Use" button, Prices -- is
+  // saved by one action, so the guard lives there.
+  const s = src('src/lib/actions/set-price.ts')
+  assert.match(s, /requiredAmount\(\w+, 'price'\)/)
+  assert.doesNotMatch(s, /Number\(\w+\.get\('price'\)\)/)
+  assert.doesNotMatch(src('src/app/(app)/recipes/[id]/page.tsx'), /Number\(formData\.get\('price'\)\)/)
 })
 
 test('a blank ingredient purchase amount cannot silently become zero', () => {
@@ -99,9 +102,12 @@ test('deliberately optional money fields were left alone', () => {
 // --- the prefill ------------------------------------------------------------
 test('the sale form offers the price the product is already sold at', () => {
   const page = src('src/app/(app)/sales/[id]/page.tsx')
-  // read from the same view the dashboard shows "You charge" from
-  assert.match(page, /from\('v_product_attention'\)/)
-  assert.match(page, /selling_price/)
+  // read from the same place as the New sale menu: fn_menu_prices (0064),
+  // which gives sales staff the selling price and nothing cost-like
+  assert.match(page, /loadMenuPrices\(/)
+  const menu = src('src/lib/data/menu.ts')
+  assert.match(menu, /rpc\('fn_menu_prices'\)/)
+  assert.match(menu, /selling_price/)
   assert.match(page, /<ProductAndPriceFields products=\{productOptions\} \/>/)
 
   const cmp = src('src/components/product-price-field.tsx')

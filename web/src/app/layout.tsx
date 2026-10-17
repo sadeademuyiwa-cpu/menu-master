@@ -4,6 +4,7 @@ import { Suspense } from 'react'
 import { Progress } from '@/components/progress'
 import { Analytics } from '@/components/analytics'
 import { loadSiteSettings } from '@/lib/data/site'
+import { PHOTO_PREFERENCE_SCRIPT } from '@/lib/dish-photo'
 import './globals.css'
 
 // The brand's two faces, self-hosted (SIL OFL, licences beside the files) and
@@ -50,7 +51,17 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const site = await loadSiteSettings()
   return (
-    <html lang="en" className={`${inter.variable} ${jakarta.variable}`}>
+    // suppressHydrationWarning: the script below sets data-photos on <html>
+    // before React arrives, so the attribute is on the page but not in this
+    // tree. It reaches <html>'s own attributes only, nothing beneath.
+    <html lang="en" className={`${inter.variable} ${jakarta.variable}`} suppressHydrationWarning>
+      <head>
+        {/* "Hide photos to save data", applied before the first paint so a
+            hidden photo never flashes (lib/dish-photo.ts). Read on the phone,
+            never from cookies() or headers() here: either would make every
+            page dynamic, the static landing and sign-in pages included. */}
+        <script dangerouslySetInnerHTML={{ __html: PHOTO_PREFERENCE_SCRIPT }} />
+      </head>
       <body>
         {/* The bar across the top while the next page is on its way. */}
         <Suspense fallback={null}><Progress /></Suspense>

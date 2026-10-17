@@ -1,49 +1,39 @@
-'use client'
-
-import { useState } from 'react'
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { Sheet } from '@/components/sheet'
-import { AppIcon, type IconName } from '@/components/icons'
+import { Suspense } from 'react'
+import { createClient } from '@/lib/supabase/server'
+import { hasSalesEntitlement } from '@/lib/data/context'
+import { QuickAddMenu } from '@/app/(app)/dashboard/quick-add-menu'
+import { quickActions } from '@/app/(app)/dashboard/roles'
 
 /**
- * The raised "+" on a phone. One tap, then the four things an owner records:
- * a sale, a purchase, a dish, an item. Hidden on the screens that ARE one of
- * those, and during setup, where the next step is already the whole page.
+ * The raised "+" on a phone, offering only what this person can record:
+ * a sale (owner, manager, sales, on a plan with Sales), a purchase (owner,
+ * manager, accountant), a dish or an item (owner, manager, kitchen). The
+ * roles are the database's own (migrations/0015); app/(app)/dashboard/roles.ts
+ * holds them.
+ *
+ * Decided here on the server, so a phone is never sent a button its role
+ * cannot use. Streamed in its own Suspense boundary: the role read never holds
+ * up the page, and the "+" appears a moment after it.
  */
-const ACTIONS: { href: string; icon: IconName; label: string; meta: string }[] = [
-  { href: '/sales/new', icon: 'sales', label: 'Record a sale', meta: 'What you sold' },
-  { href: '/purchases/new', icon: 'purchases', label: 'Record a purchase', meta: 'What you paid' },
-  { href: '/recipes/new', icon: 'recipes', label: 'New dish', meta: 'Cost what you make' },
-  { href: '/ingredients', icon: 'ingredients', label: 'Add an item', meta: 'An ingredient or packaging' },
-]
-
 export function QuickAdd() {
-  const pathname = usePathname() ?? ''
-  const [open, setOpen] = useState(false)
-  if (/\/new$|\/correct$|^\/start|^\/onboarding/.test(pathname)) return null
-
   return (
-    <>
-      <button type="button" className="mm-fab" aria-label="Add something" onClick={() => setOpen(true)}>
-        <AppIcon name="plus" size={26} />
-      </button>
-      <Sheet open={open} onClose={() => setOpen(false)} title="What are you recording?">
-        <ul className="mm-quick-list">
-          {ACTIONS.map((a) => (
-            <li key={a.href}>
-              <Link href={a.href} className="mm-action-tile" onClick={() => setOpen(false)}>
-                <span className="mm-action-icon"><AppIcon name={a.icon} size={21} /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{a.label}</span>
-                  <span className="mt-0.5 block truncate text-xs" style={{ color: 'var(--mm-muted)' }}>{a.meta}</span>
-                </span>
-                <AppIcon name="chevron-right" size={17} className="shrink-0" style={{ color: 'var(--mm-muted)' }} />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </Sheet>
-    </>
+    <Suspense fallback={null}>
+      <QuickAddForRole />
+    </Suspense>
   )
+}
+
+async function QuickAddForRole() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  // The caller's OWN membership: RLS lets a member read every membership of
+  // the account, so the user filter matters (see lib/data/context.ts).
+  const [{ data: member }, salesPlan] = await Promise.all([
+    supabase.from('memberships').select('role').eq('user_id', user.id)
+      .order('created_at').limit(1).maybeSingle<{ role: string }>(),
+    hasSalesEntitlement(),
+  ])
+  if (!member) return null
+  return <QuickAddMenu actions={quickActions(member.role, salesPlan)} />
 }

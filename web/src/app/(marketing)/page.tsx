@@ -5,7 +5,9 @@ import { COSTING_FEATURES, TRADING_FEATURES, PLAN_FAQ } from '@/lib/site/plan-fe
 import { AppIcon, type IconName } from '@/components/icons'
 import { BrandLockup } from '@/components/brand-mark'
 import { TrackOnce } from '@/components/track-once'
-import { money } from '@/lib/format'
+import { DishTile } from '@/components/dish-tile'
+import { CostBreakdown } from '@/components/charts'
+import { money, percent } from '@/lib/format'
 import { LEGAL } from '@/lib/legal'
 import './landing.css'
 
@@ -31,10 +33,39 @@ export async function generateMetadata(_props: unknown, parent: ResolvingMetadat
 // fast. Signed-in owners never see it -- the middleware sends them to the app.
 export const revalidate = 60
 
-const PAINS: { title: string; body: string }[] = [
-  { title: 'Market prices moved again', body: 'Tomatoes doubled, gas went up — and your menu prices stayed where they were.' },
-  { title: 'Busy, but where is the profit?', body: 'Orders keep coming, yet there is never enough left at the end of the month.' },
-  { title: 'Pricing by guesswork', body: 'You copy the shop next door and hope the price covers what you spent.' },
+type Photo = {
+  /** In web/public/photos: .webp, because the middleware lets only svg, png,
+   *  jpg and webp past the sign-in check (middleware.ts matcher). */
+  src: string
+  /** What is in the picture, not what it is for. */
+  alt: string
+  /** object-position for the phone's wider 16:9 cut of the 4:3 photo. */
+  focus: string
+}
+
+/**
+ * Real Nigerian food, beside the owner's real worries. Free Pexels photos,
+ * cropped to the food and hands with no faces and no number plates, credited
+ * under the band and in branding/06-imagery/credits.md. A vendor's face next
+ * to "where is the profit?" would show a real person in a poor light, which
+ * the Pexels licence forbids, so the crops leave faces out.
+ */
+const PAINS: { title: string; body: string; photo: Photo }[] = [
+  {
+    title: 'Market prices moved again',
+    body: 'Tomatoes doubled, gas went up, and your menu prices stayed where they were.',
+    photo: { src: '/photos/market-stall-lagos.webp', alt: 'Tomatoes and peppers piled on trays at a Lagos market stall.', focus: '50% 45%' },
+  },
+  {
+    title: 'Busy, but where is the profit?',
+    body: 'Orders keep coming, yet there is never enough left at the end of the month.',
+    photo: { src: '/photos/street-cook-lagos.webp', alt: 'A street cook in Lagos turns a tray of meat and sliced onions.', focus: '50% 35%' },
+  },
+  {
+    title: 'Pricing by guesswork',
+    body: 'You copy the shop next door and hope the price covers what you spent.',
+    photo: { src: '/photos/jollof-pot-jos.webp', alt: 'A big pot of jollof rice, just cooked, in Jos.', focus: '50% 40%' },
+  },
 ]
 
 const STEPS: { title: string; body: string }[] = [
@@ -47,19 +78,25 @@ const FEATURES: { icon: IconName; title: string; body: string; plan?: string }[]
   { icon: 'recipes', title: 'True cost per plate', body: 'From what you actually paid, in the units you buy. No averages, no guesses.' },
   { icon: 'pricing', title: 'A selling price that pays', body: 'See your profit per plate and margin before you set a price.' },
   { icon: 'purchases', title: 'Prices that keep up', body: 'Record a new purchase and every dish that uses it is costed again.' },
-  { icon: 'package', title: 'The hidden costs too', body: 'Packs and sizes, packaging, labour and your monthly bills.' },
+  { icon: 'package', title: 'The hidden costs too', body: 'Packs and sizes, packaging, paid work and your monthly bills.' },
   { icon: 'sales', title: 'Sales and WhatsApp receipts', body: 'Take an order in a few taps and send the receipt straight to WhatsApp.', plan: 'Costing + Sales' },
   { icon: 'reports', title: 'What you really earned', body: 'Daily takings, profit and your best customers, in one place.', plan: 'Costing + Sales' },
 ]
 
-/** A drawn example of a costed dish, shown when no screenshot is set. */
+/**
+ * A drawn example of a costed dish, shown when no screenshot is set. It is
+ * drawn with the app's own pieces (the dish tile and the cost bar), so the
+ * page shows what the dish page really looks like. Biggest part first: the
+ * cost bar colours its parts in the order given. Short labels, because the
+ * legend has two narrow columns inside the drawn phone.
+ */
 const EXAMPLE = {
   dish: 'Jollof rice & chicken',
   parts: [
-    { label: 'Rice', amount: 520 },
     { label: 'Chicken', amount: 780 },
-    { label: 'Tomato & pepper mix', amount: 260 },
-    { label: 'Oil & seasoning', amount: 150 },
+    { label: 'Rice', amount: 520 },
+    { label: 'Pepper mix', amount: 260 },
+    { label: 'Oil & spices', amount: 150 },
     { label: 'Pack & gas', amount: 130 },
   ],
   price: 3000,
@@ -68,8 +105,7 @@ const EXAMPLE = {
 
 function PhoneMock({ imageUrl }: { imageUrl: string | null }) {
   const cost = EXAMPLE.parts.reduce((s, p) => s + p.amount, 0)
-  const profit = EXAMPLE.price - cost
-  const max = Math.max(...EXAMPLE.parts.map((p) => p.amount))
+  const keep = EXAMPLE.price - cost
   return (
     <div className="lp-phone" aria-hidden={imageUrl ? undefined : true}>
       <div className="lp-phone-notch" />
@@ -78,26 +114,28 @@ function PhoneMock({ imageUrl }: { imageUrl: string | null }) {
         <img src={imageUrl} alt="Menu Master on a phone" className="lp-phone-img" />
       ) : (
         <div className="lp-phone-screen">
-          <p className="lp-mock-eyebrow">Example dish</p>
-          <p className="lp-mock-title">{EXAMPLE.dish}</p>
+          <div className="lp-mock-head">
+            <DishTile name={EXAMPLE.dish} size="sm" />
+            <div className="min-w-0">
+              <p className="lp-mock-eyebrow">Example dish</p>
+              <p className="lp-mock-title">{EXAMPLE.dish}</p>
+            </div>
+          </div>
           <div className="lp-mock-stats">
             <div><span>Cost per plate</span><strong>{money(cost)}</strong></div>
             <div><span>You sell at</span><strong>{money(EXAMPLE.price)}</strong></div>
           </div>
           <div className="lp-mock-profit">
-            <span>Profit per plate</span>
-            <strong>{money(profit)}</strong>
-            <em>{Math.round((profit / EXAMPLE.price) * 100)}% margin</em>
+            <span>You keep, per plate</span>
+            <strong>{money(keep)}</strong>
+            <em>{percent((keep / EXAMPLE.price) * 100)} margin</em>
           </div>
           <p className="lp-mock-label">What one plate costs</p>
-          <ul className="lp-mock-parts">
-            {EXAMPLE.parts.map((p) => (
-              <li key={p.label}>
-                <span className="lp-mock-part-row"><span>{p.label}</span><span>{money(p.amount)}</span></span>
-                <span className="lp-mock-bar"><span style={{ width: `${(p.amount / max) * 100}%` }} /></span>
-              </li>
-            ))}
-          </ul>
+          <CostBreakdown
+            ariaLabel={`What one plate of ${EXAMPLE.dish.toLowerCase()} is made of.`}
+            total={cost}
+            parts={EXAMPLE.parts}
+          />
           <div className="lp-mock-check">
             <span>Try a price</span>
             <strong>At {money(EXAMPLE.tryPrice)} you keep {money(EXAMPLE.tryPrice - cost)} a plate</strong>
@@ -179,18 +217,35 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* --- pains -------------------------------------------------------- */}
+        {/* --- pains, over real food ---------------------------------------- */}
         <section className="lp-section">
           <div className="lp-wrap">
             <h2 className="lp-h2">Sound familiar?</h2>
-            <div className="mt-8 grid gap-4 md:grid-cols-3">
+            <div className="lp-pains">
               {PAINS.map((p) => (
-                <div key={p.title} className="lp-card">
-                  <h3 className="text-base font-semibold">{p.title}</h3>
-                  <p className="lp-muted mt-2">{p.body}</p>
-                </div>
+                <article key={p.title} className="lp-pain">
+                  <div className="lp-photo">
+                    {/* A plain <img>: the file is already 800 px and under
+                        90 KB, and next/image would only fetch it again
+                        through this server. Lazy, so a visitor who never
+                        scrolls this far never downloads it. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.photo.src}
+                      alt={p.photo.alt}
+                      width={800}
+                      height={600}
+                      loading="lazy"
+                      decoding="async"
+                      style={{ objectPosition: p.photo.focus }}
+                    />
+                    <h3 className="lp-pain-title">{p.title}</h3>
+                  </div>
+                  <p className="lp-muted lp-pain-body">{p.body}</p>
+                </article>
               ))}
             </div>
+            <p className="lp-credit">Photos: Godiva Omoruyi, Jboy Designer and Jagaba Denis, on Pexels.</p>
             <p className="lp-answer">
               Menu Master answers one question for every dish you sell: <strong>after paying for everything in it, what do you keep?</strong>
             </p>

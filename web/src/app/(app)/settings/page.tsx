@@ -3,9 +3,11 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
-  PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading, Disclosure,
+  PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading, Disclosure, BackLink,
 } from '@/components/ui'
-import { money, NOT_ENTERED } from '@/lib/format'
+import { money, percent, quantity, NOT_ENTERED } from '@/lib/format'
+import { parentTab } from '@/lib/nav'
+import { canSeeCosts } from '@/lib/pricing'
 import { BUSINESS_TYPES, isBusinessType } from '@/lib/business-types'
 import { createClient } from '@/lib/supabase/server'
 
@@ -147,7 +149,7 @@ async function deactivateRate(formData: FormData) {
   const { error } = await supabase.from('labour_rates')
     .update({ is_active: false }).eq('id', String(formData.get('id') ?? ''))
   revalidatePath('/settings')
-  redirect(withNotice('/settings', describeWriteError(error) ?? 'Hidden. Recipes that use it keep it.'))
+  redirect(withNotice('/settings', describeWriteError(error) ?? 'Hidden. Dishes that use it keep it.'))
 }
 
 async function restoreRate(formData: FormData) {
@@ -292,34 +294,50 @@ export default async function SettingsPage({
   const ctx = await currentContext()
   const { supabase, accountId, businessId, role } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/settings'))
+  // Wages, monthly bills and the pricing settings are costs: they are read
+  // only for the roles that may see costs (fn_can_see_costs), and never sent
+  // to a sales or kitchen phone. Those are also the roles the database lets
+  // add and change wages and bills (labour_rates, overhead_items, 0015).
+  const costs = canSeeCosts(role)
+  const isOwner = role === 'owner'
 
+  type UnitRow = { id: string; code: string; name: string; kind: string }
   const [{ data: rates }, { data: overheads }, { data: settings }, { data: units }, { data: business }] = await Promise.all([
-    supabase.from('labour_rates').select('id,name,rate_per_hour,is_active')
-      .order('is_active', { ascending: false }).order('name').returns<Rate[]>(),
-    supabase.from('overhead_items')
-      .select('id,name,monthly_cost,is_active,basis_qty,basis_unit:units(code,name)')
-      .order('is_active', { ascending: false }).order('name').returns<Overhead[]>(),
-    supabase.from('business_settings')
-      .select('overhead_enabled,overhead_basis_qty,overhead_basis_unit_id,default_target_margin,price_rounding_to,show_markup_alongside,wavg_window_days')
-      .eq('business_id', businessId ?? '').maybeSingle<Settings>(),
-    supabase.from('units').select('id,code,name,kind').order('kind').order('code')
-      .returns<{ id: string; code: string; name: string; kind: string }[]>(),
+    costs
+      ? supabase.from('labour_rates').select('id,name,rate_per_hour,is_active')
+          .order('is_active', { ascending: false }).order('name').returns<Rate[]>()
+      : Promise.resolve({ data: null as Rate[] | null }),
+    costs
+      ? supabase.from('overhead_items')
+          .select('id,name,monthly_cost,is_active,basis_qty,basis_unit:units(code,name)')
+          .order('is_active', { ascending: false }).order('name').returns<Overhead[]>()
+      : Promise.resolve({ data: null as Overhead[] | null }),
+    costs
+      ? supabase.from('business_settings')
+          .select('overhead_enabled,overhead_basis_qty,overhead_basis_unit_id,default_target_margin,price_rounding_to,show_markup_alongside,wavg_window_days')
+          .eq('business_id', businessId ?? '').maybeSingle<Settings>()
+      : Promise.resolve({ data: null as Settings | null }),
+    costs
+      ? supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<UnitRow[]>()
+      : Promise.resolve({ data: null as UnitRow[] | null }),
     supabase.from('businesses').select('name,type').eq('id', businessId ?? '')
       .maybeSingle<{ name: string; type: string }>(),
   ])
-  const isOwner = role === 'owner'
+  const tab = parentTab('/settings')
+  const basisUnit = (units ?? []).find((u) => u.id === settings?.overhead_basis_unit_id)
 
   const inputClass = 'mm-input mt-1'
   const inputStyle = undefined
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Your business settings"
-        sub="How Menu Master costs and prices for you." />
-      <p className="flex flex-wrap gap-x-4 text-sm">
-        <Link href="/account" className="mm-tap underline">Your account and plan →</Link>
-        <Link href="/settings/people" className="mm-tap underline">People on this account →</Link>
-      </p>
+      {tab && <BackLink href={tab.href}>{tab.label}</BackLink>}
+      <div className="space-y-1">
+        <PageHeader title="Settings" sub="How Menu Master costs and prices for you." />
+        <p className="text-sm">
+          <Link href="/settings/people" className="mm-inline-tap">People on this account →</Link>
+        </p>
+      </div>
       {notice && <Notice tone={/could not|cannot|must be|give |needs a name|choose|from 0|above zero|from 1/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
       {/* THE BUSINESS ----------------------------------------------- */}
@@ -355,247 +373,270 @@ export default async function SettingsPage({
         </section>
       )}
 
-      {/* LABOUR ------------------------------------------------------- */}
-      <section className="space-y-3">
-        <SectionHeading sub="What you pay per hour for cooking, prep or decorating. Each dish then says how many hours one batch takes, under “Time it takes”. Leave the rate blank if you do not know it yet: the dish is reported as incomplete, never as if the work were free.">
-          Kinds of work
-        </SectionHeading>
+      {!costs && (
+        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+          Wages, monthly bills and pricing are kept by the owner, manager and accountant.
+        </p>
+      )}
 
-        {!rates?.length ? (
-          <Empty>No paid work added yet. If you pay someone to cook or prep, add it here and it will be counted in your costs.</Empty>
-        ) : (
-          <ul className="space-y-2">
-            {rates.map((r) => (
-              <li key={r.id}>
-                <Card>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <span className="font-medium">
-                      {r.name}{!r.is_active && <span className="mm-absent"> · hidden</span>}
-                    </span>
-                    <span className="tabular-nums">
-                      {r.rate_per_hour !== null
-                        ? <>{money(Number(r.rate_per_hour))} an hour</>
-                        : <span className="mm-absent">{NOT_ENTERED}</span>}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-4">
-                    <Disclosure summary="Edit">
-                      <form action={updateRate} className="mt-2 grid gap-3 sm:grid-cols-3 sm:items-end">
+      {/* LABOUR ------------------------------------------------------- */}
+      {costs && (
+        <section className="space-y-3">
+          <SectionHeading sub="What you pay per hour for cooking, prep or decorating. Each dish then says how many hours a batch takes. Leave a rate blank if you do not know it yet: the dish shows as incomplete, never as free work.">
+            Kinds of work
+          </SectionHeading>
+
+          {!rates?.length ? (
+            <Empty>No paid work yet. Add what you pay for cooking or prep, and it is counted in your costs.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {rates.map((r) => (
+                <li key={r.id}>
+                  <Card>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <span className="font-medium">
+                        {r.name}{!r.is_active && <span className="mm-absent"> · hidden</span>}
+                      </span>
+                      <span className="tabular-nums">
+                        {r.rate_per_hour !== null
+                          ? <>{money(Number(r.rate_per_hour))} an hour</>
+                          : <span className="mm-absent">{NOT_ENTERED}</span>}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-4">
+                      <Disclosure summary="Edit">
+                        <form action={updateRate} className="mt-2 grid gap-3 sm:grid-cols-3 sm:items-end">
+                          <input type="hidden" name="id" value={r.id} />
+                          <Field label="What kind of work?">
+                            <input name="name" required defaultValue={r.name} className={inputClass} style={inputStyle} />
+                          </Field>
+                          <Field label="Paid per hour (₦)">
+                            <input name="rate_per_hour" type="number" step="0.01" min="0" inputMode="decimal"
+                              defaultValue={r.rate_per_hour ?? ''} className={inputClass} style={inputStyle} />
+                          </Field>
+                          <div className="flex items-end"><Submit>Save</Submit></div>
+                          <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                            Every dish that uses this work is re-costed when you save.
+                          </p>
+                        </form>
+                      </Disclosure>
+                      <form action={r.is_active ? deactivateRate : restoreRate}>
                         <input type="hidden" name="id" value={r.id} />
-                        <Field label="What kind of work?">
-                          <input name="name" required defaultValue={r.name} className={inputClass} style={inputStyle} />
-                        </Field>
-                        <Field label="Paid per hour (₦)">
-                          <input name="rate_per_hour" type="number" step="0.01" min="0" inputMode="decimal"
-                            defaultValue={r.rate_per_hour ?? ''} className={inputClass} style={inputStyle} />
-                        </Field>
-                        <div className="flex items-end"><Submit>Save</Submit></div>
-                        <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                          Every dish that uses this work is re-costed when you save.
-                        </p>
+                        <InlineSubmit>{r.is_active ? 'Hide' : 'Show again'}</InlineSubmit>
                       </form>
-                    </Disclosure>
-                    <form action={r.is_active ? deactivateRate : restoreRate}>
-                      <input type="hidden" name="id" value={r.id} />
-                      <InlineSubmit>{r.is_active ? 'Hide' : 'Show again'}</InlineSubmit>
-                    </form>
-                  </div>
-                </Card>
-              </li>
-            ))}
-          </ul>
-        )}
-        <Disclosure summary="Add a kind of work" open={!rates?.length}>
-          <form action={addRate} className="grid gap-3 sm:grid-cols-3">
-            <Field label="What kind of work?">
-              <input name="name" required placeholder="Cooking" className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Paid per hour (₦)">
-              <input name="rate_per_hour" type="number" step="0.01" min="0"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <div className="flex items-end"><Submit>Add</Submit></div>
-          </form>
-        </Disclosure>
-      </section>
+                    </div>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Disclosure summary="Add a kind of work" open={!rates?.length}>
+            <form action={addRate} className="grid gap-3 sm:grid-cols-3">
+              <Field label="What kind of work?">
+                <input name="name" required placeholder="Cooking" className={inputClass} style={inputStyle} />
+              </Field>
+              <Field label="Paid per hour (₦)">
+                <input name="rate_per_hour" type="number" step="0.01" min="0" inputMode="decimal"
+                  className={inputClass} style={inputStyle} />
+              </Field>
+              <div className="flex items-end"><Submit>Add</Submit></div>
+            </form>
+          </Disclosure>
+        </section>
+      )}
 
       {/* OVERHEAD ----------------------------------------------------- */}
-      <section className="space-y-3">
-        <SectionHeading sub="Rent, gas, light, airtime: the bills you pay whether you cook or not. Menu Master spreads them over what you make in a month, so each plate carries its share. If a figure is missing, a dish is reported as incomplete rather than given a share of zero.">
-          Monthly running costs
-        </SectionHeading>
-        <Card>
-          <form action={saveOverheadSettings} className="grid gap-3 sm:grid-cols-3 sm:items-end">
-            <label className="mm-tap flex items-center gap-2 text-sm sm:col-span-3">
-              <input type="checkbox" name="overhead_enabled" className="h-6 w-6"
-                defaultChecked={settings?.overhead_enabled ?? false} />
-              Count my running costs in each plate
-            </label>
-            <Field label="How much do you make in a month?">
-              <input name="overhead_basis_qty" type="number" step="any" min="0" inputMode="decimal"
-                defaultValue={settings?.overhead_basis_qty ?? undefined}
-                placeholder="600" className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Measured in">
-              <select name="overhead_basis_unit_id" defaultValue={settings?.overhead_basis_unit_id ?? ''}
-                className={inputClass} style={inputStyle}>
-                <option value="">— none —</option>
-                {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
-              </select>
-            </Field>
-            <div className="flex items-end"><Submit>Save</Submit></div>
-            <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
-              For example 600 litres of soup, 400 kg of bread, or 2,000 plates.
-            </p>
-          </form>
-        </Card>
-
-        {!overheads?.length ? (
-          <Empty>No monthly bills added yet. Rent, gas and electricity are real costs — add them to see what a plate truly costs you.</Empty>
-        ) : (
-          <ul className="space-y-2">
-            {overheads.map((o) => (
-              <li key={o.id}>
-                <Card>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <span className="font-medium">
-                      {o.name}{!o.is_active && <span className="mm-absent"> · hidden</span>}
-                    </span>
-                    <span className="tabular-nums">
-                      {o.monthly_cost !== null
-                        ? <>{money(Number(o.monthly_cost))} a month</>
-                        : <span className="mm-absent">{NOT_ENTERED}</span>}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
-                    {o.basis_qty !== null && o.basis_unit
-                      ? <>spread across {Number(o.basis_qty)} {o.basis_unit.code} you make</>
-                      : <>spread across your usual monthly amount</>}
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-4">
-                    <Disclosure summary="Edit">
-                      <form action={updateOverhead} className="mt-2 grid gap-3 sm:grid-cols-4 sm:items-end">
-                        <input type="hidden" name="id" value={o.id} />
-                        <Field label="What is it?">
-                          <input name="name" required defaultValue={o.name} className={inputClass} style={inputStyle} />
-                        </Field>
-                        <Field label="Cost each month (₦)">
-                          <input name="monthly_cost" type="number" step="0.01" min="0" inputMode="decimal"
-                            defaultValue={o.monthly_cost ?? ''} className={inputClass} style={inputStyle} />
-                        </Field>
-                        <Field label="Spread across how much?">
-                          <input name="basis_qty" type="number" step="any" min="0" inputMode="decimal"
-                            defaultValue={o.basis_qty ?? ''} className={inputClass} style={inputStyle} />
-                        </Field>
-                        <Field label="Of what?">
-                          <select name="basis_unit_id"
-                            defaultValue={o.basis_unit ? (units ?? []).find((u) => u.code === o.basis_unit?.code)?.id ?? '' : ''}
-                            className={inputClass} style={inputStyle}>
-                            <option value="">— use my usual amount —</option>
-                            {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
-                          </select>
-                        </Field>
-                        <div className="sm:col-span-4"><Submit>Save</Submit></div>
-                      </form>
-                    </Disclosure>
-                    <form action={o.is_active ? deactivateOverhead : restoreOverhead}>
-                      <input type="hidden" name="id" value={o.id} />
-                      <InlineSubmit>{o.is_active ? 'Hide' : 'Show again'}</InlineSubmit>
-                    </form>
-                  </div>
-                </Card>
-              </li>
-            ))}
-          </ul>
-        )}
-        <Disclosure summary="Add a monthly bill" open={!overheads?.length}>
-          <form action={addOverhead} className="grid gap-3 sm:grid-cols-3 sm:items-end">
-            <Field label="What is it?">
-              <input name="name" required placeholder="Gas" className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Cost each month (₦)">
-              <input name="monthly_cost" type="number" step="0.01" min="0" inputMode="decimal"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <div className="flex items-end"><Submit>Add running cost</Submit></div>
-            {/* The precise option, folded: most businesses make one kind of
-                thing and the bill is simply spread across the monthly amount
-                above. A soup-and-bread kitchen opens this and says which. */}
-            <div className="sm:col-span-3">
-              <Disclosure summary="Spread this bill across something else?">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Spread across how much?">
-                    <input name="basis_qty" type="number" step="any" min="0" placeholder="600" inputMode="decimal"
-                      className={inputClass} style={inputStyle} />
-                  </Field>
-                  <Field label="Of what?">
-                    <select name="basis_unit_id" className={inputClass} style={inputStyle}>
-                      <option value="">— use my usual amount —</option>
-                      {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
-                    </select>
-                  </Field>
-                </div>
-                <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                  Only if you make more than one kind of thing: rent for the soup pots over 600
-                  litres, the bakery bill over 400 kg. Split the money between the lines; do not
-                  enter the same bill twice.
+      {costs && (
+        <section className="space-y-3">
+          <SectionHeading sub="Rent, gas, light, airtime: the bills you pay whether you cook or not. Menu Master spreads them over what you make in a month, so each plate carries its share. A missing figure leaves a dish incomplete, never with a share of zero.">
+            Monthly running costs
+          </SectionHeading>
+          <Card>
+            {/* business_settings: only the owner may change it (0015). */}
+            {isOwner ? (
+              <form action={saveOverheadSettings} className="grid gap-3 sm:grid-cols-3 sm:items-end">
+                <label className="mm-tap flex items-center gap-2 text-sm sm:col-span-3">
+                  <input type="checkbox" name="overhead_enabled" className="h-6 w-6"
+                    defaultChecked={settings?.overhead_enabled ?? false} />
+                  Count my running costs in each plate
+                </label>
+                <Field label="How much do you make in a month?">
+                  <input name="overhead_basis_qty" type="number" step="any" min="0" inputMode="decimal"
+                    defaultValue={settings?.overhead_basis_qty ?? undefined}
+                    placeholder="600" className={inputClass} style={inputStyle} />
+                </Field>
+                <Field label="Measured in">
+                  <select name="overhead_basis_unit_id" defaultValue={settings?.overhead_basis_unit_id ?? ''}
+                    className={inputClass} style={inputStyle}>
+                    <option value="">— none —</option>
+                    {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                  </select>
+                </Field>
+                <div className="flex items-end"><Submit>Save</Submit></div>
+                <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                  For example 600 litres of soup, 400 kg of bread, or 2,000 plates.
                 </p>
-              </Disclosure>
-            </div>
-          </form>
-        </Disclosure>
-      </section>
+              </form>
+            ) : (
+              <>
+                <p className="text-sm">
+                  {settings?.overhead_enabled
+                    ? <>Counted in each plate, spread across {settings.overhead_basis_qty !== null && basisUnit
+                        ? quantity(Number(settings.overhead_basis_qty), basisUnit.code)
+                        : <span className="mm-absent">{NOT_ENTERED}</span>} a month.</>
+                    : 'Not counted in each plate yet.'}
+                </p>
+                <p className="mt-1 text-xs" style={{ color: 'var(--mm-muted)' }}>Only the owner can change this.</p>
+              </>
+            )}
+          </Card>
+
+          {!overheads?.length ? (
+            <Empty>No monthly bills yet. Add rent, gas and light to see what a plate truly costs you.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {overheads.map((o) => (
+                <li key={o.id}>
+                  <Card>
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <span className="font-medium">
+                        {o.name}{!o.is_active && <span className="mm-absent"> · hidden</span>}
+                      </span>
+                      <span className="tabular-nums">
+                        {o.monthly_cost !== null
+                          ? <>{money(Number(o.monthly_cost))} a month</>
+                          : <span className="mm-absent">{NOT_ENTERED}</span>}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                      {o.basis_qty !== null && o.basis_unit
+                        ? <>spread across {quantity(Number(o.basis_qty), o.basis_unit.code)} you make</>
+                        : <>spread across your usual monthly amount</>}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-4">
+                      <Disclosure summary="Edit">
+                        <form action={updateOverhead} className="mt-2 grid gap-3 sm:grid-cols-4 sm:items-end">
+                          <input type="hidden" name="id" value={o.id} />
+                          <Field label="What is it?">
+                            <input name="name" required defaultValue={o.name} className={inputClass} style={inputStyle} />
+                          </Field>
+                          <Field label="Cost each month (₦)">
+                            <input name="monthly_cost" type="number" step="0.01" min="0" inputMode="decimal"
+                              defaultValue={o.monthly_cost ?? ''} className={inputClass} style={inputStyle} />
+                          </Field>
+                          <Field label="Spread across how much?">
+                            <input name="basis_qty" type="number" step="any" min="0" inputMode="decimal"
+                              defaultValue={o.basis_qty ?? ''} className={inputClass} style={inputStyle} />
+                          </Field>
+                          <Field label="Of what?">
+                            <select name="basis_unit_id"
+                              defaultValue={o.basis_unit ? (units ?? []).find((u) => u.code === o.basis_unit?.code)?.id ?? '' : ''}
+                              className={inputClass} style={inputStyle}>
+                              <option value="">— use my usual amount —</option>
+                              {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                            </select>
+                          </Field>
+                          <div className="sm:col-span-4"><Submit>Save</Submit></div>
+                        </form>
+                      </Disclosure>
+                      <form action={o.is_active ? deactivateOverhead : restoreOverhead}>
+                        <input type="hidden" name="id" value={o.id} />
+                        <InlineSubmit>{o.is_active ? 'Hide' : 'Show again'}</InlineSubmit>
+                      </form>
+                    </div>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Disclosure summary="Add a monthly bill" open={!overheads?.length}>
+            <form action={addOverhead} className="grid gap-3 sm:grid-cols-3 sm:items-end">
+              <Field label="What is it?">
+                <input name="name" required placeholder="Gas" className={inputClass} style={inputStyle} />
+              </Field>
+              <Field label="Cost each month (₦)">
+                <input name="monthly_cost" type="number" step="0.01" min="0" inputMode="decimal"
+                  className={inputClass} style={inputStyle} />
+              </Field>
+              <div className="flex items-end"><Submit>Add running cost</Submit></div>
+              {/* The precise option, folded: most businesses make one kind of
+                  thing and the bill is simply spread across the monthly amount
+                  above. A soup-and-bread kitchen opens this and says which. */}
+              <div className="sm:col-span-3">
+                <Disclosure summary="Spread this bill across something else?">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Spread across how much?">
+                      <input name="basis_qty" type="number" step="any" min="0" placeholder="600" inputMode="decimal"
+                        className={inputClass} style={inputStyle} />
+                    </Field>
+                    <Field label="Of what?">
+                      <select name="basis_unit_id" className={inputClass} style={inputStyle}>
+                        <option value="">— use my usual amount —</option>
+                        {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                  <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                    Only if you make more than one thing: rent for the soup pots over 600 litres, the bakery bill over 400 kg. Enter each bill once.
+                  </p>
+                </Disclosure>
+              </div>
+            </form>
+          </Disclosure>
+        </section>
+      )}
 
       {/* PRICING ------------------------------------------------------ */}
-      <section className="space-y-3">
-        <SectionHeading sub="What you aim to keep from each sale, and how suggested prices are rounded.">
-          How you price
-        </SectionHeading>
-        <Card>
-          {isOwner && settings ? (
-            <form action={savePricing} className="grid gap-3 sm:grid-cols-3 sm:items-end">
-              <Field label="Target margin (%)">
-                <input name="default_target_margin" type="number" step="any" min="0" max="99" required inputMode="decimal"
-                  defaultValue={settings.default_target_margin ?? 40} className={inputClass} style={inputStyle} />
-              </Field>
-              <Field label="Round suggested prices up to (₦)">
-                <input name="price_rounding_to" type="number" step="any" min="1" required inputMode="decimal"
-                  defaultValue={settings.price_rounding_to ?? 50} className={inputClass} style={inputStyle} />
-              </Field>
-              <Field label="Use purchases from the last (days)">
-                <input name="wavg_window_days" type="number" step="1" min="1" max="365" required inputMode="numeric"
-                  defaultValue={settings.wavg_window_days ?? 90} className={inputClass} style={inputStyle} />
-              </Field>
-              <label className="mm-tap flex items-center gap-2 text-sm sm:col-span-2">
-                <input type="checkbox" name="show_markup_alongside" className="h-6 w-6"
-                  defaultChecked={settings.show_markup_alongside} />
-                Also show markup (profit as a share of the cost) on each dish
-              </label>
-              <div className="flex items-end"><Submit>Save pricing</Submit></div>
-              <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
-                Margin is what you keep as a share of the price: at 40%, a plate that costs ₦600
-                is priced at ₦1,000. Suggested prices are always rounded <strong>up</strong>, never
-                down below your margin. Ingredient costs are averaged over your purchases in the
-                last {settings.wavg_window_days ?? 90} days; older ones are shown as “Old price”.
-              </p>
-            </form>
-          ) : (
-            <>
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                <dt style={{ color: 'var(--mm-muted)' }}>Target margin</dt>
-                <dd className="tabular-nums">{settings?.default_target_margin ?? NOT_ENTERED}%</dd>
-                <dt style={{ color: 'var(--mm-muted)' }}>Suggested prices rounded up to</dt>
-                <dd className="tabular-nums">
-                  {settings?.price_rounding_to ? money(Number(settings.price_rounding_to)) : NOT_ENTERED}
-                </dd>
-                <dt style={{ color: 'var(--mm-muted)' }}>Purchases counted from the last</dt>
-                <dd className="tabular-nums">{settings?.wavg_window_days ?? 90} days</dd>
-              </dl>
-              <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>Only the owner can change these.</p>
-            </>
-          )}
-        </Card>
-      </section>
+      {costs && (
+        <section className="space-y-3">
+          <SectionHeading sub={<>
+            Margin is what you keep as a share of the price: at 40%, a plate that costs ₦600 sells
+            for ₦1,000. Suggested prices are always rounded up, never down below your target.
+            Ingredient costs are averaged over your purchases in the last {settings?.wavg_window_days ?? 90} days;
+            older ones show as “Old price”.
+          </>}>
+            How you price
+          </SectionHeading>
+          <Card>
+            {isOwner && settings ? (
+              <form action={savePricing} className="grid gap-3 sm:grid-cols-3 sm:items-end">
+                <Field label="Target margin (%)">
+                  <input name="default_target_margin" type="number" step="any" min="0" max="99" required inputMode="decimal"
+                    defaultValue={settings.default_target_margin ?? 40} className={inputClass} style={inputStyle} />
+                </Field>
+                <Field label="Round suggested prices up to (₦)">
+                  <input name="price_rounding_to" type="number" step="any" min="1" required inputMode="decimal"
+                    defaultValue={settings.price_rounding_to ?? 50} className={inputClass} style={inputStyle} />
+                </Field>
+                <Field label="Use purchases from the last (days)">
+                  <input name="wavg_window_days" type="number" step="1" min="1" max="365" required inputMode="numeric"
+                    defaultValue={settings.wavg_window_days ?? 90} className={inputClass} style={inputStyle} />
+                </Field>
+                <label className="mm-tap flex items-center gap-2 text-sm sm:col-span-2">
+                  <input type="checkbox" name="show_markup_alongside" className="h-6 w-6"
+                    defaultChecked={settings.show_markup_alongside} />
+                  Also show markup (profit as a share of the cost) on each dish
+                </label>
+                <div className="flex items-end"><Submit>Save pricing</Submit></div>
+              </form>
+            ) : (
+              <>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                  <dt style={{ color: 'var(--mm-muted)' }}>Target margin</dt>
+                  <dd className="tabular-nums">{percent(settings?.default_target_margin, NOT_ENTERED)}</dd>
+                  <dt style={{ color: 'var(--mm-muted)' }}>Suggested prices rounded up to</dt>
+                  <dd className="tabular-nums">
+                    {settings?.price_rounding_to ? money(Number(settings.price_rounding_to)) : NOT_ENTERED}
+                  </dd>
+                  <dt style={{ color: 'var(--mm-muted)' }}>Purchases counted from the last</dt>
+                  <dd className="tabular-nums">{settings?.wavg_window_days ?? 90} days</dd>
+                </dl>
+                <p className="mt-2 text-xs" style={{ color: 'var(--mm-muted)' }}>Only the owner can change these.</p>
+              </>
+            )}
+          </Card>
+        </section>
+      )}
     </div>
   )
 }

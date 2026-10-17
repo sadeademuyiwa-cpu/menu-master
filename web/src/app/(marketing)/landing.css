@@ -1,3 +1,5 @@
+@layer theme, base, components, utilities;
+
 /* =============================================================================
    PUBLIC LANDING PAGE (/). Its own rhythm: wider, airier, bigger type than the
    app, built from the same tokens so light and dark both hold. Loaded by the
@@ -63,15 +65,11 @@
 .lp-mock-profit strong { font-size: 1.35rem; letter-spacing: -0.02em; }
 .lp-mock-profit em { font-style: normal; font-size: .72rem; font-weight: 700; background: rgba(255, 255, 255, .18); padding: .15rem .45rem; border-radius: 999px; }
 .lp-mock-label { margin-top: .85rem; font-size: .66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #66706a; }
-.lp-mock-parts { margin-top: .45rem; display: grid; gap: .5rem; }
 .lp-mock-check { margin-top: .85rem; border: 1px dashed #b9d9c7; background: #f1f8f4; border-radius: .8rem; padding: .55rem .65rem; }
 .lp-mock-check span { display: block; font-size: .64rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #1f7a52; }
 .lp-mock-check strong { display: block; margin-top: .15rem; font-size: .76rem; line-height: 1.35; }
 .lp-mock-update { margin-top: .6rem; display: flex; align-items: center; gap: .45rem; font-size: .68rem; color: #66706a; }
-.lp-mock-dot { flex: none; width: .45rem; height: .45rem; border-radius: 999px; background: #e3a008; box-shadow: 0 0 0 3px rgba(227, 160, 8, .18); }
-.lp-mock-part-row { display: flex; justify-content: space-between; font-size: .72rem; }
-.lp-mock-bar { display: block; margin-top: .2rem; height: .32rem; border-radius: 999px; background: #e8efe9; overflow: hidden; }
-.lp-mock-bar span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #1f7a52, #3aa776); }
+.lp-mock-dot { flex: none; width: .45rem; height: .45rem; border-radius: 999px; background: #1f7a52; box-shadow: 0 0 0 3px rgba(31, 122, 82, .18); }
 
 /* sections */
 .lp-section { padding: 64px 0; }
@@ -93,7 +91,11 @@
 .lp-steps { margin-top: 2.75rem; display: grid; gap: 1rem; }
 @media (min-width: 768px) { .lp-steps { grid-template-columns: repeat(3, 1fr); gap: 1.25rem; } }
 .lp-steps li { position: relative; background: var(--mm-surface); border: 1px solid var(--mm-line); border-radius: 1.25rem; padding: 1.5rem; }
-.lp-step-n { display: inline-grid; place-items: center; width: 2.3rem; height: 2.3rem; margin-bottom: 1rem; border-radius: 999px; font-weight: 700; color: #fff; background: var(--mm-accent); box-shadow: 0 8px 18px -8px var(--mm-accent); }
+/* The page's one gold thing (palette.md: one gold per screen, and the logo's
+   own "NG" does not count). Ink on Harvest Gold is 7.3:1; white on gold is on
+   the palette's do-not-use list. Gold stays #D4A020 in dark mode, and so does
+   the Ink on it, so neither flips. */
+.lp-step-n { display: inline-grid; place-items: center; width: 2.3rem; height: 2.3rem; margin-bottom: 1rem; border-radius: 999px; font-weight: 700; color: #171b18; background: var(--mm-gold); box-shadow: 0 8px 18px -8px var(--mm-gold); }
 
 .lp-shots { margin-top: 2.5rem; display: flex; gap: 1rem; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: .75rem; }
 .lp-shot { flex: 0 0 min(15rem, 70vw); scroll-snap-align: center; }
@@ -142,3 +144,59 @@
   color: #fff; background: #25d366; box-shadow: 0 12px 28px -10px rgba(0, 0, 0, .45);
 }
 @media (min-width: 640px) { .lp-wa { bottom: 24px; } }
+
+/* =============================================================================
+   ADDED FOR THE FOOD LOOK (October 2026). In @layer components, as every new
+   rule is: a loose rule beats every Tailwind utility on the same element.
+   ========================================================================== */
+@layer components {
+  /* "Sound familiar?": each worry over a real photo. Wide on a phone so the
+     three stacked cards stay short; 4:3 in three columns from tablet up. */
+  .lp-pains { margin-top: 2rem; display: grid; gap: 1rem; }
+  @media (min-width: 768px) { .lp-pains { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; } }
+  .lp-pain {
+    overflow: hidden; border-radius: 1.25rem;
+    background: var(--mm-surface); border: 1px solid var(--mm-line);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .03);
+  }
+  /* Forest under the photo too, so a photo still on its way, or hidden to
+     save data, leaves a green card with a readable title, not a hole. */
+  .lp-photo { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #0f5e3c; }
+  @media (min-width: 768px) { .lp-photo { aspect-ratio: 4 / 3; } }
+  .lp-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* The overlay from photo-direction.md: Forest, never black, at 80-88%
+     where the white title sits (white on it stays above 4.5:1 even over the
+     whitest onion) and fading up so the food shows. */
+  .lp-photo::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(to top,
+      rgb(15 94 60 / .88) 0%, rgb(15 94 60 / .8) 36%,
+      rgb(15 94 60 / .2) 72%, rgb(15 94 60 / .06) 100%);
+  }
+  .lp-pain-title {
+    position: absolute; z-index: 1; left: 0; right: 0; bottom: 0;
+    padding: 0 1.1rem 1rem; color: #fff;
+    font-size: 1.25rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance;
+  }
+  .lp-pain-body { padding: 1rem 1.1rem 1.2rem; }
+  .lp-credit { margin-top: .9rem; text-align: center; font-size: .8125rem; color: var(--mm-muted); }
+  /* The app's "Hide photos to save data" choice, or the phone's data saver
+     (app/layout.tsx sets html[data-photos]): a lazy image that is not shown
+     is never downloaded. */
+  html[data-photos="off"] .lp-photo img { display: none; }
+
+  /* The drawn phone is a light screen in both schemes, so the app pieces
+     drawn inside it (dish tile, cost bar) get the light tokens. */
+  .lp-phone-screen {
+    --mm-fg: #171b18; --mm-muted: #66706a; --mm-line: #dde3de;
+    --mm-surface: #ffffff; --mm-surface-2: #f0f3f0;
+    --mm-accent: #1f7a52; --mm-accent-strong: #0f5e3c; --mm-accent-soft: #e8f5ee;
+  }
+  /* ...and the dark-mode chart colours (globals.css) are put back to light. */
+  .lp-phone-screen .mm-chart { --mm-chart-kept: #0f5e3c; --mm-chart-sold: color-mix(in srgb, #1f7a52 32%, #fff); margin-top: .45rem; }
+  .lp-phone-screen .mm-cost-seg[data-shade="1"] { fill: #1f7a52; }
+  .lp-phone-screen .mm-cost-legend .mm-chart-swatch[data-shade="1"] { background: #1f7a52; }
+  .lp-phone-screen .mm-cost-bar { height: 12px; }
+  .lp-mock-head { display: flex; align-items: center; gap: .6rem; }
+  .lp-phone-screen .mm-cost-legend { gap: .25rem .75rem; margin-top: .5rem; font-size: .68rem; }
+}

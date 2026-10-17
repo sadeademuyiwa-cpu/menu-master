@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
@@ -5,8 +6,9 @@ import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Badge, Disclosure,
 } from '@/components/ui'
-import { money, quantity } from '@/lib/format'
+import { quantity } from '@/lib/format'
 import { ConfirmSubmit } from '@/components/confirm-submit'
+import { canChangeSizes } from '../roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -128,8 +130,9 @@ export default async function FormatDetail({
   const { id } = await params
   const { notice } = await searchParams
   const ctx = await currentContext()
-  const { supabase, accountId } = ctx
+  const { supabase, accountId, role } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/formats'))
+  const changes = canChangeSizes(role)
 
   const { data: format } = await supabase.from('serving_formats')
     .select('id,name,description,capacity_qty,is_active,capacity_unit:units(code)')
@@ -156,16 +159,19 @@ export default async function FormatDetail({
   const inputStyle = undefined
 
   return (
-    <div className="space-y-6">
-      <BackLink href="/formats">All sizes</BackLink>
-      <PageHeader
-        title={format.name}
-        sub={(format.capacity_qty !== null && format.capacity_unit
-          ? `Holds ${quantity(Number(format.capacity_qty), format.capacity_unit.code)}`
-          : 'Sold by the piece') + (format.is_active ? '' : ' · hidden')}
-      />
+    <div className="space-y-5">
+      <BackLink href="/formats">Sizes</BackLink>
+      <div className="space-y-1">
+        <PageHeader title={format.name} />
+        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+          {(format.capacity_qty !== null && format.capacity_unit
+            ? `Holds ${quantity(Number(format.capacity_qty), format.capacity_unit.code)}`
+            : 'Sold by the piece') + (format.is_active ? '' : ' · hidden')}
+        </p>
+      </div>
       {notice && <Notice tone={/could not|must be|how many|already|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
+      {changes && (
       <Disclosure summary="Edit this size">
         <form action={updateFormat} className="grid gap-3 sm:grid-cols-4 sm:items-end">
           <input type="hidden" name="format_id" value={id} />
@@ -195,6 +201,7 @@ export default async function FormatDetail({
           <InlineSubmit>{format.is_active ? 'Hide this size' : 'Show this size again'}</InlineSubmit>
         </form>
       </Disclosure>
+      )}
 
       <section className="space-y-3">
         <SectionHeading sub="What you use up for ONE of these — the container, the lid, the label. Counted once for each one you sell, not per litre.">
@@ -202,7 +209,7 @@ export default async function FormatDetail({
         </SectionHeading>
 
         {!rows.length ? (
-          <Empty>No packaging yet. If this format uses a container, add it so the cost is counted.</Empty>
+          <Empty>No packaging yet.{changes ? ' If this size uses a container, add it so its cost is counted.' : ''}</Empty>
         ) : (
           <ul className="space-y-2">
             {rows.map((l) => (
@@ -217,6 +224,7 @@ export default async function FormatDetail({
                       {Number(l.qty)} for each one
                     </span>
                   </div>
+                  {changes && (
                   <div className="mt-3 flex flex-wrap items-end gap-4">
                     <form action={updatePackaging} className="flex items-end gap-2">
                       <input type="hidden" name="format_id" value={id} />
@@ -234,20 +242,23 @@ export default async function FormatDetail({
                       <ConfirmSubmit message={`Remove ${l.item?.name ?? 'this packaging'} from this size?`}>Remove</ConfirmSubmit>
                     </form>
                   </div>
+                  )}
                 </Card>
               </li>
             ))}
           </ul>
         )}
 
+        {changes && (
         <Card>
           <SectionHeading sub="Add the container and anything that goes with it.">
             Add packaging
           </SectionHeading>
           {!items?.length ? (
             <p className="mt-2 text-sm" style={{ color: 'var(--mm-muted)' }}>
-              You have no packaging items yet. Add one under Ingredients, choosing
-              Packaging as its type, and record what you paid for it.
+              No packaging items yet. Add one under{' '}
+              <Link href="/ingredients?add=1" className="mm-inline-tap">Ingredients</Link>{' '}
+              as Packaging, then record what you paid.
             </p>
           ) : (
             <form action={addPackaging} className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -265,12 +276,11 @@ export default async function FormatDetail({
             </form>
           )}
         </Card>
+        )}
       </section>
 
       <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
-        If any packaging item here has no purchase price, every recipe sold in
-        this format is reported as incomplete. Menu Master will not price a
-        container it does not know the cost of.
+        A container with no purchase price leaves every dish in this size incomplete.
       </p>
     </div>
   )

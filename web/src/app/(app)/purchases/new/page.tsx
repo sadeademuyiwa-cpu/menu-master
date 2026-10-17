@@ -1,10 +1,13 @@
 import { redirect } from 'next/navigation'
 import { currentContext, contextRedirect } from '@/lib/data/context'
-import { loadPurchaseCatalog } from '@/lib/data/purchase-catalog'
+import { loadBuyingHistory, loadPurchaseCatalog } from '@/lib/data/purchase-catalog'
 import { localToday } from '@/lib/dates'
-import { BackLink } from '@/components/ui'
+import { canSeeCosts } from '@/lib/pricing'
+import { BackLink, Empty, PageHeader } from '@/components/ui'
+import { canAddMeasures, canRecordPurchases } from '../buy-roles'
 import { NewPurchase } from './new-purchase'
-import { recordPurchase } from './actions'
+import { recordPurchase, saveMeasure } from './actions'
+import '../buy.css'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,8 +19,23 @@ export default async function NewPurchasePage(props: {
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/purchases/new'))
 
-  const [{ items, recent }, { data: suppliers }] = await Promise.all([
+  // Recording a purchase is for owner, manager and accountant (0015,
+  // fn_post_purchase). Anyone else would fill in a whole market run only to
+  // have it refused, so they are told who can do it instead.
+  if (!canRecordPurchases(ctx.role)) {
+    return (
+      <div className="space-y-4">
+        <BackLink href="/purchases">Purchases</BackLink>
+        <PageHeader title="Record a purchase" />
+        <Empty>Purchases are recorded by the owner, a manager or the accountant. Ask one of them to record this one.</Empty>
+      </div>
+    )
+  }
+
+  const [{ items }, history, { data: suppliers }] = await Promise.all([
     loadPurchaseCatalog(supabase),
+    // What was paid last time is a cost; it is only read for a role that may see costs.
+    loadBuyingHistory(supabase, { withAmounts: canSeeCosts(ctx.role) }),
     supabase.from('suppliers').select('id,name').eq('is_active', true).order('name')
       .returns<{ id: string; name: string }[]>(),
   ])
@@ -26,8 +44,10 @@ export default async function NewPurchasePage(props: {
     <div className="space-y-4">
       <BackLink href="/purchases">Purchases</BackLink>
       <NewPurchase
-        items={items} recent={recent} suppliers={suppliers ?? []}
+        items={items} often={history.often} lastRun={history.lastRun} lastRunDay={history.lastRunDay}
+        lastBought={history.lastBought} suppliers={suppliers ?? []}
         today={localToday()} first={ingredient ?? null} action={recordPurchase}
+        canMeasure={canAddMeasures(ctx.role)} saveMeasure={saveMeasure}
       />
     </div>
   )

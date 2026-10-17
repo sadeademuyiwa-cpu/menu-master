@@ -41,30 +41,130 @@ export function purchaseReference(reference: string | null | undefined): string 
   return cleaned || null
 }
 
-const ngn = new Intl.NumberFormat('en-NG', {
+const ngnWhole = new Intl.NumberFormat('en-NG', {
+  style: 'currency',
+  currency: 'NGN',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+})
+const ngnKobo = new Intl.NumberFormat('en-NG', {
   style: 'currency',
   currency: 'NGN',
   minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 })
 
-/** Money. Returns NOT_ENTERED for null — never ₦0.00. */
+/** A finite number from a figure as the database or a form hands it over, or null. */
+function figure(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = typeof value === 'string' ? Number(value) : value
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Money, the way an owner says it: ₦850, ₦184,500, ₦213 for 212.93. From
+ * ₦100 up the figure is whole naira; below ₦100 kobo show when there are kobo
+ * (₦1.70 a gram, ₦0.40 of salt), because there they carry the meaning.
+ * Returns NOT_ENTERED for null -- never ₦0. moneyExact shows every kobo.
+ *
+ * Small amounts are judged to the kobo first, so a float like 0.1 + 0.2 reads
+ * ₦0.30, and -0.004 is ₦0, not "-₦0".
+ */
 export function money(
   value: number | string | null | undefined,
   absent: string = NOT_ENTERED,
 ): string {
-  if (value === null || value === undefined || value === '') return absent
-  const n = typeof value === 'string' ? Number(value) : value
-  return Number.isFinite(n) ? ngn.format(n) : absent
+  const n = figure(value)
+  if (n === null) return absent
+  // From ₦100 up, whole naira: the owner asked for fewer numbers, and the
+  // 93 kobo in "₦212.93" is noise on a plate. Halves round away from zero,
+  // as PostgreSQL's round() does. Below ₦100 the kobo carry meaning (₦1.70
+  // a gram), so they stay. moneyExact is there for anything that must show
+  // every kobo.
+  if (Math.abs(n) >= 99.995) return ngnWhole.format(Math.sign(n) * Math.round(Math.abs(n)) + 0)
+  const kobo = Math.round(n * 100)
+  const naira = kobo / 100 + 0 // + 0 turns -0 into 0
+  return kobo % 100 === 0 ? ngnWhole.format(naira) : ngnKobo.format(naira)
 }
 
-/** Percentage. Returns NOT_AVAILABLE for null — never 0%. */
+/**
+ * Money with its kobo always shown: ₦850.00. For the places where kobo
+ * matter even when there are none, such as a table of ingredient unit prices
+ * that must line up. Returns NOT_ENTERED for null -- never ₦0.00.
+ */
+export function moneyExact(
+  value: number | string | null | undefined,
+  absent: string = NOT_ENTERED,
+): string {
+  const n = figure(value)
+  return n === null ? absent : ngnKobo.format(Math.round(n * 100) / 100 + 0)
+}
+
+/**
+ * Percentage in whole numbers: 15%, -13%. One decimal only below 1%
+ * (0.4%), where rounding to a whole number would say 0% about a margin that
+ * is not zero. Returns NOT_AVAILABLE for null -- never 0%.
+ *
+ * toFixed rounds a half away from zero (12.5 -> 13, -12.5 -> -13), as
+ * PostgreSQL's round() does on the figures this displays.
+ */
 export function percent(
   value: number | string | null | undefined,
   absent: string = NOT_AVAILABLE,
 ): string {
-  if (value === null || value === undefined || value === '') return absent
-  const n = typeof value === 'string' ? Number(value) : value
-  return Number.isFinite(n) ? `${n.toFixed(2)}%` : absent
+  const n = figure(value)
+  if (n === null) return absent
+  if (Math.abs(n) >= 1) return `${n.toFixed(0)}%`
+  // 0.04 -> "0.0" and 0.96 -> "1.0": say those as 0% and 1%, without a sign on zero.
+  const s = n.toFixed(1)
+  const whole = s.endsWith('.0') ? String(Number(s) + 0) : s
+  return `${whole}%`
+}
+
+/**
+ * The business's own target margin, as she set it: 40%, 37.5%. Never rounded:
+ * Settings holds 37.5 (numeric(5,2)), and "your 38% target" would be a figure
+ * she never chose. Trailing zeros go ("40.00" from PostgREST is 40%).
+ */
+export function targetPercent(
+  value: number | string | null | undefined,
+  absent: string = NOT_AVAILABLE,
+): string {
+  const n = figure(value)
+  if (n === null) return absent
+  return `${Number(n.toFixed(2)) + 0}%`
+}
+
+/**
+ * A margin printed beside its target. Whole numbers, as percent(), except
+ * where rounding would make it read as the target or as past it: 39.6
+ * against 40 would print "40%" beside "Below your target". There it keeps one
+ * decimal, cut toward the truth (down when under the target, up when over),
+ * so 39.96 is "39.9%", never "40.0%". A margin exactly at the target prints
+ * as the target does.
+ */
+export function marginPercent(
+  margin: number | string | null | undefined,
+  target: number | string | null | undefined,
+  absent: string = NOT_AVAILABLE,
+): string {
+  const m = figure(margin)
+  if (m === null) return absent
+  const t = figure(target)
+  if (t === null) return percent(m, absent)
+  if (m === t) return targetPercent(t)
+  // The figure percent() would print, as a number.
+  const shown = Number(Math.abs(m) >= 1 ? m.toFixed(0) : m.toFixed(1))
+  const misleads = m < t ? shown >= t : shown <= t
+  if (!misleads) return percent(m, absent)
+  // The epsilon keeps a float such as 37.3 * 10 = 372.99999999999994 at
+  // 37.3; it must never carry the figure onto the target itself.
+  const down = Math.floor(m * 10 + 1e-9) / 10
+  const up = Math.ceil(m * 10 - 1e-9) / 10
+  const cut = m < t
+    ? (down < t ? down : Math.floor(m * 10) / 10)
+    : (up > t ? up : Math.ceil(m * 10) / 10)
+  return `${(cut + 0).toFixed(1)}%`
 }
 
 /** Quantity with a unit. Both-or-neither: a bare number is never shown. */
@@ -213,13 +313,13 @@ export function productState(state: string | null | undefined): {
       return { label: 'Below your target', tone: 'warn',
                detail: 'You are making money, but less than you planned.' }
     case 'losing_money':
-      return { label: 'You may be undercharging', tone: 'bad',
+      return { label: 'Selling at a loss', tone: 'bad',
                detail: 'This sells for less than it costs you to make.' }
     case 'no_price_yet':
-      return { label: 'Ready to sell', tone: 'muted',
+      return { label: 'No price yet', tone: 'muted',
                detail: 'The cost is worked out. Set a price to see your profit.' }
     case 'costing_incomplete':
-      return { label: 'Costing incomplete', tone: 'muted',
+      return { label: 'Cost incomplete', tone: 'muted',
                detail: 'A few figures are still missing before this can be costed.' }
     default:
       return { label: 'Not costed yet', tone: 'muted', detail: '' }

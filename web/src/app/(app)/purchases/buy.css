@@ -1,0 +1,109 @@
+/*
+ * Buying screens: Purchases, New purchase, Ingredients, Suppliers.
+ *
+ * Every rule is in @layer components, the layer globals.css declares through
+ * Tailwind, so a utility a page passes in still wins as it reads. A rule
+ * outside a layer would beat every utility.
+ */
+@layer components {
+  /* The two ways into Purchases' tools: Ingredients and Suppliers. The label
+     may wrap to two lines on a 360px phone; it is never cut off. */
+  .mm-buy-tile {
+    display: flex;
+    min-height: 60px;
+    align-items: center;
+    gap: .6rem;
+    padding: .65rem .7rem;
+    border: 1px solid var(--mm-line);
+    border-radius: var(--mm-radius);
+    background: var(--mm-surface);
+    box-shadow: var(--mm-shadow-soft);
+    font-size: .95rem;
+    font-weight: 600;
+    line-height: 1.2;
+    transition: border-color var(--mm-motion-fast) var(--mm-ease), transform var(--mm-motion-fast) var(--mm-ease);
+  }
+  .mm-buy-tile:hover { border-color: color-mix(in srgb, var(--mm-accent) 45%, var(--mm-line)); }
+  .mm-buy-tile:active { transform: scale(.985); }
+  .mm-buy-tile-icon {
+    display: inline-grid;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    place-items: center;
+    border-radius: 10px;
+    background: var(--mm-accent-soft);
+    color: var(--mm-accent);
+  }
+
+  /* Rows inside one card, divided by hairlines, the way a food app lists a
+     menu: one card per day of purchases, one card of ingredients. */
+  .mm-buy-rows {
+    overflow: hidden;
+    border: 1px solid var(--mm-line);
+    border-radius: var(--mm-radius);
+    background: var(--mm-surface);
+    box-shadow: var(--mm-shadow-soft);
+  }
+  .mm-buy-rows > li + li { border-top: 1px solid var(--mm-line); }
+  .mm-buy-row {
+    display: flex;
+    min-height: 56px;
+    align-items: center;
+    gap: .75rem;
+    padding: .6rem .9rem;
+  }
+  a.mm-buy-row:hover { background: var(--mm-surface-2); }
+
+  /* Chips: "Bought before", and the switch between your items and all. */
+  .mm-buy-chip {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    gap: .35rem;
+    padding: 0 .9rem;
+    border: 1px solid var(--mm-line);
+    border-radius: 999px;
+    background: var(--mm-surface);
+    color: var(--mm-fg);
+    font-size: .875rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: border-color var(--mm-motion-fast) var(--mm-ease), transform var(--mm-motion-fast) var(--mm-ease);
+  }
+  .mm-buy-chip:hover { border-color: var(--mm-muted); }
+  .mm-buy-chip:active { transform: scale(.97); }
+  .mm-buy-chip[aria-current="page"] {
+    border-color: var(--mm-accent);
+    background: var(--mm-accent-soft);
+    color: var(--mm-accent-strong);
+  }
+
+  /* A price's state as a dot: current, old or an estimate, none yet. Brand
+     green and the warning amber only: no gold, which is the screen's one
+     highlight, and no red, which means a dish sells below cost. */
+  .mm-buy-dot {
+    display: inline-block;
+    width: .6rem;
+    height: .6rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--mm-line);
+  }
+  .mm-buy-dot[data-tone="good"] { background: var(--mm-accent); }
+  .mm-buy-dot[data-tone="warn"] { background: var(--mm-warn); }
+  .mm-buy-dot[data-tone="muted"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--mm-muted); }
+
+  /* The one figure a screen leads with: this month's spend, an item's price. */
+  .mm-buy-hero { font-size: 1.75rem; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
+}
+
+@layer components {
+  /* A chip whose item is already on the purchase: tapping it goes to that line. */
+  .mm-buy-chip { max-width: 100%; }
+  .mm-buy-chip[data-added] {
+    border-color: color-mix(in srgb, var(--mm-accent) 45%, var(--mm-line));
+    background: var(--mm-accent-soft);
+    color: var(--mm-accent-strong);
+  }
+}

@@ -2,10 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { NAV, activeHref } from '@/lib/nav'
+import { NAV, activeHref, type NavHref } from '@/lib/nav'
 import { AppIcon, type IconName } from '@/components/icons'
 
-const ICONS: Record<string, IconName> = {
+// Keyed by the five hrefs themselves, so a tab added to NAV without an icon
+// is a type error rather than a quiet fallback. Dishes keeps the /recipes
+// address and the icon Recipes had.
+const ICONS: Record<NavHref, IconName> = {
   '/dashboard': 'home',
   '/sales': 'sales',
   '/purchases': 'purchases',
@@ -15,7 +18,9 @@ const ICONS: Record<string, IconName> = {
 
 /**
  * The same five destinations in three shapes: a column in the sidebar (lg),
- * a row in the header (md), a bar along the bottom (phones).
+ * a row in the header (md), a bar along the bottom (phones). The lit one is
+ * the tab the page belongs to (lib/nav.ts activeHref): Customers lights Sales,
+ * Ingredients lights Purchases, Prices lights Dishes.
  */
 export function PrimaryNav({ variant }: { variant: 'header' | 'bottom' | 'sidebar' }) {
   const pathname = usePathname() ?? ''
@@ -32,7 +37,7 @@ export function PrimaryNav({ variant }: { variant: 'header' | 'bottom' | 'sideba
       <ul className={isSidebar ? 'grid gap-1' : isHeader ? 'flex items-center gap-1' : 'mx-auto grid max-w-lg grid-cols-5'}>
         {NAV.map((item) => {
           const current = item.href === active
-          const icon = ICONS[item.href] ?? 'more'
+          const icon = ICONS[item.href]
           return (
             <li key={item.href}>
               <Link

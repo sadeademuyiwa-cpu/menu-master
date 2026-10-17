@@ -8,6 +8,8 @@ import {
 import { Button } from '@/components/button'
 import { money, quantity, purchaseReference } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
+import { canRecordPurchases } from '../../buy-roles'
+import { inSentence, sumMoney } from '../../buy-figures'
 
 export const dynamic = 'force-dynamic'
 
@@ -109,6 +111,9 @@ export default async function CorrectPurchase({
     .eq('id', id).maybeSingle<Purchase>()
   if (!purchase) notFound()
   if (purchase.status !== 'posted') redirect(`/purchases/${id}`)
+  // Correcting is recording a purchase (owner, manager, accountant; 0015), and
+  // this form shows every amount paid. Anyone else goes back to the purchase.
+  if (!canRecordPurchases(ctx.role)) redirect(`/purchases/${id}`)
 
   const [{ data: lines }, { data: ingredients }, { data: units }, { data: suppliers }] = await Promise.all([
     supabase.from('purchase_lines')
@@ -122,14 +127,15 @@ export default async function CorrectPurchase({
     supabase.from('suppliers').select('id,name').eq('is_active', true).order('name').returns<Named[]>(),
   ])
   const rows = lines ?? []
-  const total = rows.reduce((t, l) => t + Number(l.amount), 0)
+  // Added in whole kobo, so the figure in the title is exact.
+  const total = sumMoney(rows.map((l) => l.amount))
 
   return (
     <div className="space-y-6">
       <BackLink href={`/purchases/${id}`}>Back to the purchase</BackLink>
       <PageHeader
         title="Correct this purchase"
-        sub={`Recorded on ${formatDay(purchase.purchase_date).toLowerCase()}${purchaseReference(purchase.reference) ? ` · ${purchaseReference(purchase.reference)}` : ''} · ${money(total)}`}
+        sub={`Bought ${inSentence(formatDay(purchase.purchase_date))}${purchaseReference(purchase.reference) ? ` · ${purchaseReference(purchase.reference)}` : ''} · ${money(total)}`}
       />
       {notice && <Notice tone={/could not|not available|nothing was changed|choose|enter|needs/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 

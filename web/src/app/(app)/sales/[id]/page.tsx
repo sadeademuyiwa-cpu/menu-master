@@ -3,24 +3,28 @@ import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { requiredAmount } from '@/lib/money-input'
 import { ProductAndPriceFields } from '@/components/product-price-field'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice, hasSalesEntitlement } from '@/lib/data/context'
+import { loadMenuPrices } from '@/lib/data/menu'
+import { canRecordSales, SALE_ROLES } from '@/app/(app)/dashboard/roles'
 import {
-  PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
+  Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Stat, StatRow, Badge, Disclosure,
 } from '@/components/ui'
 import { money, percent, saleLabel } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
-import { buildReceipt, buildQuote, whatsappLink, whatsappNumber } from '@/lib/receipt'
-import { ReceiptActions } from '@/components/receipt-actions'
+import { canSeeCosts, canSeeSellingPrices } from '@/lib/pricing'
+import { buildReceipt, buildQuote, whatsappLink, whatsappNumber, receiptDate, receiptMoney } from '@/lib/receipt'
 import { ConfirmSubmit } from '@/components/confirm-submit'
 import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
+import { ReceiptCard } from './receipt-card'
 
 export const dynamic = 'force-dynamic'
 
 type Order = {
   id: string; order_no: string | null; order_date: string; status: string
-  payment_status: string; amount_paid: string; order_discount: string
+  /** Not selected for kitchen, which sees no money. */
+  payment_status: string; amount_paid?: string; order_discount?: string
   customer_id: string | null; finalised_at: string | null
   voided_at: string | null; void_reason: string | null; replaces: string | null
 }
@@ -37,15 +41,24 @@ type SaleLine = {
 type Recipe = { id: string; name: string }
 type Variant = { id: string; recipe_id: string; format: { name: string } | null }
 type Customer = { id: string; name: string; phone: string | null }
-type ProductPrice = { recipe_id: string; variant_id: string | null; selling_price: string | null }
+
+/** What a sale line says without its cost: everything the receipt needs and
+ *  nothing more. A sales or kitchen phone is sent only these columns. */
+const LINE_COLS_NO_COST =
+  'line_id,recipe_id,product_name,variant_id,format_name,description,qty,unit_price,' +
+  'gross_revenue,line_discount,allocated_order_discount,net_revenue'
+/** Kitchen sees no money at all (no cost, no selling price, no takings):
+ *  what was sold and how many, and not one column more. */
+const LINE_COLS_NO_MONEY = 'line_id,recipe_id,product_name,variant_id,format_name,description,qty'
 
 /** A line of a CANCELLED sale, read straight from order_lines.
  *  v_sale_lines deliberately excludes voided and cancelled orders -- that is
  *  its documented contract and the reason live totals are correct -- so the
  *  historical record has to be read from the table it was never deleted from. */
 type HistoryLine = {
-  id: string; qty: string; unit_price: string; discount_amount: string
-  unit_cost_at_sale: string | null; description: string | null
+  /** unit_price and discount_amount are not selected for kitchen. */
+  id: string; qty: string; unit_price?: string; discount_amount?: string
+  unit_cost_at_sale?: string | null; description: string | null
   recipe: { name: string } | null
 }
 /** One row of fn_allocate_order_discount(order_id) -- the SAME function
@@ -57,6 +70,28 @@ type Allocation = {
 }
 
 /* ---------------------------------------------------------------- actions */
+
+/**
+ * An update or delete that RLS refuses comes back with no error and no rows,
+ * so "Item updated." would be a lie. Each write below asks for the changed
+ * rows (.select('id')) and, when there are none, says so in words: who may
+ * make the change (0015), or for a role that may, that nothing was saved.
+ */
+function notChanged(role: string | null | undefined, allowed: readonly string[], action: string, askWho: string): string {
+  return allowed.includes(role ?? '')
+    ? 'That could not be saved. Reload the sale and try again.'
+    : `Your role cannot ${action}. Ask ${askWho}.`
+}
+const SALE_WRITERS = 'the owner, a manager or sales staff'
+/** orders DELETE and fn_void_order: owner and manager only (0015). */
+const SALE_REMOVERS = ['owner', 'manager'] as const
+const editRefused = (role: string | null | undefined) => notChanged(role, SALE_ROLES, 'change a sale', SALE_WRITERS)
+
+/** A day from formatDay inside a sentence: "Sale of today", "Sale of 12 Oct
+ *  2026". Only Today and Yesterday are lowered; a month keeps its capital.
+ *  The same rule as inSentence in purchases/buy-figures.ts. */
+const inSentence = (formatted: string) =>
+  formatted === 'Today' || formatted === 'Yesterday' ? formatted.toLowerCase() : formatted
 
 async function addLine(formData: FormData) {
   'use server'
@@ -119,9 +154,10 @@ async function removeLine(formData: FormData) {
   const here = `/sales/${id}`
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('order_lines')
-    .delete().eq('id', String(formData.get('line_id') ?? ''))
+  const { data, error } = await supabase.from('order_lines')
+    .delete().eq('id', String(formData.get('line_id') ?? '')).select('id')
   revalidatePath(here)
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, editRefused(ctx.role)))
   redirect(withNotice(here, describeWriteError(error) ?? 'Removed.'))
 }
 
@@ -155,9 +191,10 @@ async function updateLine(formData: FormData) {
     }
     patch.extra_unit_cost = cost
   }
-  const { error } = await supabase.from('order_lines')
-    .update(patch).eq('id', String(formData.get('line_id') ?? ''))
+  const { data, error } = await supabase.from('order_lines')
+    .update(patch).eq('id', String(formData.get('line_id') ?? '')).select('id')
   revalidatePath(here)
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, editRefused(ctx.role)))
   redirect(withNotice(here, error
     ? (/extra_unit_cost/.test(error.message)
         ? 'What it costs you cannot be saved on this account yet; the rest was not changed.'
@@ -174,11 +211,12 @@ async function updateHeader(formData: FormData) {
   const { supabase } = ctx
   const date = String(formData.get('order_date') ?? '')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) redirect(withNotice(here, 'Choose the date of the sale.'))
-  const { error } = await supabase.from('orders').update({
+  const { data, error } = await supabase.from('orders').update({
     order_date: date,
     customer_id: String(formData.get('customer_id') ?? '') || null,
-  }).eq('id', id)
+  }).eq('id', id).select('id')
   revalidatePath(here)
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, editRefused(ctx.role)))
   redirect(withNotice(here, describeWriteError(error) ?? 'Saved.'))
 }
 
@@ -192,9 +230,10 @@ async function setOrderDiscount(formData: FormData) {
   }
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('orders')
-    .update({ order_discount: amount }).eq('id', id)
+  const { data, error } = await supabase.from('orders')
+    .update({ order_discount: amount }).eq('id', id).select('id')
   revalidatePath(here)
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, editRefused(ctx.role)))
   redirect(withNotice(here, describeWriteError(error) ?? 'Discount saved.'))
 }
 
@@ -229,12 +268,15 @@ async function markPaid(formData: FormData) {
   const paid = Number(formData.get('amount_paid') || 0)
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('orders')
+  const { data, error } = await supabase.from('orders')
     .update({
       amount_paid: paid,
       payment_status: String(formData.get('payment_status') ?? 'unpaid'),
-    }).eq('id', id)
+    }).eq('id', id).select('id')
   revalidatePath(here)
+  if (!error && (data ?? []).length === 0) {
+    redirect(withNotice(here, notChanged(ctx.role, SALE_ROLES, 'record a payment', SALE_WRITERS)))
+  }
   redirect(withNotice(here, describeWriteError(error) ?? 'Payment updated.'))
 }
 
@@ -273,8 +315,13 @@ async function deleteDraft(formData: FormData) {
   const id = String(formData.get('order_id') ?? '')
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('orders').delete().eq('id', id)
+  const { data, error } = await supabase.from('orders').delete().eq('id', id).select('id')
   if (error) redirect(withNotice(`/sales/${id}`, describeWriteError(error) ?? 'Could not discard that draft.'))
+  // RLS lets only the owner or a manager delete an order; for anyone else the
+  // delete quietly removes nothing, and "Draft discarded." would be untrue.
+  if ((data ?? []).length === 0) {
+    redirect(withNotice(`/sales/${id}`, notChanged(ctx.role, SALE_REMOVERS, 'discard a draft', 'the owner or a manager')))
+  }
   revalidatePath('/sales')
   redirect(withNotice('/sales', 'Draft discarded.'))
 }
@@ -291,50 +338,94 @@ function costWords(status: string): { label: string; tone: 'good' | 'warn' | 'mu
   }
 }
 
+/** How the payment reads, in the owner's words, from orders.payment_status
+ *  and amount_paid as recorded; nothing here decides a payment. `fmt` is
+ *  receiptMoney on the receipt card, so it reads to the kobo like the text
+ *  the customer is sent; money() for the owner's own summary. */
+function paymentWords(status: string, paid: number, total: number, fmt: (n: number) => string = money): string {
+  if (status === 'paid') return 'Paid in full'
+  if (status === 'part_paid' && paid > 0) {
+    return `Paid ${fmt(paid)} so far · ${fmt(Math.max(0, total - paid))} still to pay`
+  }
+  return 'Not paid yet'
+}
+
+const MUTED = { color: 'var(--mm-muted)' } as const
+
 export default async function SaleDetail({
   params, searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ notice?: string }>
+  searchParams: Promise<{ notice?: string; send?: string }>
 }) {
   const { id } = await params
-  const { notice } = await searchParams
+  const { notice, send } = await searchParams
   const ctx = await currentContext()
-  const { supabase, accountId } = ctx
+  const { supabase, accountId, businessId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/sales'))
+  // What a sale cost and what it kept reach this page only for the roles
+  // that may see costs. For sales and kitchen the cost columns are not even
+  // read, so no figure travels to their phones to be hidden there.
+  const showCosts = canSeeCosts(ctx.role)
+  // Selling prices and takings follow 0064's rule, as on Home and Reports:
+  // everyone but kitchen. Kitchen is sent what was sold and how many, and no
+  // money column at all, not even to be hidden.
+  const takings = canSeeSellingPrices(ctx.role)
 
-  const { data: order } = await supabase.from('orders')
-    .select('id,order_no,order_date,status,payment_status,amount_paid,order_discount,' +
-            'customer_id,finalised_at,voided_at,void_reason,replaces')
-    .eq('id', id).maybeSingle<Order>()
+  const [{ data: order }, salesPlan] = await Promise.all([
+    supabase.from('orders')
+      .select('id,order_no,order_date,status,payment_status,' + (takings ? 'amount_paid,order_discount,' : '') +
+              'customer_id,finalised_at,voided_at,void_reason,replaces')
+      .eq('id', id).maybeSingle<Order>(),
+    hasSalesEntitlement(),
+  ])
   if (!order) notFound()
+  // Every form here is offered only to the roles the database lets use it
+  // (0015, fn_void_order): changing a sale and its payment for owner, manager
+  // and sales; discarding a draft and cancelling a sale for owner and manager.
+  const records = canRecordSales(ctx.role, salesPlan)
+  const removerRole = (SALE_REMOVERS as readonly string[]).includes(ctx.role ?? '')
+  const removes = records && removerRole
 
-  const [{ data: lines }, { data: recipes }, { data: variants }, { data: customers },
-         { data: productPrices }] =
+  const [{ data: lines }, { data: recipes }, { data: variants }, { data: customers }, priceOf] =
     await Promise.all([
-      supabase.from('v_sale_lines').select('*').eq('order_id', id).returns<SaleLine[]>(),
-      supabase.from('recipes').select('id,name').is('deleted_at', null)
-        .eq('status', 'active').order('name').returns<Recipe[]>(),
+      supabase.from('v_sale_lines')
+        .select(showCosts ? '*' : takings ? LINE_COLS_NO_COST : LINE_COLS_NO_MONEY).eq('order_id', id)
+        .returns<SaleLine[]>(),
+      // The dishes and their prices only feed "Add what they bought", which
+      // only a role that may change the sale is shown.
+      records
+        ? supabase.from('recipes').select('id,name').is('deleted_at', null)
+            .eq('status', 'active').order('name').returns<Recipe[]>()
+        : Promise.resolve({ data: [] as Recipe[] }),
       // recipe_variants has a single foreign key to serving_formats, so this
       // embed needs no constraint hint.
-      supabase.from('recipe_variants')
-        .select('id,recipe_id,format:serving_formats(name)')
-        .eq('is_active', true).returns<Variant[]>(),
+      records
+        ? supabase.from('recipe_variants')
+            .select('id,recipe_id,format:serving_formats(name)')
+            .eq('is_active', true).returns<Variant[]>()
+        : Promise.resolve({ data: [] as Variant[] }),
       supabase.from('customers').select('id,name,phone').order('name').returns<Customer[]>(),
-      // The same view the dashboard reads "You charge" from, so the price
-      // offered here is the price shown there -- not a second opinion.
-      supabase.from('v_product_attention')
-        .select('recipe_id,variant_id,selling_price').returns<ProductPrice[]>(),
+      // The same prices New sale and the dashboard read (fn_menu_prices), so
+      // the price offered here is the price shown there -- not a second
+      // opinion -- and a sales member is offered it too.
+      records ? loadMenuPrices(supabase, businessId) : Promise.resolve(new Map<string, string | null>()),
     ])
 
-  const rows = lines ?? []
+  // Without the cost columns a line simply has no cost here; it is never
+  // read as a zero.
+  const rows: SaleLine[] = (lines ?? []).map((r) => showCosts ? r : {
+    ...r, unit_cost_at_sale: null, cogs: null, gross_profit: null, gross_margin_pct: null, cost_status: 'hidden',
+  })
   const confirmed = order.finalised_at !== null
   const voided = order.voided_at !== null
 
-  // The typed cost of each non-dish line (0061). Before the column exists the
-  // query errors and every line simply has none.
-  const { data: extraCosts } = await supabase.from('order_lines').select('id,extra_unit_cost')
-    .eq('order_id', id).returns<{ id: string; extra_unit_cost: string | null }[]>()
+  // The typed cost of each non-dish line (0061), for the draft's edit form.
+  // Before the column exists the query errors and every line simply has none.
+  const { data: extraCosts } = showCosts
+    ? await supabase.from('order_lines').select('id,extra_unit_cost')
+        .eq('order_id', id).returns<{ id: string; extra_unit_cost: string | null }[]>()
+    : { data: null }
   const extraCostOf = new Map((extraCosts ?? []).map((l) => [l.id, l.extra_unit_cost]))
 
   // A cancelled sale keeps everything: fn_void_order writes only voided_at,
@@ -352,12 +443,13 @@ export default async function SaleDetail({
           // 0.00 with no items, because the error left histLines null.
           // e2e/postgrest-embeds.mjs now proves every embed against real
           // PostgREST so this cannot return silently.
-          .select('id,qty,unit_price,discount_amount,unit_cost_at_sale,description,' +
+          .select(`id,qty,${takings ? 'unit_price,discount_amount,' : ''}${showCosts ? 'unit_cost_at_sale,' : ''}description,` +
                   'recipe:recipes!order_lines_recipe_id_fkey(name)')
           .eq('order_id', id).returns<HistoryLine[]>(),
         // The rpc's generated return type is not array-shaped, so it is cast
-        // where it is consumed rather than through .returns<>().
-        supabase.rpc('fn_allocate_order_discount', { p_order_id: id }),
+        // where it is consumed rather than through .returns<>(). Kitchen is
+        // not sent the money, so it is not asked for.
+        takings ? supabase.rpc('fn_allocate_order_discount', { p_order_id: id }) : Promise.resolve({ data: null }),
         supabase.from('orders').select('id,order_no').eq('replaces', id)
           .maybeSingle<{ id: string; order_no: string | null }>(),
       ])
@@ -369,7 +461,10 @@ export default async function SaleDetail({
   // prove the record survived would be worse.
   const allocRows: Allocation[] = Array.isArray(allocations) ? allocations as Allocation[] : []
   const allocOf = new Map(allocRows.map((a) => [a.order_line_id, a]))
-  const history = (histLines ?? []).map((l) => ({ line: l, alloc: allocOf.get(l.id) ?? null }))
+  const history = (histLines ?? []).map((l) => ({
+    line: { ...l, unit_cost_at_sale: showCosts ? (l.unit_cost_at_sale ?? null) : null },
+    alloc: allocOf.get(l.id) ?? null,
+  }))
 
   // The same arithmetic the live page uses, over the preserved rows. These
   // figures are displayed as history and are NOT added to any live total --
@@ -392,7 +487,6 @@ export default async function SaleDetail({
   // use. Nothing is recomputed differently here.
   const sum = (pick: (r: SaleLine) => string | null) =>
     rows.reduce((t, r) => { const v = pick(r); return v === null ? t : t + Number(v) }, 0)
-  const gross = sum((r) => r.gross_revenue)
   const discounts = sum((r) => r.line_discount) + sum((r) => r.allocated_order_discount)
   const net = sum((r) => r.net_revenue)
   const costedRows = rows.filter((r) => r.cogs !== null)
@@ -405,37 +499,39 @@ export default async function SaleDetail({
     ? (100 * profit) / costedRevenue : null
   const uncosted = rows.filter((r) => r.cost_status === 'sold_without_cost')
 
-  // The receipt, from the confirmed figures in v_sale_lines.
-  const receipt = confirmed && !voided && rows.length > 0
+  const lineName = (r: SaleLine) => r.product_name
+    ? `${r.product_name}${r.format_name ? ` (${r.format_name})` : ''}`
+    : (r.description ?? 'Item')
+  const receiptLines = rows.map((r) => ({
+    name: lineName(r), qty: Number(r.qty), unitPrice: Number(r.unit_price), gross: Number(r.gross_revenue),
+  }))
+  const businessName = ctx.businessName ?? 'Menu Master NG'
+  const amountPaid = Number(order.amount_paid)
+
+  // The receipt, from the confirmed figures in v_sale_lines. A part-paid sale
+  // says what was paid and what is left, so a deposit receipt is complete.
+  // Neither is built for kitchen: a receipt is prices and a total.
+  const receipt = takings && confirmed && !voided && rows.length > 0
     ? buildReceipt({
-        businessName: ctx.businessName ?? 'Menu Master NG',
-        date: order.order_date,
+        businessName,
+        date: receiptDate(order.order_date),
         reference: order.order_no,
         customerName,
-        lines: rows.map((r) => ({
-          name: r.product_name
-            ? `${r.product_name}${r.format_name ? ` (${r.format_name})` : ''}`
-            : (r.description ?? 'Item'),
-          qty: Number(r.qty), unitPrice: Number(r.unit_price), gross: Number(r.gross_revenue),
-        })),
+        lines: receiptLines,
         discount: discounts,
         total: net,
+        paid: order.payment_status === 'part_paid' ? amountPaid : null,
       })
     : null
 
   // A draft is a quote until it is confirmed: the same lines, said before the
   // sale, for a caterer or baker pricing an event.
-  const quote = !confirmed && !voided && rows.length > 0
+  const quote = takings && !confirmed && !voided && rows.length > 0
     ? buildQuote({
-        businessName: ctx.businessName ?? 'Menu Master NG',
-        date: formatDay(order.order_date),
+        businessName,
+        date: receiptDate(order.order_date),
         customerName,
-        lines: rows.map((r) => ({
-          name: r.product_name
-            ? `${r.product_name}${r.format_name ? ` (${r.format_name})` : ''}`
-            : (r.description ?? 'Item'),
-          qty: Number(r.qty), unitPrice: Number(r.unit_price), gross: Number(r.gross_revenue),
-        })),
+        lines: receiptLines,
         discount: discounts,
         total: net,
         validDays: 7,
@@ -452,10 +548,6 @@ export default async function SaleDetail({
   // "recipe:variant" values, identical to the options this replaces, each
   // carrying the price already recorded for that product so the form can offer
   // it. A product with no recorded price simply offers nothing.
-  const priceOf = new Map<string, string | null>()
-  for (const pp of productPrices ?? []) {
-    priceOf.set(`${pp.recipe_id}:${pp.variant_id ?? ''}`, pp.selling_price)
-  }
   const productOptions = (recipes ?? []).flatMap((rec) => {
     const vs = byRecipe.get(rec.id) ?? []
     if (vs.length === 0) {
@@ -466,30 +558,36 @@ export default async function SaleDetail({
       const value = `${rec.id}:${v.id}`
       return {
         value,
-        label: `${rec.name} \u2014 ${v.format?.name ?? 'one size'}`,
+        label: `${rec.name} — ${v.format?.name ?? 'one size'}`,
         price: priceOf.get(value) ?? null,
       }
     })
   })
 
+  const cardLines = receiptLines.map((l) => ({ name: l.name, qty: l.qty, gross: l.gross }))
+  const whatsappTo = whatsappNumber(customer?.phone) ? customerName : null
+
   return (
-    <div className="space-y-6">
-      <BackLink href="/sales">All sales</BackLink>
-      <PageHeader
-        title={saleLabel(order.order_no) ?? `Sale of ${formatDay(order.order_date).toLowerCase()}`}
-        sub={[
-          formatDay(order.order_date),
-          customerName,
-          voided ? 'Cancelled' : confirmed ? 'Confirmed' : 'Draft — not confirmed yet',
-        ].filter(Boolean).join(' · ')}
-      />
+    <div className="space-y-5">
+      <BackLink href="/sales">Sales</BackLink>
+      <header className="space-y-1">
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+          {saleLabel(order.order_no) ?? `Sale of ${inSentence(formatDay(order.order_date))}`}
+        </h1>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" style={MUTED}>
+          <span>{[formatDay(order.order_date), customerName].filter(Boolean).join(' · ')}</span>
+          <Badge tone={confirmed && !voided ? 'good' : 'muted'}>
+            {voided ? 'Cancelled' : confirmed ? 'Confirmed' : 'Draft'}
+          </Badge>
+        </div>
+      </header>
       {notice && <Notice tone={/could not|cannot|do not/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
       {voided && (
         <Notice>
           This sale was cancelled: {order.void_reason ?? 'no reason recorded'}. It no longer
-          counts in your figures. The record and the cost frozen onto it are kept, so nothing
-          disappears without a trace.
+          counts in your figures. The record{showCosts ? ' and the cost frozen onto it are' : ' is'} kept,
+          so nothing disappears without a trace.
           {replacement && (
             <> It was replaced by{' '}
               <Link href={`/sales/${replacement.id}`} className="mm-inline-tap">
@@ -500,66 +598,36 @@ export default async function SaleDetail({
       )}
       {!confirmed && !voided && (
         <Notice tone="info">
-          This is still a draft. Nothing here counts as a sale yet, and the cost of each item
-          will be worked out from your prices at the moment you confirm — not from when you
-          typed it.
+          {showCosts
+            ? 'Still a draft. It counts as a sale when you confirm it, and the cost of each item is worked out from your prices at that moment, not from when you typed it.'
+            : 'Still a draft. It counts as a sale when you confirm it.'}
         </Notice>
       )}
+
       {quote && (
-        <Card>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="font-semibold">Send as a quote</div>
-              <div className="text-sm" style={{ color: 'var(--mm-muted)' }}>{money(net)} · {rows.length} item{rows.length === 1 ? '' : 's'} · prices hold for 7 days</div>
-            </div>
-          </div>
-          <div className="mt-3">
-            <ReceiptActions
-              text={quote}
-              whatsappHref={whatsappLink(customer?.phone, quote)}
-              toName={whatsappNumber(customer?.phone) ? customerName : null}
-            />
-          </div>
-          <div className="mt-3">
-            <Disclosure summary="See the quote">
-              <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed">{quote}</pre>
-            </Disclosure>
-          </div>
-        </Card>
+        <ReceiptCard
+          kind="quote" businessName={businessName} dateText={receiptDate(order.order_date)}
+          reference={null} customerName={customerName} lines={cardLines}
+          discount={discounts} total={net}
+          text={quote} whatsappHref={whatsappLink(customer?.phone, quote)} toName={whatsappTo}
+        />
       )}
       {receipt && (
-        <Card>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="font-semibold">Receipt</div>
-              <div className="text-sm" style={{ color: 'var(--mm-muted)' }}>{money(net)} · {rows.length} item{rows.length === 1 ? '' : 's'}</div>
-            </div>
-            <Link href="/sales/new" className="mm-btn mm-btn-primary">
+        <>
+          <ReceiptCard
+            kind="receipt" businessName={businessName} dateText={receiptDate(order.order_date)}
+            reference={order.order_no} customerName={customerName} lines={cardLines}
+            discount={discounts} total={net}
+            paymentText={paymentWords(order.payment_status, amountPaid, net, receiptMoney)}
+            text={receipt} whatsappHref={whatsappLink(customer?.phone, receipt)} toName={whatsappTo}
+            focusSend={send === '1'}
+          />
+          {records && (
+            <Link href="/sales/new" className="mm-btn mm-btn-secondary w-full">
               <AppIcon name="plus" size={18} /> New sale
             </Link>
-          </div>
-          <div className="mt-3">
-            <ReceiptActions
-              text={receipt}
-              whatsappHref={whatsappLink(customer?.phone, receipt)}
-              toName={whatsappNumber(customer?.phone) ? customerName : null}
-            />
-          </div>
-          <div className="mt-3">
-            <Disclosure summary="See the receipt">
-              <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed">{receipt}</pre>
-            </Disclosure>
-          </div>
-        </Card>
-      )}
-      {confirmed && !voided && uncosted.length > 0 && (
-        <Notice>
-          {uncosted.length} item{uncosted.length === 1 ? '' : 's'} on this sale
-          {uncosted.length === 1 ? ' has' : ' have'} no known cost, so
-          {uncosted.length === 1 ? ' it is' : ' they are'} counted as money taken and left out
-          of the profit below. Finish costing {uncosted.length === 1 ? 'that dish' : 'those dishes'}
-          {' '}and future sales will be complete.
-        </Notice>
+          )}
+        </>
       )}
 
       {voided ? (
@@ -568,24 +636,35 @@ export default async function SaleDetail({
               the preserved rows: nothing here reaches revenue, COGS or profit
               reporting, which read v_sales_unified and exclude cancelled sales
               at the database. */}
-          <SectionHeading sub="What this sale was when it was cancelled. These figures are kept for your records and are NOT counted in your revenue, cost or profit.">
+          <SectionHeading>
             The original cancelled sale
           </SectionHeading>
+          {/* Visible, not behind the (i): without it these figures read as
+              takings. The one line on this page that must never be hidden. */}
+          <p className="text-sm" style={{ color: 'var(--mm-warn)' }}>
+            Kept for your records. NOT counted in your revenue, cost or profit.
+          </p>
+          {takings && (
           <StatRow>
             <Stat label="Was charged" value={money(histGross)} />
             <Stat label="Came to" value={money(histNet)} />
-            <Stat
-              label="Cost frozen at the time"
-              value={histCosted.length ? money(histCogs) : money(null, 'never known')}
-            />
-            <Stat
-              label="Would have kept"
-              value={histProfit === null ? money(null, 'not known') : money(histProfit)}
-              sub={histMargin === null
-                ? 'No item on this sale had a known cost.'
-                : `${percent(histMargin)} of ${money(histCostedRevenue)}`}
-            />
+            {showCosts && (
+              <>
+                <Stat
+                  label="Cost frozen at the time"
+                  value={histCosted.length ? money(histCogs) : money(null, 'never known')}
+                />
+                <Stat
+                  label="Would have kept"
+                  value={histProfit === null ? money(null, 'not known') : money(histProfit)}
+                  sub={histMargin === null
+                    ? 'No item on this sale had a known cost.'
+                    : `${percent(histMargin)} of ${money(histCostedRevenue)}`}
+                />
+              </>
+            )}
           </StatRow>
+          )}
 
           <section className="space-y-3">
             <SectionHeading sub="Read from the original record, which cancellation never altered.">
@@ -594,30 +673,29 @@ export default async function SaleDetail({
             {history.length === 0 ? (
               <Empty>This sale had no items on it when it was cancelled.</Empty>
             ) : (
-              <ul className="space-y-2">
+              <ul className="mm-card divide-y" style={{ borderColor: 'var(--mm-line)' }}>
                 {history.map(({ line, alloc }) => {
                   const lineCogs = line.unit_cost_at_sale === null ? null
                     : Number(line.qty) * Number(line.unit_cost_at_sale)
                   const lineNet = Number(alloc?.net_revenue ?? 0)
                   return (
-                    <li key={line.id}>
-                      <Card>
-                        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                          <span className="font-medium">
-                            {line.recipe?.name ?? line.description ?? 'Item'}
-                          </span>
-                          <span className="mm-num font-medium">{money(lineNet)}</span>
-                        </div>
-                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
-                          {Number(line.qty).toLocaleString('en-NG')} × {money(line.unit_price)}
-                          {Number(line.discount_amount) > 0
-                            ? ` · less ${money(line.discount_amount)} off` : ''}
-                          {' · '}
-                          {lineCogs === null
-                            ? 'cost was never known'
-                            : `cost frozen at ${money(lineCogs)}, kept ${money(lineNet - lineCogs)}`}
-                        </div>
-                      </Card>
+                    <li key={line.id} className="py-2.5 first:pt-0 last:pb-0" style={{ borderColor: 'var(--mm-line)' }}>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="min-w-0 font-medium">{line.recipe?.name ?? line.description ?? 'Item'}</span>
+                        <span className="mm-num shrink-0 font-medium">
+                          {takings ? money(lineNet) : `× ${Number(line.qty).toLocaleString('en-NG')}`}
+                        </span>
+                      </div>
+                      {takings && (
+                      <div className="mt-0.5 text-sm" style={MUTED}>
+                        {Number(line.qty).toLocaleString('en-NG')} × {money(line.unit_price)}
+                        {Number(line.discount_amount) > 0
+                          ? ` · less ${money(line.discount_amount)} off` : ''}
+                        {showCosts && (lineCogs === null
+                          ? ' · cost was never known'
+                          : ` · cost frozen at ${money(lineCogs)}, kept ${money(lineNet - lineCogs)}`)}
+                      </div>
+                      )}
                     </li>
                   )
                 })}
@@ -625,123 +703,175 @@ export default async function SaleDetail({
             )}
           </section>
         </>
-      ) : (
-      <>
-      {/* An empty draft has no figures yet; three ₦0.00 boxes only got in the way. */}
-      {(confirmed || rows.length > 0) && (
-      <StatRow>
-        <Stat label="Charged" value={money(gross)}
-              sub={discounts > 0 ? `less ${money(discounts)} in discounts` : undefined} />
-        <Stat label={confirmed ? 'You were paid' : 'It would come to'} value={money(net)} />
-        <Stat
-          label="You kept"
-          value={profit === null ? money(null, 'not known yet') : money(profit)}
-          sub={margin === null
-            ? (confirmed ? 'No item on this sale has a known cost.' : 'Confirm the sale to lock in the cost.')
-            : `${percent(margin)} of ${money(costedRevenue)}${
-                costedRows.length < rows.length ? ' — the part with a known cost' : ''}`}
-        />
-      </StatRow>
-      )}
-
-      <section className="space-y-3">
-        <SectionHeading sub={confirmed
-          ? 'These cannot be changed. Cancel and re-issue the sale if something is wrong.'
-          : 'Add what the customer bought.'}>
-          What was sold
-        </SectionHeading>
-
-        {rows.length === 0 ? (
-          <Empty>Nothing on this sale yet.</Empty>
-        ) : (
-          <ul className="space-y-2">
-            {rows.map((r) => (
-              <li key={r.line_id}>
-                <Card>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <span className="font-medium">
-                      {r.product_name ?? r.description ?? 'Item'}
-                      {r.format_name ? ` · ${r.format_name}` : ''}
-                    </span>
-                    <span className="mm-num font-medium">{money(r.net_revenue)}</span>
-                  </div>
-                  <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
-                    {Number(r.qty).toLocaleString('en-NG')} × {money(r.unit_price)}
-                    {Number(r.line_discount) > 0 ? ` · less ${money(r.line_discount)} off` : ''}
-                    {Number(r.allocated_order_discount) > 0
-                      ? ` · less ${money(r.allocated_order_discount)} share of the order discount`
-                      : ''}
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-                    <Badge tone={costWords(r.cost_status).tone}>{costWords(r.cost_status).label}</Badge>
-                    {r.cogs !== null && (
-                      <span style={{ color: 'var(--mm-muted)' }}>
-                        cost {money(r.cogs)} · kept {money(r.gross_profit)} ({percent(r.gross_margin_pct)})
-                      </span>
-                    )}
-                    {r.cost_status === 'sold_without_cost' && (
-                      <span className="mm-absent">
-                        we do not know what this cost you, so it is left out of the profit
-                      </span>
-                    )}
-                  </div>
-                  {!confirmed && !voided && (
-                    <div className="mt-3 flex flex-wrap items-end gap-4">
-                      <form action={updateLine} className="flex flex-wrap items-end gap-2">
-                        <input type="hidden" name="order_id" value={id} />
-                        <input type="hidden" name="line_id" value={r.line_id} />
-                        <label className="block">
-                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>How many</span>
-                          <input name="qty" type="number" step="any" min="0" inputMode="decimal"
-                            defaultValue={Number(r.qty)} className="mt-1 w-24 rounded border px-2 py-2 text-base" />
-                        </label>
-                        <label className="block">
-                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Price for one (₦)</span>
-                          <input name="unit_price" type="number" step="0.01" min="0" inputMode="decimal"
-                            defaultValue={Number(r.unit_price)} className="mt-1 w-32 rounded border px-2 py-2 text-base" />
-                        </label>
-                        <label className="block">
-                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Off (₦)</span>
-                          <input name="discount_amount" type="number" step="0.01" min="0" inputMode="decimal"
-                            defaultValue={Number(r.line_discount)} className="mt-1 w-24 rounded border px-2 py-2 text-base" />
-                        </label>
-                        {r.recipe_id === null && (
-                          <label className="block">
-                            <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Costs you (₦)</span>
-                            <input name="extra_unit_cost" type="number" step="0.01" min="0" inputMode="decimal"
-                              defaultValue={extraCostOf.get(r.line_id) ?? ''} placeholder="optional"
-                              className="mt-1 w-28 rounded border px-2 py-2 text-base" />
-                          </label>
-                        )}
-                        <InlineSubmit>Update</InlineSubmit>
-                      </form>
-                      <form action={removeLine}>
-                        <input type="hidden" name="order_id" value={id} />
-                        <input type="hidden" name="line_id" value={r.line_id} />
-                        <InlineSubmit>Remove</InlineSubmit>
-                      </form>
+      ) : confirmed ? (
+        !takings ? (
+          // Kitchen has no receipt card, so the items are listed here: what
+          // was sold and how many, which is what the kitchen needs to know.
+          rows.length > 0 && (
+            <section className="space-y-2">
+              <SectionHeading>What was sold</SectionHeading>
+              <ul className="mm-card divide-y" style={{ borderColor: 'var(--mm-line)' }}>
+                {rows.map((r) => (
+                  <li key={r.line_id} className="flex items-baseline justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
+                      style={{ borderColor: 'var(--mm-line)' }}>
+                    <span className="min-w-0 font-medium">{lineName(r)}</span>
+                    <span className="mm-num shrink-0">× {Number(r.qty).toLocaleString('en-NG')}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )
+        ) : showCosts && rows.length > 0 && (
+          <section className="space-y-3">
+            {uncosted.length > 0 && (
+              <Notice>
+                {uncosted.length} item{uncosted.length === 1 ? '' : 's'} on this sale
+                {uncosted.length === 1 ? ' has' : ' have'} no known cost, so
+                {uncosted.length === 1 ? ' it is' : ' they are'} counted as money taken and left out
+                of the profit below. Finish costing {uncosted.length === 1 ? 'that dish' : 'those dishes'}
+                {' '}and future sales will be complete.
+              </Notice>
+            )}
+            {/* For the owner only: one card, the two figures that matter, then
+                each item's cost so a missing one can be found. */}
+            <div className="mm-card space-y-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span style={MUTED}>Cost at the time of sale</span>
+                <span className="mm-num shrink-0 font-semibold">
+                  {costedRows.length ? money(cogs) : money(null, 'not known yet')}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="font-semibold" style={{ color: 'var(--mm-accent)' }}>You kept</span>
+                <span className="text-right">
+                  <span className="mm-num block text-xl font-semibold" style={{ color: profit !== null && profit < 0 ? 'var(--mm-bad)' : 'var(--mm-accent)' }}>
+                    {profit === null ? money(null, 'not known yet') : money(profit)}
+                  </span>
+                  <span className="block text-xs" style={MUTED}>
+                    {margin === null
+                      ? 'No item on this sale has a known cost.'
+                      : `${percent(margin)}${costedRows.length < rows.length ? ` of ${money(costedRevenue)}, the part with a known cost` : ''}`}
+                  </span>
+                </span>
+              </div>
+              <ul className="divide-y border-t pt-1" style={{ borderColor: 'var(--mm-line)' }}>
+                {rows.map((r) => (
+                  <li key={r.line_id} className="py-2.5 text-sm" style={{ borderColor: 'var(--mm-line)' }}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="min-w-0 font-medium">{lineName(r)}</span>
+                      <Badge tone={costWords(r.cost_status).tone}>{costWords(r.cost_status).label}</Badge>
                     </div>
-                  )}
-                </Card>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      </>
+                    {r.cogs !== null ? (
+                      <div className="mt-0.5" style={MUTED}>
+                        cost {money(r.cogs)} · kept {money(r.gross_profit)} ({percent(r.gross_margin_pct)})
+                      </div>
+                    ) : r.cost_status === 'sold_without_cost' ? (
+                      <div className="mm-absent mt-0.5">we do not know what this cost you, so it is left out of the profit</div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        )
+      ) : (
+        <section className="space-y-3">
+          <SectionHeading sub={records ? 'Add what the customer bought. Change an item until you confirm.' : undefined}>
+            What was sold
+          </SectionHeading>
+          {rows.length === 0 ? (
+            <Empty>Nothing on this sale yet.</Empty>
+          ) : (
+            <ul className="space-y-2">
+              {rows.map((r) => (
+                <li key={r.line_id}>
+                  <Card>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="min-w-0 font-medium">
+                        {r.product_name ?? r.description ?? 'Item'}
+                        {r.format_name ? ` · ${r.format_name}` : ''}
+                      </span>
+                      <span className="mm-num shrink-0 font-medium">
+                        {takings ? money(r.net_revenue) : `× ${Number(r.qty).toLocaleString('en-NG')}`}
+                      </span>
+                    </div>
+                    {takings && (
+                      <div className="mt-1 text-sm" style={MUTED}>
+                        {Number(r.qty).toLocaleString('en-NG')} × {money(r.unit_price)}
+                        {Number(r.line_discount) > 0 ? ` · less ${money(r.line_discount)} off` : ''}
+                        {Number(r.allocated_order_discount) > 0
+                          ? ` · less ${money(r.allocated_order_discount)} share of the order discount`
+                          : ''}
+                      </div>
+                    )}
+                    {showCosts && (
+                      <div className="mt-2">
+                        <Badge tone={costWords(r.cost_status).tone}>{costWords(r.cost_status).label}</Badge>
+                      </div>
+                    )}
+                    {records && (
+                    <details className="mt-2">
+                      <summary className="mm-tap cursor-pointer list-none text-sm font-semibold underline [&::-webkit-details-marker]:hidden"
+                               style={{ color: 'var(--mm-accent)' }}>
+                        Change or remove
+                      </summary>
+                      <div className="mt-2 flex flex-wrap items-end gap-4">
+                        <form action={updateLine} className="flex flex-wrap items-end gap-2">
+                          <input type="hidden" name="order_id" value={id} />
+                          <input type="hidden" name="line_id" value={r.line_id} />
+                          <label className="block">
+                            <span className="text-xs" style={MUTED}>How many</span>
+                            <input name="qty" type="number" step="any" min="0" inputMode="decimal"
+                              defaultValue={Number(r.qty)} className="mt-1 w-24 min-h-[44px] rounded border px-2 py-2 text-base" />
+                          </label>
+                          <label className="block">
+                            <span className="text-xs" style={MUTED}>Price for one (₦)</span>
+                            <input name="unit_price" type="number" step="0.01" min="0" inputMode="decimal"
+                              defaultValue={Number(r.unit_price)} className="mt-1 w-32 min-h-[44px] rounded border px-2 py-2 text-base" />
+                          </label>
+                          <label className="block">
+                            <span className="text-xs" style={MUTED}>Off (₦)</span>
+                            <input name="discount_amount" type="number" step="0.01" min="0" inputMode="decimal"
+                              defaultValue={Number(r.line_discount)} className="mt-1 w-24 min-h-[44px] rounded border px-2 py-2 text-base" />
+                          </label>
+                          {/* What an extra cost: shown, and so sent, only to the roles that may see costs. */}
+                          {showCosts && r.recipe_id === null && (
+                            <label className="block">
+                              <span className="text-xs" style={MUTED}>Costs you (₦)</span>
+                              <input name="extra_unit_cost" type="number" step="0.01" min="0" inputMode="decimal"
+                                defaultValue={extraCostOf.get(r.line_id) ?? ''} placeholder="optional"
+                                className="mt-1 w-28 min-h-[44px] rounded border px-2 py-2 text-base" />
+                            </label>
+                          )}
+                          <InlineSubmit>Update</InlineSubmit>
+                        </form>
+                        <form action={removeLine}>
+                          <input type="hidden" name="order_id" value={id} />
+                          <input type="hidden" name="line_id" value={r.line_id} />
+                          <InlineSubmit>Remove</InlineSubmit>
+                        </form>
+                      </div>
+                    </details>
+                    )}
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
 
-      {!confirmed && !voided && (
+      {!confirmed && !voided && records && (
         <>
           {/* The next step comes first. Adding to the order and a discount
               are there when needed, folded away when they are not. */}
           {rows.length > 0 && (
             <Card>
-              <SectionHeading sub="Confirming locks in what this sale cost you, using today's prices. After that it cannot be edited — only cancelled and re-issued.">
+              <SectionHeading sub="Confirming locks in what this sale cost you, using today's prices. After that it cannot be edited, only cancelled and re-issued.">
                 Ready? Confirm the sale
               </SectionHeading>
-              <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
-                Confirm when the order is served or paid for. Until then it does not count as a sale.
+              <p className="mt-1 text-sm" style={MUTED}>
+                Confirm when the order is served or paid for.
               </p>
               <form action={confirm} className="mt-3">
                 <input type="hidden" name="order_id" value={id} />
@@ -776,7 +906,7 @@ export default async function SaleDetail({
             <Disclosure summary={Number(order.order_discount) > 0
               ? `Discount on the whole sale · ${money(order.order_discount)}`
               : 'Discount on the whole sale'}>
-              <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+              <p className="text-sm" style={MUTED}>
                 Taken off the whole sale and shared across the items, so each dish still shows a true margin.
               </p>
               <form action={setOrderDiscount} className="mt-3 flex flex-wrap items-end gap-3">
@@ -807,74 +937,52 @@ export default async function SaleDetail({
             </form>
           </Disclosure>
 
-          <Disclosure summary="Discard this draft">
-            <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-              A draft has never counted as a sale, so discarding one changes none of your
-              figures.
-            </p>
-            <form action={deleteDraft} className="mt-2">
-              <input type="hidden" name="order_id" value={id} />
-              <ConfirmSubmit message="Discard this draft? It has never counted as a sale.">Discard this draft</ConfirmSubmit>
-            </form>
-          </Disclosure>
+          {removes && (
+            <Disclosure summary="Discard this draft">
+              <p className="text-sm" style={MUTED}>
+                A draft has never counted as a sale, so discarding one changes none of your
+                figures.
+              </p>
+              <form action={deleteDraft} className="mt-2">
+                <input type="hidden" name="order_id" value={id} />
+                <ConfirmSubmit message="Discard this draft? It has never counted as a sale.">Discard this draft</ConfirmSubmit>
+              </form>
+            </Disclosure>
+          )}
         </>
       )}
 
-      {confirmed && !voided && (
+      {confirmed && !voided && takings && (
         <>
           <Card>
-            <SectionHeading sub="Money can still come in after the sale. Recording it changes nothing about what was sold.">
+            <SectionHeading sub={records ? 'Money can still come in after the sale. Recording it changes nothing about what was sold.' : undefined}>
               Payment
             </SectionHeading>
+            <p className="mt-1 text-sm">
+              <span className="font-semibold">{paymentWords(order.payment_status, amountPaid, net)}</span>
+            </p>
             {/* A sale paid in full needs no form, only the fact. */}
-            {order.payment_status === 'paid' ? (
-              <>
-                <p className="mt-2 text-sm">
-                  <span className="font-semibold">Paid in full</span>
-                  <span style={{ color: 'var(--mm-muted)' }}> · {money(order.amount_paid)}</span>
-                </p>
-                <div className="mt-3">
-                  <Disclosure summary="Change the payment">
-                      <form action={markPaid} className="mt-3 flex flex-wrap items-end gap-3">
-                        <input type="hidden" name="order_id" value={id} />
-                        <Field label="Paid so far (₦)">
-                          <input name="amount_paid" type="number" step="0.01" min="0" inputMode="decimal"
-                                 defaultValue={order.amount_paid} className="mm-input mt-1" />
-                        </Field>
-                        <Field label="Status">
-                          <select name="payment_status" defaultValue={order.payment_status} className="mm-input mt-1">
-                            <option value="unpaid">Not paid</option>
-                            <option value="part_paid">Part paid</option>
-                            <option value="paid">Paid in full</option>
-                          </select>
-                        </Field>
-                        <Submit>Save payment</Submit>
-                      </form>
-                  </Disclosure>
-                </div>
-              </>
+            {!records ? null : order.payment_status === 'paid' ? (
+              <div className="mt-3">
+                <Disclosure summary="Change the payment">
+                  <PaymentForm id={id} order={order} />
+                </Disclosure>
+              </div>
             ) : (
-            <form action={markPaid} className="mt-3 flex flex-wrap items-end gap-3">
-              <input type="hidden" name="order_id" value={id} />
-              <Field label="Paid so far (₦)">
-                <input name="amount_paid" type="number" step="0.01" min="0" inputMode="decimal"
-                       defaultValue={order.amount_paid} className="mm-input mt-1" />
-              </Field>
-              <Field label="Status">
-                <select name="payment_status" defaultValue={order.payment_status} className="mm-input mt-1">
-                  <option value="unpaid">Not paid</option>
-                  <option value="part_paid">Part paid</option>
-                  <option value="paid">Paid in full</option>
-                </select>
-              </Field>
-              <Submit>Save payment</Submit>
-            </form>
+              <PaymentForm id={id} order={order} />
             )}
           </Card>
 
+          {!removes ? (
+            // fn_void_order admits only the owner and a manager; the form
+            // would only ever be refused, so say who to ask instead.
+            !removerRole && (
+              <p className="text-sm" style={MUTED}>If something is wrong with this sale, ask the owner or a manager to cancel it.</p>
+            )
+          ) : (
           <Disclosure summary="Something is wrong with this sale">
             <p className="text-sm">
-              A confirmed sale is never edited. Cancel it — with the reason — and Menu Master
+              A confirmed sale is never edited. Cancel it, with the reason, and Menu Master
               will start a replacement you can correct. Both records are kept and linked, so
               your history stays honest.
             </p>
@@ -886,6 +994,7 @@ export default async function SaleDetail({
               <ConfirmSubmit variant="secondary" message="Cancel this sale? It stops counting in your figures. The record is kept and you can put through a corrected one.">Cancel this sale</ConfirmSubmit>
             </form>
           </Disclosure>
+          )}
         </>
       )}
 
@@ -901,7 +1010,8 @@ export default async function SaleDetail({
               </Link>
             </p>
           </Card>
-        ) : (
+        ) : records && (
+        // fn_reissue_order admits owner, manager and sales, as New sale does.
         <Card>
           <SectionHeading sub="The cancelled sale stays exactly as it was. The replacement starts with the same items; change the one that was wrong and confirm.">
             Put through a corrected sale
@@ -922,5 +1032,26 @@ export default async function SaleDetail({
         </p>
       )}
     </div>
+  )
+}
+
+/** What has been paid, in the same two fields as ever (markPaid). */
+function PaymentForm({ id, order }: { id: string; order: Order }) {
+  return (
+    <form action={markPaid} className="mt-3 flex flex-wrap items-end gap-3">
+      <input type="hidden" name="order_id" value={id} />
+      <Field label="Paid so far (₦)">
+        <input name="amount_paid" type="number" step="0.01" min="0" inputMode="decimal"
+               defaultValue={order.amount_paid} className="mm-input mt-1" />
+      </Field>
+      <Field label="Status">
+        <select name="payment_status" defaultValue={order.payment_status} className="mm-input mt-1">
+          <option value="unpaid">Not paid</option>
+          <option value="part_paid">Part paid</option>
+          <option value="paid">Paid in full</option>
+        </select>
+      </Field>
+      <Submit>Save payment</Submit>
+    </form>
   )
 }

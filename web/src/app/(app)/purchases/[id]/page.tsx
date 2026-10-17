@@ -4,13 +4,21 @@ import { revalidatePath } from 'next/cache'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
-  SectionHeading, BackLink, Stat, StatRow, Disclosure, Badge,
+  SectionHeading, BackLink, Disclosure,
 } from '@/components/ui'
 import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
-import { money, quantity, productState, purchaseReference } from '@/lib/format'
+import { DishTile } from '@/components/dish-tile'
+import { money, quantity, purchaseReference } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
+import { canSeeCosts } from '@/lib/pricing'
 import { ConfirmSubmit } from '@/components/confirm-submit'
+import { stateDot } from '../../recipes/_list/dish-figures'
+import { NOT_CHANGED, canRecordPurchases } from '../buy-roles'
+import { inSentence } from '../buy-figures'
+import '../buy.css'
+// .mm-dot, the dish state dot, as /recipes and /pricing draw it.
+import '../../recipes/_list/lists.css'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +28,10 @@ type Purchase = {
   reversal_reason: string | null
 }
 type Line = {
-  id: string; qty: string; amount: string; qty_base: string | null
+  id: string; qty: string
+  /** Selected only for a role that may see costs. */
+  amount?: string
+  qty_base: string | null
   ingredient: { id: string; name: string } | null
   unit: { code: string; name: string } | null
 }
@@ -28,7 +39,7 @@ type Ingredient = { id: string; name: string }
 type Affected = {
   recipe_id: string; variant_id: string | null
   product_name: string; format_name: string | null
-  true_cost: string | null; selling_price: string | null; state: string
+  true_cost: string | null; state: string
 }
 type Unit = { id: string; code: string; name: string; kind: string }
 
@@ -66,10 +77,11 @@ async function removeLine(formData: FormData) {
   const here = `/purchases/${id}`
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('purchase_lines')
-    .delete().eq('id', String(formData.get('line_id') ?? ''))
+  // .select: a refused delete is not an error, only zero rows (NOT_CHANGED).
+  const { data, error } = await supabase.from('purchase_lines')
+    .delete().eq('id', String(formData.get('line_id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Item removed.'))
+  redirect(withNotice(here, describeWriteError(error) ?? (data?.length ? 'Item removed.' : NOT_CHANGED)))
 }
 
 /**
@@ -123,11 +135,11 @@ async function updateLine(formData: FormData) {
   if (!Number.isFinite(amount) || amount <= 0) {
     redirect(withNotice(here, 'Enter what you paid. It must be greater than zero.'))
   }
-  const { error } = await supabase.from('purchase_lines')
+  const { data, error } = await supabase.from('purchase_lines')
     .update({ qty, unit_id: String(formData.get('unit_id') ?? ''), amount })
-    .eq('id', String(formData.get('line_id') ?? ''))
+    .eq('id', String(formData.get('line_id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Item updated.'))
+  redirect(withNotice(here, describeWriteError(error) ?? (data?.length ? 'Item updated.' : NOT_CHANGED)))
 }
 
 /** The draft's date, supplier and reference. */
@@ -139,14 +151,14 @@ async function updateHeader(formData: FormData) {
   const { supabase } = ctx
   const date = String(formData.get('purchase_date') ?? '')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) redirect(withNotice(here, 'Choose the date of the purchase.'))
-  const { error } = await supabase.from('purchases').update({
+  const { data, error } = await supabase.from('purchases').update({
     purchase_date: date,
     supplier_id: String(formData.get('supplier_id') ?? '') || null,
     reference: String(formData.get('reference') ?? '').trim() || null,
     note: String(formData.get('note') ?? '').trim() || null,
-  }).eq('id', id)
+  }).eq('id', id).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Saved.'))
+  redirect(withNotice(here, describeWriteError(error) ?? (data?.length ? 'Saved.' : NOT_CHANGED)))
 }
 
 /** A draft never set a price, so discarding one changes nothing. */
@@ -155,8 +167,10 @@ async function discardDraft(formData: FormData) {
   const id = String(formData.get('purchase_id') ?? '')
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('purchases').delete().eq('id', id).eq('status', 'draft')
+  const { data, error } = await supabase.from('purchases').delete().eq('id', id).eq('status', 'draft').select('id')
   if (error) redirect(withNotice(`/purchases/${id}`, describeWriteError(error) ?? 'Could not discard that draft.'))
+  // Zero rows: refused, or recorded in the meantime. Either way it is still there.
+  if (!data?.length) redirect(withNotice(`/purchases/${id}`, NOT_CHANGED))
   revalidatePath('/purchases')
   redirect(withNotice('/purchases', 'Draft discarded.'))
 }
@@ -192,6 +206,14 @@ export default async function PurchaseDetail({
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/purchases'))
 
+  // What was paid is a cost: amount / quantity is the ingredient's price,
+  // which fn_can_see_costs (0004) keeps from sales and kitchen. Every member
+  // may read purchase lines, so the gate is here: without it no amount, total
+  // or dish cost is selected at all. Changing a purchase is for the roles the
+  // database lets write one (0015); the forms are not drawn for anyone else.
+  const costs = canSeeCosts(ctx.role)
+  const canWrite = canRecordPurchases(ctx.role)
+
   const { data: purchase } = await supabase.from('purchases')
     .select('id,purchase_date,status,reference,note,supplier_id,reverses,reversal_reason')
     .eq('id', id).maybeSingle<Purchase>()
@@ -203,22 +225,35 @@ export default async function PurchaseDetail({
     .eq('id', id).maybeSingle<{ replaced_by: string | null }>()
   const replacedBy = link?.replaced_by ?? null
 
-  const [{ data: lines }, { data: ingredients }, { data: units }, { data: suppliers }] = await Promise.all([
+  const draft = purchase.status === 'draft'
+  const posted = purchase.status === 'posted'
+
+  const [{ data: lines }, { data: ingredients }, { data: units }, { data: suppliers }, { data: supplier }] = await Promise.all([
     // The !constraint hints are required, not cosmetic: purchase_lines has two
     // foreign keys to ingredients (a composite tenant-scoped one and a simple
     // one), so an unhinted embed fails with PGRST201 and the page renders no
     // items at all. The composite key is chosen because it also enforces that
     // the ingredient belongs to the same account.
     supabase.from('purchase_lines')
-      .select('id,qty,amount,qty_base,' +
+      .select((costs ? 'id,qty,amount,qty_base,' : 'id,qty,qty_base,') +
               'ingredient:ingredients!fk_purchase_lines_ingredient_id_account(id,name),' +
               'unit:units!purchase_lines_unit_id_fkey(code,name)')
       .eq('purchase_id', id).returns<Line[]>(),
-    supabase.from('ingredients').select('id,name').is('deleted_at', null)
-      .eq('is_active', true).order('name').returns<Ingredient[]>(),
-    supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<Unit[]>(),
-    supabase.from('suppliers').select('id,name').eq('is_active', true).order('name')
-      .returns<{ id: string; name: string }[]>(),
+    // The pickers are only for a draft someone here may change.
+    draft && canWrite
+      ? supabase.from('ingredients').select('id,name').is('deleted_at', null)
+          .eq('is_active', true).order('name').returns<Ingredient[]>()
+      : Promise.resolve({ data: null }),
+    draft && canWrite
+      ? supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<Unit[]>()
+      : Promise.resolve({ data: null }),
+    draft && canWrite
+      ? supabase.from('suppliers').select('id,name').eq('is_active', true).order('name')
+          .returns<{ id: string; name: string }[]>()
+      : Promise.resolve({ data: null }),
+    purchase.supplier_id
+      ? supabase.from('suppliers').select('name').eq('id', purchase.supplier_id).maybeSingle<{ name: string }>()
+      : Promise.resolve({ data: null }),
   ])
 
   const rows = lines ?? []
@@ -230,42 +265,52 @@ export default async function PurchaseDetail({
   // The total is summed in PostgreSQL by v_purchase_summary (0035). Adding the
   // lines up here would be money arithmetic in the browser.
   const { data: summary } = await supabase.from('v_purchase_summary')
-    .select('total_amount,line_count').eq('purchase_id', id)
-    .maybeSingle<{ total_amount: string | null; line_count: number }>()
-  const total = summary?.total_amount !== null && summary?.total_amount !== undefined
+    .select(costs ? 'total_amount,line_count' : 'line_count').eq('purchase_id', id)
+    .maybeSingle<{ total_amount?: string | null; line_count: number }>()
+  const total = costs && summary?.total_amount !== null && summary?.total_amount !== undefined
     ? Number(summary.total_amount) : null
+  const itemCount = summary?.line_count ?? rows.length
+
   // What this purchase changed: every dish using one of its items, with the
-  // cost the database now holds for it.
+  // cost the database now holds for it. Costs only, so not asked otherwise.
   const boughtIds = [...new Set(rows.map((l) => l.ingredient?.id).filter((x): x is string => !!x))]
   let affected: Affected[] = []
-  if (purchase.status === 'posted' && boughtIds.length) {
+  const photoOf = new Map<string, string | null>()
+  if (costs && posted && boughtIds.length) {
     const { data: uses } = await supabase.from('recipe_lines').select('recipe_id')
       .in('ingredient_id', boughtIds).returns<{ recipe_id: string }[]>()
     const recipeIds = [...new Set((uses ?? []).map((u) => u.recipe_id))]
     if (recipeIds.length) {
-      const { data } = await supabase.from('v_product_attention')
-        .select('recipe_id,variant_id,product_name,format_name,true_cost,selling_price,state')
-        .in('recipe_id', recipeIds).order('product_name').returns<Affected[]>()
+      const [{ data }, { data: photos }] = await Promise.all([
+        supabase.from('v_product_attention')
+          .select('recipe_id,variant_id,product_name,format_name,true_cost,state')
+          .in('recipe_id', recipeIds).order('product_name').returns<Affected[]>(),
+        // recipes.photo_path arrives with 0063. Before it, this read fails and
+        // every dish keeps its tile.
+        supabase.from('recipes').select('id,photo_path').in('id', recipeIds)
+          .returns<{ id: string; photo_path: string | null }[]>(),
+      ])
       affected = data ?? []
+      for (const p of photos ?? []) photoOf.set(p.id, p.photo_path)
     }
   }
-  const draft = purchase.status === 'draft'
-  const posted = purchase.status === 'posted'
   const inputClass = 'mm-input mt-1'
   const inputStyle = undefined
+  const statusWord = draft ? 'Not recorded yet' : posted ? 'Recorded' : 'Cancelled'
 
   return (
     <div className="space-y-6">
-      <BackLink href="/purchases">All purchases</BackLink>
+      <BackLink href="/purchases">Purchases</BackLink>
       <PageHeader
-        title={`Purchase of ${formatDay(purchase.purchase_date).toLowerCase()}`}
+        title={`Purchase of ${inSentence(formatDay(purchase.purchase_date))}`}
         sub={[
-          draft ? 'Not recorded yet' : posted ? 'Recorded' : 'Cancelled',
-          purchaseReference(purchase.reference),
-        ].filter(Boolean).join(' · ')}
+          supplier?.name ? `From ${supplier.name}` : null,
+          purchaseReference(purchase.reference) ? `Receipt ${purchaseReference(purchase.reference)}` : null,
+          purchase.note,
+        ].filter(Boolean).join(' · ') || undefined}
       />
       {notice && (
-        <Notice tone={/could not|do not yet|cancelling|must be/i.test(notice) ? 'warn' : 'info'}>
+        <Notice tone={/could not|do not yet|cancelling|must be|nothing was changed/i.test(notice) ? 'warn' : 'info'}>
           {notice}
         </Notice>
       )}
@@ -296,24 +341,33 @@ export default async function PurchaseDetail({
         </Notice>
       )}
 
+      {/* One figure: what the trip came to. */}
       {rows.length > 0 && (
-        <StatRow>
-          <Stat label="Items" value={String(summary?.line_count ?? rows.length)} />
-          <Stat label="Total paid" value={total !== null ? money(total) : undefined} />
-          <Stat label="Status"
-            value={draft ? 'Not recorded' : posted ? 'Recorded' : 'Cancelled'} />
-        </StatRow>
+        <section className="mm-card" aria-label="This purchase">
+          {costs && (
+            <>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: 'var(--mm-muted)' }}>
+                You paid
+              </div>
+              <div className={`mm-num mm-buy-hero mt-1 ${posted || draft ? '' : 'line-through'}`}>
+                {money(total, 'not known yet')}
+              </div>
+            </>
+          )}
+          <div className={costs ? 'mt-1 text-sm' : 'text-sm'} style={{ color: 'var(--mm-muted)' }}>
+            {supplier?.name ? `${supplier.name} · ` : ''}
+            {itemCount} item{itemCount === 1 ? '' : 's'} ·{' '}
+            <span style={draft || !posted ? { color: 'var(--mm-warn)' } : undefined}>{statusWord}</span>
+          </div>
+        </section>
       )}
 
       {/* A draft's next step comes first. */}
-      {draft && rows.length > 0 && (
+      {draft && canWrite && rows.length > 0 && (
         <Card>
-          <SectionHeading sub="This updates the cost of every recipe using these ingredients.">
+          <SectionHeading sub="Recording it updates the cost of every dish using these items. Until then, none of these prices are used.">
             Ready? Record this purchase
           </SectionHeading>
-          <p className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
-            Until you record it, none of these prices are used.
-          </p>
           <form action={post} className="mt-3">
             <input type="hidden" name="purchase_id" value={id} />
             <Button className="w-full sm:w-auto" busyLabel="Recording…">
@@ -323,32 +377,39 @@ export default async function PurchaseDetail({
         </Card>
       )}
 
-      {posted && (
+      {costs && posted && (
         <section className="space-y-3">
           <SectionHeading sub="Dishes that use what you bought, costed with the prices you just paid.">
             What this changed
           </SectionHeading>
           {affected.length === 0 ? (
-            <Empty>None of your dishes use these items yet. Add them to a dish and its cost will come from what you paid here.</Empty>
+            <Empty>None of your dishes use these items yet.</Empty>
           ) : (
-            <ul className="space-y-2">
+            <ul className="mm-buy-rows">
               {affected.map((p) => {
-                const st = productState(p.state)
+                // The Dishes list's dot and words, so a dish is called the same
+                // thing on both screens. A badge beside the name left about six
+                // letters of it at 360px; the dot sits by the cost instead and
+                // the name keeps the row's full width.
+                const dot = stateDot(p.state)
+                const known = p.true_cost !== null && p.true_cost !== ''
                 return (
                   <li key={`${p.recipe_id}-${p.variant_id ?? 'base'}`}>
-                    <Link href={`/recipes/${p.recipe_id}`} className="block">
-                      <Card>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="min-w-0 truncate font-semibold">
-                            {p.product_name}{p.format_name ? <span style={{ color: 'var(--mm-muted)' }}> · {p.format_name}</span> : null}
-                          </span>
-                          <Badge tone={st.tone}>{st.label}</Badge>
-                        </div>
-                        <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
-                          Costs you {money(p.true_cost, 'not known yet')}
-                          {p.selling_price !== null ? ` · you sell it for ${money(p.selling_price)}` : ' · no selling price yet'}
-                        </div>
-                      </Card>
+                    <Link href={`/recipes/${p.recipe_id}`} className="mm-buy-row">
+                      <DishTile name={p.product_name} photoPath={photoOf.get(p.recipe_id) ?? null} size="sm" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold">
+                          {p.product_name}{p.format_name ? <span style={{ color: 'var(--mm-muted)' }}> · {p.format_name}</span> : null}
+                        </span>
+                        <span className="mt-0.5 flex items-center gap-1.5 text-sm" style={{ color: 'var(--mm-muted)' }}>
+                          {/* With no cost the words beside it say the same; read them once. */}
+                          <span className="mm-dot" data-tone={dot.tone} title={dot.label}
+                            {...(known ? { role: 'img', 'aria-label': dot.label } : { 'aria-hidden': true })} />
+                          {known
+                            ? <span className="min-w-0">Costs you <span className="mm-num">{money(p.true_cost)}</span></span>
+                            : <span className="min-w-0">{dot.label}</span>}
+                        </span>
+                      </span>
                     </Link>
                   </li>
                 )
@@ -356,73 +417,76 @@ export default async function PurchaseDetail({
             </ul>
           )}
           <div className="grid gap-2 sm:grid-cols-2">
-            <Link href="/purchases/new" className="mm-btn mm-btn-primary w-full">
-              <AppIcon name="plus" size={18} /> New purchase
-            </Link>
+            {canWrite && (
+              <Link href="/purchases/new" className="mm-btn mm-btn-primary w-full">
+                <AppIcon name="plus" size={18} /> New purchase
+              </Link>
+            )}
             <Link href="/recipes" className="mm-btn mm-btn-secondary w-full">See your dishes</Link>
           </div>
         </section>
       )}
 
       <section className="space-y-3">
-        <SectionHeading sub="What you bought, and what you paid for it.">Items</SectionHeading>
+        <SectionHeading>Items</SectionHeading>
         {!rows.length ? (
-          <Empty>Nothing on this purchase yet. Add what you bought and what you paid for it.</Empty>
+          <Empty>Nothing on this purchase yet.{draft && canWrite ? ' Add what you bought and what you paid for it.' : ''}</Empty>
         ) : (
-          <ul className="space-y-2">
+          <ul className="mm-buy-rows">
             {rows.map((l) => (
               <li key={l.id}>
-                <Card>
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <span className="font-medium">{l.ingredient?.name ?? 'Unknown item'}</span>
-                    <span className="tabular-nums font-medium">{money(Number(l.amount))}</span>
-                  </div>
-                  <div className="mt-1 text-sm" style={{ color: 'var(--mm-muted)' }}>
-                    {quantity(Number(l.qty), l.unit?.code ?? null)}
-                  </div>
-                  {draft && (
-                    <div className="mt-3 flex flex-wrap items-end gap-4">
-                      <form action={updateLine} className="flex flex-wrap items-end gap-2">
-                        <input type="hidden" name="purchase_id" value={id} />
-                        <input type="hidden" name="line_id" value={l.id} />
-                        <label className="block">
-                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Quantity</span>
-                          <input name="qty" type="number" step="any" min="0" inputMode="decimal"
-                            defaultValue={Number(l.qty)} className="mt-1 w-24 rounded border px-2 py-2 text-base" />
-                        </label>
-                        <label className="block">
-                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Unit</span>
-                          <select name="unit_id" className="mt-1 rounded border px-2 py-2 text-base"
-                            defaultValue={(units ?? []).find((u) => u.code === l.unit?.code)?.id ?? ''}>
-                            {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
-                          </select>
-                        </label>
-                        <label className="block">
-                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Paid (₦)</span>
-                          <input name="amount" type="number" step="0.01" min="0" inputMode="decimal"
-                            defaultValue={Number(l.amount)} className="mt-1 w-32 rounded border px-2 py-2 text-base" />
-                        </label>
-                        <InlineSubmit>Update</InlineSubmit>
-                      </form>
-                      <form action={removeLine}>
-                        <input type="hidden" name="purchase_id" value={id} />
-                        <input type="hidden" name="line_id" value={l.id} />
-                        <InlineSubmit>Remove</InlineSubmit>
-                      </form>
-                    </div>
+                <div className="mm-buy-row">
+                  <span className="min-w-0 flex-1">
+                    {l.ingredient
+                      ? <Link href={`/ingredients/${l.ingredient.id}`} className="block truncate font-medium">{l.ingredient.name}</Link>
+                      : <span className="block truncate font-medium">Unknown item</span>}
+                    <span className="block text-sm" style={{ color: 'var(--mm-muted)' }}>
+                      {quantity(Number(l.qty), l.unit?.code ?? null)}
+                    </span>
+                  </span>
+                  {costs && l.amount !== undefined && (
+                    <span className="mm-num shrink-0 font-medium">{money(l.amount)}</span>
                   )}
-                </Card>
+                </div>
+                {draft && canWrite && (
+                  <div className="flex flex-wrap items-end gap-4 px-[.9rem] pb-3">
+                    <form action={updateLine} className="flex flex-wrap items-end gap-2">
+                      <input type="hidden" name="purchase_id" value={id} />
+                      <input type="hidden" name="line_id" value={l.id} />
+                      <label className="block">
+                        <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Quantity</span>
+                        <input name="qty" type="number" step="any" min="0" inputMode="decimal"
+                          defaultValue={Number(l.qty)} className="mm-input mt-1" style={{ width: '6rem' }} />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Unit</span>
+                        <select name="unit_id" className="mm-input mt-1" style={{ width: 'auto' }}
+                          defaultValue={(units ?? []).find((u) => u.code === l.unit?.code)?.id ?? ''}>
+                          {(units ?? []).map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>Paid (₦)</span>
+                        <input name="amount" type="number" step="0.01" min="0" inputMode="decimal"
+                          defaultValue={l.amount !== undefined ? Number(l.amount) : undefined} className="mm-input mt-1" style={{ width: '8rem' }} />
+                      </label>
+                      <InlineSubmit>Update</InlineSubmit>
+                    </form>
+                    <form action={removeLine}>
+                      <input type="hidden" name="purchase_id" value={id} />
+                      <input type="hidden" name="line_id" value={l.id} />
+                      <InlineSubmit>Remove</InlineSubmit>
+                    </form>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         )}
 
-        {draft && (
+        {draft && canWrite && (
           <Disclosure summary={rows.length === 0 ? 'Add what you bought' : 'Add another item'} open={rows.length === 0}>
-            <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-              Buy in bags, paint, derica or kilograms — whatever you actually bought in.
-            </p>
-            <form action={addLine} className="mt-3 grid gap-3 sm:grid-cols-5">
+            <form action={addLine} className="grid gap-3 sm:grid-cols-5">
               <input type="hidden" name="purchase_id" value={id} />
               <div className="sm:col-span-2">
                 <Field label="Ingredient">
@@ -454,9 +518,9 @@ export default async function PurchaseDetail({
         )}
       </section>
 
-      {draft && (
+      {draft && canWrite && (
         <Disclosure summary={`Date, supplier and reference · ${formatDay(purchase.purchase_date)}`}>
-          <form action={updateHeader} className="mt-2 grid gap-3 sm:grid-cols-4 sm:items-end">
+          <form action={updateHeader} className="grid gap-3 sm:grid-cols-4 sm:items-end">
             <input type="hidden" name="purchase_id" value={id} />
             <Field label="Date">
               <input name="purchase_date" type="date" required defaultValue={purchase.purchase_date}
@@ -482,7 +546,7 @@ export default async function PurchaseDetail({
         </Disclosure>
       )}
 
-      {draft && (
+      {draft && canWrite && (
         <Disclosure summary="Discard this draft">
           <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
             A draft has never changed a price, so discarding it changes nothing.
@@ -494,20 +558,20 @@ export default async function PurchaseDetail({
         </Disclosure>
       )}
 
-      {posted && (
+      {posted && canWrite && (
         <Card>
           <SectionHeading sub="Wrong amount, wrong quantity, wrong item? Correct it in one step: the corrected purchase is recorded and this one is cancelled, and they stay linked.">
-            Something is wrong with this purchase
+            Something wrong?
           </SectionHeading>
           <p className="mt-3">
-            <Link href={`/purchases/${id}/correct`} className="mm-btn mm-btn-primary">
+            <Link href={`/purchases/${id}/correct`} className="mm-btn mm-btn-primary w-full sm:w-auto">
               Correct this purchase <AppIcon name="arrow-right" size={16} />
             </Link>
           </p>
         </Card>
       )}
 
-      {posted && (
+      {posted && canWrite && (
         <Disclosure summary="Cancel it without a replacement">
           <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
             For goods you returned or a purchase recorded by mistake. Cancelling undoes
@@ -525,11 +589,6 @@ export default async function PurchaseDetail({
           </form>
         </Disclosure>
       )}
-
-      <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
-        Menu Master works out the unit cost from what you paid.{' '}
-        <Link href="/ingredients" className="underline">See your ingredients</Link>.
-      </p>
     </div>
   )
 }

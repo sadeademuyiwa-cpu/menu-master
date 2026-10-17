@@ -25,9 +25,17 @@ type Payload = {
   discount?: number
   /** Paid on the spot. Recorded after confirmation, from the confirmed total. */
   paid?: boolean
+  /**
+   * Part paid: what the customer handed over now, a deposit on a cake order
+   * say. Recorded after confirmation, in the same two fields the sale page's
+   * payment form writes (amount_paid, payment_status 'part_paid'), and never
+   * more than the confirmed total. Null or absent when not part paid.
+   */
+  paidAmount?: number | null
 }
 
 const isAmount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+const toKobo = (n: number) => Math.round(n * 100) / 100
 
 /**
  * Record a whole sale from the order screen in one go.
@@ -37,6 +45,10 @@ const isAmount = (n: unknown): n is number => typeof n === 'number' && Number.is
  * rule and freezes each line's cost -- just without a page load in between.
  * If any step is refused, everything written so far is removed again and the
  * owner keeps their basket on screen with the reason.
+ *
+ * mode: 'confirm' records the sale; 'send' records it exactly the same way
+ * and opens the sale page ready to send the receipt (send=1); 'draft' saves
+ * it for later.
  */
 export async function placeOrder(_prev: OrderResult, formData: FormData): Promise<OrderResult> {
   let p: Payload
@@ -62,13 +74,21 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
       return { error: 'What an item costs you is an amount in naira, and cannot be negative.' }
     }
   }
+  // Checked before anything is written, so a bad deposit never leaves a sale
+  // recorded without its payment.
+  const partPaid = p.paidAmount === undefined || p.paidAmount === null ? null : p.paidAmount
+  if (partPaid !== null && !(isAmount(partPaid) && partPaid > 0)) {
+    return { error: 'What they paid so far is an amount in naira, more than nothing.' }
+  }
   // Before 0061 the column does not exist; sending it would refuse the whole
   // sale. Send it only when something was typed, and if that is refused for
   // being unknown, record the sale without it.
   const anyCost = lines.some((l) => !l.product && l.cost !== undefined && l.cost !== null)
   // "Save for later" keeps it as a draft: an order taken now, served and
   // confirmed another day. Nothing counts as a sale until it is confirmed.
-  const asDraft = String(formData.get('mode') ?? 'confirm') === 'draft'
+  const mode = String(formData.get('mode') ?? 'confirm')
+  const asDraft = mode === 'draft'
+  const sendReceipt = mode === 'send'
   const discount = p.discount ?? 0
   if (!isAmount(discount)) return { error: 'A discount is an amount in naira, and cannot be negative.' }
   const subtotal = lines.reduce((t, l) => t + l.qty * (l.price ?? 0) - (l.discount ?? 0), 0)
@@ -135,7 +155,10 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
 
   if (asDraft) {
     revalidatePath('/sales')
-    redirect(`/sales/${order.id}?notice=${encodeURIComponent('Saved for later. It does not count as a sale until you confirm it. You can send it as a quote from here.' + costNote)}`)
+    // A draft is not a sale, so no money is recorded against it: the owner
+    // records the deposit when she confirms.
+    const depositNote = partPaid !== null ? ' Record what they paid when you confirm it.' : ''
+    redirect(`/sales/${order.id}?notice=${encodeURIComponent('Saved for later. It does not count as a sale until you confirm it. You can send it as a quote from here.' + depositNote + costNote)}`)
   }
 
   const { data: confirmed, error: cErr } = await supabase.rpc('fn_confirm_order', { p_order_id: order.id })
@@ -144,17 +167,32 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
     return { error: describeWriteError(cErr) ?? 'We could not confirm that sale.' }
   }
 
-  // Paid on the spot: record the confirmed total as paid. The amount is read
-  // back from the database, not taken from the screen. The sale itself is
-  // already confirmed, so a failure here is reported, never undone.
+  // Paid on the spot, or part paid: recorded against the confirmed total,
+  // which is read back from the database, not taken from the screen. The sale
+  // itself is already confirmed, so a failure here is reported, never undone.
   let paymentNote = ''
-  if (p.paid) {
-    const { data: lineRows } = await supabase.from('v_sale_lines').select('net_revenue')
+  const paymentFailed = p.paid
+    ? ' We could not mark it as paid; record the payment below.'
+    : ' We could not record what they paid; record the payment below.'
+  if (p.paid || partPaid !== null) {
+    const { data: lineRows, error: rErr } = await supabase.from('v_sale_lines').select('net_revenue')
       .eq('order_id', order.id).returns<{ net_revenue: string }[]>()
-    const paidTotal = (lineRows ?? []).reduce((t, r) => t + Number(r.net_revenue), 0)
-    const { error } = await supabase.from('orders')
-      .update({ amount_paid: Math.round(paidTotal * 100) / 100, payment_status: 'paid' }).eq('id', order.id)
-    if (error) paymentNote = ' We could not mark it as paid; record the payment below.'
+    if (rErr || !lineRows || lineRows.length === 0) {
+      // Without the confirmed total we cannot say what is still owed. A
+      // status worked out from 0 marked a deposit sale "paid in full" with
+      // nothing paid. Rows, not a total above 0: a sale of free items has a
+      // real ₦0 total and is still marked paid.
+      paymentNote = paymentFailed
+    } else {
+      const paidTotal = toKobo(lineRows.reduce((t, r) => t + Number(r.net_revenue), 0))
+      // A deposit of the whole total or more is simply paid in full.
+      const amount = p.paid ? paidTotal : Math.min(toKobo(partPaid ?? 0), paidTotal)
+      const status = p.paid || amount >= paidTotal ? 'paid' : 'part_paid'
+      // .select(): an update RLS refuses returns no error and no rows.
+      const { data: updated, error } = await supabase.from('orders')
+        .update({ amount_paid: amount, payment_status: status }).eq('id', order.id).select('id')
+      if (error || !updated || updated.length === 0) paymentNote = paymentFailed
+    }
   }
 
   await queueEvent('sale_recorded')
@@ -164,5 +202,5 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
   const notice = (without > 0
     ? `Sale recorded. ${without} item${without === 1 ? ' has' : 's have'} no known cost, so ${without === 1 ? 'it is' : 'they are'} left out of your profit.`
     : 'Sale recorded.') + paymentNote + costNote
-  redirect(`/sales/${order.id}?notice=${encodeURIComponent(notice)}`)
+  redirect(`/sales/${order.id}?${sendReceipt ? 'send=1&' : ''}notice=${encodeURIComponent(notice)}`)
 }

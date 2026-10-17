@@ -17,10 +17,14 @@ import { daysLeft } from '@/lib/trial'
 import { noticeTone } from '@/lib/ui/notice-tone'
 import { queueEvent } from '@/lib/analytics/queue'
 import { BUSINESS_TYPES, isBusinessType } from '@/lib/business-types'
-import { money, percent, quantity, marginVerdict } from '@/lib/format'
+import { money, quantity, marginVerdict } from '@/lib/format'
+import { recipeIdOrNull } from '@/lib/pricing'
+import { canAddDishPhotos, isDishPhotoPath } from '@/lib/dish-photo'
 import { Card, Notice, HeroStat, Badge, Disclosure } from '@/components/ui'
 import { Button } from '@/components/button'
-import { AppIcon } from '@/components/icons'
+import { AppIcon, type IconName } from '@/components/icons'
+import { DishTile } from '@/components/dish-tile'
+import { DishPhotoUpload } from '@/components/dish-photo-upload'
 import { SetupSteps, SetupTitle, StepNav } from '../steps'
 import {
   PurchaseRows, type InitialRow, type MeasureKind, type StarterIngredient, type StarterUnit,
@@ -374,6 +378,39 @@ async function updateBusiness(formData: FormData) {
 }
 
 /**
+ * The finish card's optional photo of the setup dish. The phone has already
+ * shrunk the photo and uploaded it under a fresh name in the dish bucket
+ * (components/dish-photo-upload.tsx); this saves that name on the dish, after
+ * checking it is this business's file for this dish. An empty name removes
+ * the photo. The database checks the name again (0063).
+ *
+ * .select() on the update: one the caller may not make returns no error and
+ * no rows under RLS, so "nothing came back" is the refusal.
+ */
+async function saveSetupDishPhoto(formData: FormData) {
+  'use server'
+  const ctx = await requireOwner()
+  const back = at('done')
+  const recipeId = recipeIdOrNull(formData.get('recipe_id'))
+  const raw = String(formData.get('photo_path') ?? '').trim()
+  const refused = 'That photo could not be saved. Try again.'
+  if (!recipeId) redirect(withNotice(back, refused))
+  if (!canAddDishPhotos(ctx.role)) redirect(withNotice(back, 'Your role does not allow adding dish photos. Ask the owner.'))
+  if (raw && !isDishPhotoPath(raw, ctx.businessId, recipeId)) redirect(withNotice(back, refused))
+
+  const { data, error } = await ctx.supabase.from('recipes')
+    .update({ photo_path: raw || null }).eq('id', recipeId).select('id')
+  revalidatePath(HERE)
+  revalidatePath('/dashboard')
+  revalidatePath('/recipes')
+  revalidatePath(`/recipes/${recipeId}`)
+  revalidatePath('/sales/new')
+  if (error) redirect(withNotice(back, describeWriteError(error) ?? refused))
+  if (!data?.length) redirect(withNotice(back, refused))
+  redirect(withNotice(back, raw ? 'Photo saved.' : 'Photo removed.'))
+}
+
+/**
  * "Skip for now". Remembered on the login itself (user metadata), so every
  * device agrees, and in the setup cookie on this one, so the check stops at
  * once. Setup stays open at /start, from Home and from More.
@@ -444,7 +481,7 @@ export default async function StartPage(props: { searchParams: Promise<{ notice?
         ? <DishReview supabase={supabase} businessId={businessId} />
         : <DishStep supabase={supabase} />)}
       {view === 'price' && <PriceStep supabase={supabase} businessId={businessId} revisit={revisit} />}
-      {view === 'done' && <DoneStep supabase={supabase} />}
+      {view === 'done' && <DoneStep supabase={supabase} businessId={businessId} role={ctx.role} />}
       <StepNav back={back} next={next} />
     </div>
   )
@@ -846,8 +883,11 @@ async function PriceStep({ supabase, businessId, revisit }: { supabase: Supabase
 
 // --- finished ----------------------------------------------------------------
 
-async function DoneStep({ supabase }: { supabase: Supabase }) {
-  const [{ data: checks }, canSell, entitlement, { offers }] = await Promise.all([
+type Extra = { done: boolean; label: string; href: string; hint: string; icon: IconName }
+type ExtraCounts = { serving_formats: number; packaging_lines: number; labour_rates: number; overhead_items: number }
+
+async function DoneStep({ supabase, businessId, role }: { supabase: Supabase; businessId: string; role?: string }) {
+  const [{ data: checks }, canSell, entitlement, { offers }, { data: counts }, { data: photos }] = await Promise.all([
     supabase.from('v_price_check')
       .select('recipe_id,name,is_complete,cost_per_portion,selling_price,profit,margin_pct,recommended_price,target_margin')
       .is('variant_id', null).eq('is_complete', true).not('selling_price', 'is', null)
@@ -855,15 +895,34 @@ async function DoneStep({ supabase }: { supabase: Supabase }) {
     hasSalesEntitlement(),
     entitlementStatus(),
     loadPlanOffers(supabase),
+    supabase.from('v_onboarding_status')
+      .select('serving_formats,packaging_lines,labour_rates,overhead_items').limit(1)
+      .maybeSingle<ExtraCounts>(),
+    supabase.from('recipes').select('id,photo_path').eq('kind', 'dish').is('deleted_at', null)
+      .returns<{ id: string; photo_path: string | null }[]>(),
   ])
   const trialDays = entitlement?.reason === 'trial_active' ? daysLeft(entitlement.boundary) : null
   const from = cheapest(offers)
   const dish = checks?.[0]
+  const photo = dish ? (photos ?? []).find((p) => p.id === dish.recipe_id)?.photo_path ?? null : null
   const verdict = dish
     ? marginVerdict(dish.margin_pct === null ? null : Number(dish.margin_pct),
                     dish.target_margin === null ? null : Number(dish.target_margin))
     : null
   const tone = verdict?.tone === 'ok' ? 'plain' : verdict?.tone
+
+  // Optional detail that makes a cost more accurate. Never blocks anything;
+  // it lived on Home and moved here, where setting up happens.
+  const extras: Extra[] = [
+    { done: (counts?.serving_formats ?? 0) > 0, label: 'Sizes', href: '/formats',
+      hint: 'Plates, litres, packs', icon: 'formats' },
+    { done: (counts?.packaging_lines ?? 0) > 0, label: 'Packaging', href: '/formats',
+      hint: 'Bowls, lids, labels', icon: 'package' },
+    { done: (counts?.labour_rates ?? 0) > 0, label: 'Paid work', href: '/settings',
+      hint: 'Cooking, prep', icon: 'people' },
+    { done: (counts?.overhead_items ?? 0) > 0, label: 'Monthly bills', href: '/settings',
+      hint: 'Rent, gas, light', icon: 'settings' },
+  ]
 
   return (
     <>
@@ -876,25 +935,39 @@ async function DoneStep({ supabase }: { supabase: Supabase }) {
 
       {dish && (
         <Card>
-          <div className="flex items-center justify-between gap-2">
-            <span className="truncate font-semibold">{dish.name}</span>
-            {verdict && <Badge tone={tone}>{verdict.label}</Badge>}
+          <div className="flex items-center gap-3">
+            <DishTile name={dish.name} photoPath={photo} size="md" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-semibold">{dish.name}</div>
+              {verdict && <div className="mt-1"><Badge tone={tone}>{verdict.label}</Badge></div>}
+            </div>
           </div>
-          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <div><dt style={{ color: 'var(--mm-muted)' }}>One plate costs</dt><dd className="mm-num mt-0.5 font-semibold">{money(dish.cost_per_portion)}</dd></div>
-            <div><dt style={{ color: 'var(--mm-muted)' }}>You sell it for</dt><dd className="mm-num mt-0.5 font-semibold">{money(dish.selling_price)}</dd></div>
-            <div><dt style={{ color: 'var(--mm-muted)' }}>You keep</dt><dd className="mm-num mt-0.5 font-semibold">{money(dish.profit)}</dd></div>
-            <div><dt style={{ color: 'var(--mm-muted)' }}>Margin</dt><dd className="mm-num mt-0.5 font-semibold">{percent(dish.margin_pct)}</dd></div>
+          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt style={{ color: 'var(--mm-muted)' }}>You sell it for</dt>
+              <dd className="mm-num mt-0.5 text-lg font-semibold">{money(dish.selling_price)}</dd>
+            </div>
+            <div>
+              <dt style={{ color: 'var(--mm-muted)' }}>You keep on each</dt>
+              <dd className="mm-num mt-0.5 text-lg font-semibold" style={{ color: 'var(--mm-accent-strong)' }}>{money(dish.profit)}</dd>
+            </div>
           </dl>
-          {verdict && <p className="mt-3 text-sm" style={{ color: 'var(--mm-muted)' }}>{verdict.sentence}</p>}
+          {verdict && <p className="mt-2 text-sm" style={{ color: 'var(--mm-muted)' }}>{verdict.sentence}</p>}
+
+          {/* Optional: her own picture of the dish, so it looks like her food
+              on Home, the dish list and the sale screen from day one. */}
+          {canAddDishPhotos(role) && (
+            <div className="mt-4 space-y-2 border-t pt-4" style={{ borderColor: 'var(--mm-line)' }}>
+              <p className="text-sm font-semibold">
+                {photo ? `Your photo of ${dish.name}` : `Add a photo of ${dish.name}`}{' '}
+                {!photo && <span className="font-normal" style={{ color: 'var(--mm-muted)' }}>(optional)</span>}
+              </p>
+              <DishPhotoUpload businessId={businessId} recipeId={dish.recipe_id} photoPath={photo}
+                               action={saveSetupDishPhoto} returnTo={at('done')} />
+            </div>
+          )}
         </Card>
       )}
-
-      <ul className="space-y-2 text-sm">
-        <li className="flex gap-2"><AppIcon name="check" size={17} className="mt-0.5 shrink-0" style={{ color: 'var(--mm-accent)' }} />When you record a new purchase, every dish that uses it is re-costed automatically.</li>
-        <li className="flex gap-2"><AppIcon name="check" size={17} className="mt-0.5 shrink-0" style={{ color: 'var(--mm-accent)' }} />Home tells you when a dish needs attention, like a price that has gone up.</li>
-        <li className="flex gap-2"><AppIcon name="check" size={17} className="mt-0.5 shrink-0" style={{ color: 'var(--mm-accent)' }} />Add more dishes, sizes, packaging and monthly bills whenever you are ready.</li>
-      </ul>
 
       {/* Said now, while it is good news, not first on the day it runs out. */}
       {trialDays !== null && (
@@ -915,6 +988,35 @@ async function DoneStep({ supabase }: { supabase: Supabase }) {
           Go to my dashboard
         </Link>
       </div>
+
+      <section aria-labelledby="setup-extras" className="space-y-3">
+        <div>
+          <h2 id="setup-extras" className="text-lg font-semibold tracking-tight">Make your costs more accurate</h2>
+          <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+            Optional. Your costs already work without them.
+          </p>
+        </div>
+        <Card>
+          <ul className="-my-1">
+            {extras.map((e) => (
+              <li key={e.label}>
+                <Link href={e.href} className="flex min-h-[52px] items-center gap-3 rounded-lg py-1">
+                  <span className="mm-action-icon"><AppIcon name={e.icon} size={19} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold">{e.label}</span>
+                    <span className="block text-xs" style={{ color: 'var(--mm-muted)' }}>{e.hint}</span>
+                  </span>
+                  {e.done
+                    ? <span className="flex shrink-0 items-center gap-1 text-[13px]" style={{ color: 'var(--mm-accent)' }}>
+                        <AppIcon name="check" size={15} />Added
+                      </span>
+                    : <AppIcon name="chevron-right" size={17} className="shrink-0" style={{ color: 'var(--mm-muted)' }} />}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </section>
     </>
   )
 }

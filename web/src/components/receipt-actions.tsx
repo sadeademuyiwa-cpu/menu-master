@@ -36,9 +36,11 @@ export function ReceiptActions({ text, whatsappHref, toName }: {
   return (
     <div className="space-y-2">
       <div className="grid gap-2 sm:grid-cols-2">
+        {/* The brand's primary green, as on the receipt card: white on
+            WhatsApp's own #1f9d55 was about 3.5:1, too faint for the label. */}
         <a href={whatsappHref} target="_blank" rel="noopener noreferrer"
            onClick={() => track('receipt_shared', { method: 'whatsapp' })}
-           className="mm-btn w-full text-white" style={{ background: '#1f9d55' }}>
+           className="mm-btn mm-btn-primary w-full">
           Send on WhatsApp
         </a>
         <button type="button" className="mm-btn mm-btn-secondary w-full" onClick={copy}>

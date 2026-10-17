@@ -4,7 +4,7 @@ export default function Loading() {
   return (
     <SkeletonPage>
       <SkeletonHeader />
-      <SkeletonList rows={6} />
+      <SkeletonList rows={6} lines={1} />
     </SkeletonPage>
   )
 }

@@ -65,7 +65,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-5 pb-28 sm:py-7 md:pb-8">
+        {/* Bottom padding lives in .mm-main (globals.css): on a phone it
+            clears the bottom bar and the "+", so the "+" never covers the
+            last card. Only the top is set here, so nothing overrides it. */}
+        <main className="mm-main mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 pt-5 sm:pt-7">
           <EntitlementBanner />
           {children}
         </main>

@@ -3,8 +3,9 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { entitlementStatus } from '@/lib/data/context'
 import { loadPlanOffers } from '@/lib/data/plans'
-import { PageHeader, Card, Badge, Disclosure, SectionHeading } from '@/components/ui'
+import { PageHeader, Card, Badge, Disclosure, SectionHeading, BackLink } from '@/components/ui'
 import { money } from '@/lib/format'
+import { parentTab } from '@/lib/nav'
 import { daysLeft, planStatusLabel } from '@/lib/trial'
 import { PlanChooser } from '@/components/plan-chooser'
 import { COSTING_FEATURES, TRADING_FEATURES, PLAN_FAQ as FAQ } from '@/lib/site/plan-features'
@@ -33,7 +34,7 @@ async function SubscribePageBody() {
   const statusLine = !sub ? null
     : sub.status === 'trialing'
       ? (entitlement?.entitled
-          ? `You are on the free trial${days !== null ? ` — ${days === 0 ? 'it ends today' : `${days} day${days === 1 ? '' : 's'} left`}` : ''}.`
+          ? `You are on the free trial${days !== null ? `: ${days === 0 ? 'it ends today' : `${days} day${days === 1 ? '' : 's'} left`}` : ''}.`
           : 'Your free trial has ended. Choose a plan to record new work again.')
       : sub.status === 'active'
         ? `You are on ${currentPlan?.name ?? 'a paid plan'}${renews ? `, renewing on ${renews}` : ''}.`
@@ -41,9 +42,13 @@ async function SubscribePageBody() {
           ? 'We could not take your last payment. Choose your plan below to pay again.'
           : `Your plan: ${planStatusLabel(sub.status)}.`
 
+  // One name per thing: More calls this page "Plans & billing", so it does too.
+  const tab = parentTab('/subscribe')
+
   return (
     <div className="space-y-5">
-      <PageHeader title="Choose your plan" sub="Monthly billing in naira. Cancel whenever you like." />
+      {tab && <BackLink href={tab.href}>{tab.label}</BackLink>}
+      <PageHeader title="Plans & billing" sub="Monthly billing in naira. Cancel whenever you like." />
 
       {statusLine && (
         <Card>

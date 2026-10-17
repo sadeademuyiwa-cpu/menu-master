@@ -2,24 +2,35 @@ import Link from 'next/link'
 import { Button } from '@/components/button'
 import { AppIcon, type IconName } from '@/components/icons'
 
+/**
+ * The icon for a fixed page title ("Sales", "Plans & billing"). Whole words
+ * only: matching parts of words gave "Plantain (ripe)" the account icon and
+ * "Steamed rice" the team icon. A page titled with a name the owner typed (an
+ * ingredient, a size) passes PageHeader its icon instead.
+ */
+const TITLE_ICONS: [IconName, string[]][] = [
+  ['sales', ['sale', 'sales']],
+  ['purchases', ['purchase', 'purchases']],
+  ['recipes', ['recipe', 'recipes', 'dish', 'dishes']],
+  ['ingredients', ['ingredient', 'ingredients']],
+  ['customers', ['customer', 'customers']],
+  ['pricing', ['price', 'prices', 'pricing']],
+  ['formats', ['format', 'formats', 'size', 'sizes']],
+  ['reports', ['report', 'reports']],
+  ['people', ['people', 'team']],
+  ['account', ['account', 'plan', 'plans']],
+  ['settings', ['setting', 'settings', 'cost', 'costs']],
+  ['admin', ['admin']],
+]
+
 function titleIcon(title: string): IconName {
-  const t = title.toLowerCase()
-  if (t.includes('sale')) return 'sales'
-  if (t.includes('purchase')) return 'purchases'
-  if (t.includes('recipe')) return 'recipes'
-  if (t.includes('ingredient')) return 'ingredients'
-  if (t.includes('customer')) return 'customers'
-  if (t.includes('price')) return 'pricing'
-  if (t.includes('format') || t.includes('size')) return 'formats'
-  if (t.includes('report')) return 'reports'
-  if (t.includes('people') || t.includes('team')) return 'people'
-  if (t.includes('account') || t.includes('plan')) return 'account'
-  if (t.includes('setting') || t.includes('cost')) return 'settings'
-  if (t.includes('admin')) return 'admin'
-  return 'store'
+  const words = new Set(title.toLowerCase().split(/[^a-z]+/))
+  return TITLE_ICONS.find(([, keys]) => keys.some((k) => words.has(k)))?.[0] ?? 'store'
 }
 
-function InfoHint({ children, label }: { children: React.ReactNode; label: string }) {
+/** Secondary words behind an (i): there when wanted, not in the way. The
+ *  popover opens leftwards from the button, so place it at a row's right end. */
+export function InfoHint({ children, label }: { children: React.ReactNode; label: string }) {
   return (
     <details className="mm-info relative shrink-0">
       <summary className="mm-icon-btn" aria-label={label} title={label}>
@@ -30,12 +41,18 @@ function InfoHint({ children, label }: { children: React.ReactNode; label: strin
   )
 }
 
-export function PageHeader({ title, sub }: { title: string; sub?: string }) {
+export function PageHeader({ title, sub, icon }: {
+  title: string
+  sub?: string
+  /** Pass it when the title is a name she typed (an ingredient, a size);
+   *  otherwise the icon is picked from the words of a fixed title. */
+  icon?: IconName
+}) {
   return (
     <header className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
         <span className="mm-page-icon" aria-hidden>
-          <AppIcon name={titleIcon(title)} size={21} />
+          <AppIcon name={icon ?? titleIcon(title)} size={21} />
         </span>
         <div className="min-w-0">
           <h1 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
@@ -217,7 +234,11 @@ export function Disclosure({ summary, children, open = false }: {
     <details open={open} className="mm-disclosure">
       <summary className="mm-tap cursor-pointer list-none px-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
         <AppIcon name="chevron-right" size={16} className="mr-2 transition-transform [details[open]_&]:rotate-90" />
-        {summary}
+        {/* One span, so the summary is one flex item and reads as one line of
+            text: loose, "Sizes you sell this in " and a <span>· Sold by the
+            portion</span> became two flex items and the space between them
+            was dropped. */}
+        <span className="min-w-0">{summary}</span>
       </summary>
       <div className="border-t px-3 py-3" style={{ borderColor: 'var(--mm-line)' }}>{children}</div>
     </details>

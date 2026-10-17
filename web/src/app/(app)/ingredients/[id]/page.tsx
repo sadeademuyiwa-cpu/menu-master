@@ -1,25 +1,40 @@
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import Link from 'next/link'
 import { requiredAmount } from '@/lib/money-input'
-import { createClient } from '@/lib/supabase/server'
 import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
 import {
-  PageHeader, Card, Field, Submit, InlineSubmit, inputClass, inputStyle,
-  DataList, Notice, SectionHeading, BackLink, Empty, Disclosure,
+  PageHeader, Field, Submit, InlineSubmit, inputClass, inputStyle,
+  Notice, SectionHeading, BackLink, Empty, Disclosure,
 } from '@/components/ui'
-import Link from 'next/link'
-import { money, quantity, NOT_ENTERED } from '@/lib/format'
-import { localToday, formatDay } from '@/lib/dates'
+import { Sparkline } from '@/components/charts'
 import { ConfirmSubmit } from '@/components/confirm-submit'
+import { money, percent, quantity, NOT_ENTERED } from '@/lib/format'
+import { localToday, formatDay } from '@/lib/dates'
+import { canSeeCosts } from '@/lib/pricing'
+import { NOT_CHANGED, canAddMeasures, canEditItems, canRecordPurchases, canRemoveMeasures } from '../../purchases/buy-roles'
+import { dayShort, inSentence, perBuyingUnit, priceTrend, sinceWords, trendWords } from '../../purchases/buy-figures'
+import { writeMeasure } from '../measure'
+import { Info } from '../info'
+import '../../purchases/buy.css'
 
 export const dynamic = 'force-dynamic'
 
 type Unit = { id: string; code: string; name: string; kind: string; factor_to_base: number | null; is_base: boolean }
 type Price = {
   id: string; qty_base: string; amount: string; unit_cost: string
-  effective_date: string; source: string; supplier_id: string | null
+  effective_date: string; source: string; supplier_id: string | null; purchase_line_id: string | null
 }
 type Conversion = { id: string; unit_id: string; qty_in_base: string }
+/** fn_ingredient_cost_basis (0026): the price every dish is costed at now, and where it came from. */
+type Basis = {
+  unit_cost: number | string | null; basis: string; purchase_count: number | null
+  from_date: string | null; to_date: string | null
+}
+
+/** Purchases shown before "Older purchases"; and points on the price line. */
+const RECENT = 6
+const TREND_POINTS = 8
 
 // ---------------------------------------------------------------------------
 // WRITES
@@ -126,11 +141,9 @@ async function addConversion(formData: FormData) {
     redirect(withNotice(here, 'Enter how much one of these holds. It must be greater than zero.'))
   }
 
-  const { error } = await supabase.from('ingredient_unit_conversions').insert({
-    account_id: accountId,
-    ingredient_id: id,
-    unit_id: String(formData.get('unit_id') ?? ''),
-    qty_in_base: qtyInBase,
+  // The same write as "How much is one paint of rice?" on the purchase screen.
+  const { error } = await writeMeasure(supabase, {
+    accountId, ingredientId: id, unitId: String(formData.get('unit_id') ?? ''), qtyInBase,
   })
 
   revalidatePath(here)
@@ -153,10 +166,12 @@ async function updateConversion(formData: FormData) {
   if (!Number.isFinite(qtyInBase) || qtyInBase <= 0) {
     redirect(withNotice(here, 'Enter how much one of these holds. It must be greater than zero.'))
   }
-  const { error } = await supabase.from('ingredient_unit_conversions')
-    .update({ qty_in_base: qtyInBase }).eq('id', String(formData.get('conversion_id') ?? ''))
+  // .select: a refused update is not an error, only zero rows (NOT_CHANGED).
+  const { data, error } = await supabase.from('ingredient_unit_conversions')
+    .update({ qty_in_base: qtyInBase }).eq('id', String(formData.get('conversion_id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Measure updated. Dishes using it have been re-costed.'))
+  redirect(withNotice(here, describeWriteError(error)
+    ?? (data?.length ? 'Measure updated. Dishes using it have been re-costed.' : NOT_CHANGED)))
 }
 
 async function removeConversion(formData: FormData) {
@@ -165,11 +180,11 @@ async function removeConversion(formData: FormData) {
   const here = `/ingredients/${id}`
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('ingredient_unit_conversions')
-    .delete().eq('id', String(formData.get('conversion_id') ?? ''))
+  const { data, error } = await supabase.from('ingredient_unit_conversions')
+    .delete().eq('id', String(formData.get('conversion_id') ?? '')).select('id')
   revalidatePath(here)
   redirect(withNotice(here, describeWriteError(error)
-    ?? 'Measure removed. Anything recorded in it is costed again once you add a new one.'))
+    ?? (data?.length ? 'Measure removed. Anything recorded in it is costed again once you add a new one.' : NOT_CHANGED)))
 }
 
 /**
@@ -198,16 +213,16 @@ async function updateIngredient(formData: FormData) {
   const baseUnit = String(formData.get('base_unit_id') ?? '')
   if (baseUnit) patch.base_unit_id = baseUnit
 
-  const { error } = await supabase.from('ingredients').update(patch).eq('id', id)
+  const { data, error } = await supabase.from('ingredients').update(patch).eq('id', id).select('id')
   revalidatePath(here)
   revalidatePath('/ingredients')
   redirect(withNotice(here, error
     ? (error.code === '23505'
         ? `You already have an item called “${name}”.`
         : error.code === '23514' && /measure/i.test(error.message)
-          ? 'Its measure cannot change: purchases or recipes are already recorded in it.'
+          ? 'Its measure cannot change: purchases or dishes are already recorded in it.'
           : describeWriteError(error))
-    : 'Item updated.'))
+    : data?.length ? 'Item updated.' : NOT_CHANGED))
 }
 
 /** Put away, never deleted: purchases and recipe lines keep pointing at it. */
@@ -220,13 +235,27 @@ async function archiveIngredient(formData: FormData) {
     .update({ deleted_at: new Date().toISOString() }).eq('id', id)
     .select('name').maybeSingle<{ name: string }>()
   if (error) redirect(withNotice(`/ingredients/${id}`, describeWriteError(error)))
+  // No row back: refused quietly, so it is not put away. Say so on its page.
+  if (!data) redirect(withNotice(`/ingredients/${id}`, NOT_CHANGED))
   revalidatePath('/ingredients')
-  redirect(withNotice('/ingredients', `${data?.name ?? 'The item'} has been put away. Find it under “Put away” to bring it back.`))
+  redirect(withNotice('/ingredients', `${data.name} has been put away. Find it under “Put away” to bring it back.`))
 }
 
 // ---------------------------------------------------------------------------
 // PAGE
 // ---------------------------------------------------------------------------
+
+
+/** Where the current price comes from, in one short line. */
+function basisWords(b: Basis): string {
+  const n = b.purchase_count ?? 0
+  if (b.basis === 'purchase_window') {
+    return n > 1 ? `average of your last ${n} purchases` : `from your purchase ${inSentence(formatDay(b.to_date))}`
+  }
+  if (b.basis === 'purchase_latest') return `from your last purchase, ${inSentence(formatDay(b.to_date))}. It may be old`
+  if (b.basis === 'manual') return 'an estimate you typed, not a purchase'
+  return ''
+}
 
 export default async function IngredientDetail(props: {
   params: Promise<{ id: string }>
@@ -234,7 +263,18 @@ export default async function IngredientDetail(props: {
 }) {
   const { id } = await props.params
   const { notice } = await props.searchParams
-  const supabase = await createClient()
+  const ctx = await currentContext()
+  if (!ctx.accountId) redirect(contextRedirect(ctx, `/ingredients/${id}`))
+  const { supabase, businessId } = ctx
+
+  // Ingredient prices are costs (fn_can_see_costs, 0004): for sales and
+  // kitchen no price, purchase amount or cost is asked for at all, so none
+  // can reach their phone. The forms follow what each role may write (0015).
+  const costs = canSeeCosts(ctx.role)
+  const canBuy = canRecordPurchases(ctx.role)
+  const canEdit = canEditItems(ctx.role)
+  const canMeasure = canAddMeasures(ctx.role)
+  const canRemove = canRemoveMeasures(ctx.role)
 
   const { data: ingredient } = await supabase
     .from('ingredients')
@@ -243,20 +283,22 @@ export default async function IngredientDetail(props: {
 
   if (!ingredient) notFound()
 
-  const [{ data: units }, { data: prices }, { data: conversions }, { data: missing }] =
+  const [{ data: units }, { data: prices }, { data: conversions }, { data: missing }, { data: basisRow }] =
     await Promise.all([
       supabase.from('units').select('id,code,name,kind,factor_to_base,is_base').order('kind').order('code')
         .returns<Unit[]>(),
-      supabase.from('ingredient_prices')
-        .select('id,qty_base,amount,unit_cost,effective_date,source,supplier_id')
-        .eq('ingredient_id', id)
-        // A cancelled purchase keeps its price row with reversed_at set. The
-        // ingredients list already skipped those; this page did not, so a
-        // cancelled receipt could stand as "Latest price".
-        .is('reversed_at', null)
-        .order('effective_date', { ascending: false })
-        .order('created_at', { ascending: false })
-        .returns<Price[]>(),
+      costs
+        ? supabase.from('ingredient_prices')
+            .select('id,qty_base,amount,unit_cost,effective_date,source,supplier_id,purchase_line_id')
+            .eq('ingredient_id', id)
+            // A cancelled purchase keeps its price row with reversed_at set. The
+            // ingredients list already skipped those; this page did not, so a
+            // cancelled receipt could stand as "Latest price".
+            .is('reversed_at', null)
+            .order('effective_date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .returns<Price[]>()
+        : Promise.resolve({ data: null }),
       supabase.from('ingredient_unit_conversions').select('id,unit_id,qty_in_base')
         .eq('ingredient_id', id).returns<Conversion[]>(),
       supabase.from('v_missing_unit_conversions')
@@ -264,16 +306,25 @@ export default async function IngredientDetail(props: {
         // list's ideas (a crate of eggs), not a blocker, and must not read as one.
         .select('ingredient_id,unit_code,reason').eq('ingredient_id', id).neq('reason', 'suggested')
         .returns<{ ingredient_id: string; unit_code: string; reason: string }[]>(),
+      // The engine's own current price, so this page and every dish agree.
+      costs && businessId
+        ? supabase.rpc('fn_ingredient_cost_basis', { p_ingredient_id: id, p_business_id: businessId })
+        : Promise.resolve({ data: null }),
     ])
 
   // The base unit is free to change only while nothing is measured in it
   // (the 0060 trigger refuses otherwise). Counted here so the form can say so
-  // instead of offering a change the database will refuse.
-  const [{ count: priceRows }, { count: lineRows }] = await Promise.all([
-    supabase.from('ingredient_prices').select('id', { count: 'exact', head: true }).eq('ingredient_id', id),
+  // instead of offering a change the database will refuse. Purchase lines are
+  // counted too: ingredient prices are hidden from kitchen, and without them
+  // a cook was offered a change the database would refuse.
+  const [{ count: priceRows }, { count: lineRows }, { count: boughtRows }] = await Promise.all([
+    costs
+      ? supabase.from('ingredient_prices').select('id', { count: 'exact', head: true }).eq('ingredient_id', id)
+      : Promise.resolve({ count: 0 }),
     supabase.from('recipe_lines').select('id', { count: 'exact', head: true }).eq('ingredient_id', id),
+    supabase.from('purchase_lines').select('id', { count: 'exact', head: true }).eq('ingredient_id', id),
   ])
-  const measureLocked = (priceRows ?? 0) > 0 || (lineRows ?? 0) > 0
+  const measureLocked = (priceRows ?? 0) > 0 || (lineRows ?? 0) > 0 || (boughtRows ?? 0) > 0
 
   const unitById = new Map((units ?? []).map((u) => [u.id, u]))
   const base = unitById.get(ingredient.base_unit_id)
@@ -291,214 +342,335 @@ export default async function IngredientDetail(props: {
   // Units that would need a conversion first: everything else.
   const needsConversion = (units ?? []).filter((u) => !usable.some((x) => x.id === u.id))
 
-  const latest = prices?.[0]
+  // ---- the price, for a role that may see it ------------------------------
+  const history = prices ?? []
+  const basis = (Array.isArray(basisRow) ? basisRow[0] : basisRow) as Basis | null
+  const current = basis && basis.unit_cost !== null && basis.unit_cost !== undefined ? Number(basis.unit_cost) : null
+  const currentPer = current !== null && Number.isFinite(current) ? perBuyingUnit(current, base?.code) : null
+  const yieldPct = Number(ingredient.purchase_yield_pct ?? 100)
+  let usablePer: { value: number; per: string } | null = null
+  if (currentPer && businessId && yieldPct < 100) {
+    const { data } = await supabase.rpc('fn_ingredient_usable_unit_cost', { p_ingredient_id: id, p_business_id: businessId })
+    const v = data === null || data === undefined ? NaN : Number(data)
+    if (Number.isFinite(v)) usablePer = perBuyingUnit(v, base?.code)
+  }
+
+  // "Rice up 8% since September": her own purchases only, oldest first. No
+  // sentence and no line with fewer than three, because two are not a trend.
+  const bought = history.filter((p) => p.source === 'purchase').slice(0, TREND_POINTS).reverse()
+  const points = bought.map((p) => perBuyingUnit(Number(p.unit_cost), base?.code).value)
+  const trend = priceTrend(bought.map((p, i) => ({ day: p.effective_date, price: points[i] })))
+  const today = localToday()
+
+  // What each purchase was bought as ("2 paint"), and from whom.
+  const lineIds = history.map((p) => p.purchase_line_id).filter((x): x is string => !!x)
+  const supplierIds = [...new Set(history.map((p) => p.supplier_id).filter((x): x is string => !!x))]
+  const [{ data: lines }, { data: suppliers }] = await Promise.all([
+    lineIds.length
+      ? supabase.from('purchase_lines').select('id,qty,unit_id').in('id', lineIds.slice(0, 100))
+          .returns<{ id: string; qty: string; unit_id: string }[]>()
+      : Promise.resolve({ data: null }),
+    supplierIds.length
+      ? supabase.from('suppliers').select('id,name').in('id', supplierIds)
+          .returns<{ id: string; name: string }[]>()
+      : Promise.resolve({ data: null }),
+  ])
+  const lineOf = new Map((lines ?? []).map((l) => [l.id, l]))
+  const supplierOf = new Map((suppliers ?? []).map((s) => [s.id, s.name]))
+  /** "2 paint (8 kg)" for a local measure, "10 kg" otherwise. */
+  const boughtAs = (p: Price) => {
+    const inBase = quantity(Number(p.qty_base), base?.code ?? null)
+    const line = p.purchase_line_id ? lineOf.get(p.purchase_line_id) : undefined
+    const unit = line ? unitById.get(line.unit_id) : undefined
+    if (!line || !unit || unit.factor_to_base !== null) return inBase
+    return `${quantity(Number(line.qty), unit.code)} (${inBase})`
+  }
+
+  const historyRow = (p: Price) => {
+    const per = perBuyingUnit(Number(p.unit_cost), base?.code)
+    const from = p.supplier_id ? supplierOf.get(p.supplier_id) : undefined
+    return (
+      <li key={p.id}>
+        <div className="mm-buy-row">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">
+              {formatDay(p.effective_date)}{from ? ` · ${from}` : ''}
+              {p.source !== 'purchase' && <span style={{ color: 'var(--mm-muted)' }}> · estimate</span>}
+            </span>
+            <span className="block text-sm" style={{ color: 'var(--mm-muted)' }}>
+              {boughtAs(p)} for <span className="mm-num">{money(p.amount)}</span>
+            </span>
+          </span>
+          <span className="shrink-0 text-right">
+            <span className="mm-num block font-semibold">{money(per.value)}</span>
+            <span className="block text-xs" style={{ color: 'var(--mm-muted)' }}>{per.per}</span>
+          </span>
+        </div>
+      </li>
+    )
+  }
+
+  const measuredIn = base?.name.toLowerCase() ?? baseCode
 
   return (
-    <div className="space-y-8">
-      <BackLink href="/ingredients">All ingredients</BackLink>
+    <div className="space-y-6">
+      <BackLink href="/ingredients">Ingredients</BackLink>
 
       <PageHeader
         title={ingredient.name}
-        sub={`${ingredient.kind === 'packaging' ? 'Packaging' : 'Ingredient'}, measured in ${base?.name.toLowerCase() ?? baseCode}.` +
-          (ingredient.purchase_yield_pct !== null ? ` Usable after cleaning: ${ingredient.purchase_yield_pct}%.` : '')}
+        icon="ingredients"
+        sub={`${ingredient.kind === 'packaging' ? 'Packaging' : 'Ingredient'}, measured in ${measuredIn}.` +
+          (yieldPct < 100 ? ` Usable after cleaning: ${yieldPct}%.` : '')}
       />
 
       {notice && <Notice tone={/could not|not know|cannot|already|give the|between/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
-      <Disclosure summary="Edit this item">
-        <form action={updateIngredient} className="grid gap-3 sm:grid-cols-4 sm:items-end">
-          <input type="hidden" name="ingredient_id" value={ingredient.id} />
-          <div className="sm:col-span-2">
-            <Field label="Name">
-              <input name="name" required maxLength={120} defaultValue={ingredient.name}
-                className={inputClass} style={inputStyle} />
-            </Field>
-          </div>
-          <Field label="What is it?">
-            <select name="kind" defaultValue={ingredient.kind} className={inputClass} style={inputStyle}>
-              <option value="ingredient">Something you cook with</option>
-              <option value="packaging">Packaging</option>
-            </select>
-          </Field>
-          <Field label="Usable after cleaning (%)">
-            <input name="purchase_yield_pct" type="number" step="any" min="1" max="100" inputMode="decimal"
-              defaultValue={ingredient.purchase_yield_pct ?? 100} className={inputClass} style={inputStyle} />
-          </Field>
-          {measureLocked ? (
-            <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
-              Measured in <strong>{base?.name.toLowerCase() ?? baseCode}</strong>. That cannot change now:
-              purchases or recipes are already recorded in it. Put this item away and add a new one if it was wrong.
-            </p>
-          ) : (
-            <div className="sm:col-span-3">
-              <Field label="Measured in">
-                <select name="base_unit_id" defaultValue={ingredient.base_unit_id} className={inputClass} style={inputStyle}>
-                  {(units ?? []).filter((u) => u.is_base || u.id === ingredient.base_unit_id).map((u) => (
-                    <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-          )}
-          <div className="flex items-end"><Submit>Save changes</Submit></div>
-          <p className="sm:col-span-4 text-xs" style={{ color: 'var(--mm-muted)' }}>
-            “Usable after cleaning” is what is left after peeling, boning or trimming:
-            a yam that loses 30% to the peel is 70%. Leave it at 100 if nothing is thrown away.
-          </p>
-        </form>
-      </Disclosure>
-
       {missing && missing.length > 0 && (
         <Notice>
-          A recipe or purchase already uses{' '}
-          {missing.map((m) => m.unit_code).join(', ')} for this item and cannot be
-          costed until you say how much {baseCode} one holds.
+          A dish or purchase uses {missing.map((m) => m.unit_code).join(', ')} for this item. Say how
+          much {baseCode} one holds under Local measurements, and it can be costed.
         </Notice>
       )}
 
       {/* ------------------------------------------------------------------ */}
-      <section className="space-y-3">
-        <SectionHeading sub="What you actually paid. Menu Master never supplies a price.">
-          Record a purchase
-        </SectionHeading>
-
-        <form action={addPrice} className="grid gap-3 sm:grid-cols-5 sm:items-end">
-          <input type="hidden" name="ingredient_id" value={ingredient.id} />
-          <Field label="Quantity bought">
-            <input name="qty" type="number" step="any" min="0" required
-              className={inputClass} style={inputStyle} />
-          </Field>
-          <Field label="Unit">
-            <select name="unit_id" required className={inputClass} style={inputStyle}
-              defaultValue={ingredient.base_unit_id}>
-              {usable.map((u) => (
-                <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-              ))}
-              {needsConversion.length > 0 && (
-                <optgroup label="Needs a conversion first">
-                  {needsConversion.map((u) => (
-                    <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-                  ))}
-                </optgroup>
+      {costs && (
+        <section className="mm-card" aria-label="Current price">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: 'var(--mm-muted)' }}>
+            Current price
+          </div>
+          {currentPer && current !== null ? (
+            <>
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
+                <span className="mm-num mm-buy-hero">{money(currentPer.value)}</span>
+                <span className="text-sm" style={{ color: 'var(--mm-muted)' }}>{currentPer.per}</span>
+              </div>
+              <p className="mt-1 text-[13px]" style={{ color: 'var(--mm-muted)' }}>
+                <span className="mm-num">{money(current)}</span> per {baseCode}
+                {basisWords(basis as Basis) ? ` · ${basisWords(basis as Basis)}` : ''}
+              </p>
+              {usablePer && (
+                <p className="mt-1 text-[13px]" style={{ color: 'var(--mm-muted)' }}>
+                  {yieldPct}% usable after cleaning, so <span className="mm-num">{money(usablePer.value)}</span> {usablePer.per} usable
+                </p>
               )}
-            </select>
-          </Field>
-          <Field label="Amount paid (₦)">
-            <input name="amount" type="number" step="0.01" min="0" required
-              className={inputClass} style={inputStyle} />
-          </Field>
-          <Field label="Date">
-            <input name="effective_date" type="date" className={inputClass} style={inputStyle} />
-          </Field>
-          <Submit>Record</Submit>
-        </form>
-        <p className="text-sm">
-          <Link href={`/purchases/new?ingredient=${ingredient.id}`} className="mm-tap underline">
-            Bought several things on one trip? Record them together →
-          </Link>
-        </p>
+              {trend && (
+                <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3" style={{ borderColor: 'var(--mm-line)' }}>
+                  <p className="min-w-0 text-sm font-medium">
+                    {ingredient.name} {trendWords(trend.change, percent)} since {sinceWords(trend.since, today)}
+                  </p>
+                  <Sparkline
+                    className="shrink-0"
+                    points={points}
+                    labels={bought.map((p) => dayShort(p.effective_date))}
+                    ariaLabel={`Price of ${ingredient.name} ${currentPer.per}, your last ${points.length} purchases.`}
+                    width={96} height={32}
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="mt-1 text-lg font-semibold">No price yet</div>
+              <p className="mt-1 text-[13px]" style={{ color: 'var(--mm-muted)' }}>
+                Record what you paid and every dish using it is costed.
+              </p>
+            </>
+          )}
+        </section>
+      )}
 
-        {latest && (
-          <Card>
-            <div className="text-sm">
-              Latest price:{' '}
-              <span className="font-medium tabular-nums">
-                {baseCode === 'g' ? `${money(Number(latest.unit_cost) * 1000)} per kg`
-                  : baseCode === 'ml' ? `${money(Number(latest.unit_cost) * 1000)} per litre`
-                  : baseCode === 'unit' ? `${money(Number(latest.unit_cost))} each`
-                  : `${money(Number(latest.unit_cost))} per ${baseCode}`}
-              </span>
-            </div>
-          </Card>
-        )}
+      {/* ------------------------------------------------------------------ */}
+      {canBuy && (
+        <section className="space-y-3">
+          <SectionHeading sub="What you actually paid, the way you bought it: 2 paint for ₦9,000. Menu Master never supplies a price.">
+            Record a purchase
+          </SectionHeading>
 
-        <DataList
-          rows={prices ?? []}
-          keyOf={(p) => p.id}
-          empty="No purchase recorded yet. Until one is, recipes using this item cannot be costed."
-          render={(p) => [
-            { label: 'Date', value: formatDay(p.effective_date) },
-            { label: 'Quantity', value: quantity(Number(p.qty_base), baseCode) },
-            { label: 'Paid', value: money(Number(p.amount)) },
-            { label: 'Unit cost', value: `${money(Number(p.unit_cost))} / ${baseCode}` },
-          ]}
-        />
-      </section>
+          <form action={addPrice} className="mm-card grid grid-cols-2 gap-3 sm:grid-cols-5 sm:items-end">
+            <input type="hidden" name="ingredient_id" value={ingredient.id} />
+            <Field label="Quantity bought">
+              <input name="qty" type="number" step="any" min="0" required inputMode="decimal"
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Unit">
+              <select name="unit_id" required className={inputClass} style={inputStyle}
+                defaultValue={ingredient.base_unit_id}>
+                {usable.map((u) => (
+                  <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                ))}
+                {needsConversion.length > 0 && (
+                  <optgroup label="Needs a conversion first">
+                    {needsConversion.map((u) => (
+                      <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </Field>
+            <Field label="Amount paid (₦)">
+              <input name="amount" type="number" step="0.01" min="0" required inputMode="decimal"
+                className={inputClass} style={inputStyle} />
+            </Field>
+            <Field label="Date">
+              <input name="effective_date" type="date" className={inputClass} style={inputStyle} />
+            </Field>
+            <div className="col-span-2 sm:col-span-1"><Submit>Record</Submit></div>
+          </form>
+          <p className="text-sm">
+            <Link href={`/purchases/new?ingredient=${ingredient.id}`} className="mm-tap underline">
+              Bought several things on one trip? Record them together →
+            </Link>
+          </p>
+        </section>
+      )}
+
+      {costs && (
+        <section className="space-y-3">
+          <SectionHeading>Price history</SectionHeading>
+          {history.length === 0 ? (
+            <Empty>No purchase recorded yet. Until one is, dishes using this item cannot be costed.</Empty>
+          ) : (
+            <>
+              <ul className="mm-buy-rows">{history.slice(0, RECENT).map(historyRow)}</ul>
+              {history.length > RECENT && (
+                <Disclosure summary={`Older purchases (${history.length - RECENT})`}>
+                  <ul className="mm-buy-rows">{history.slice(RECENT).map(historyRow)}</ul>
+                </Disclosure>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
       {/* ------------------------------------------------------------------ */}
       <section className="space-y-3">
-        <SectionHeading sub={`How much ${baseCode} one of these holds — for this item only.`}>
+        <SectionHeading sub={`How much ${baseCode} one paint, derica or bag of this item holds. It is different for every item, so only you can say.`}>
           Local measurements
         </SectionHeading>
 
-        <Disclosure summary="Add a local measure (paint, derica, bag…)" open={(conversions ?? []).length === 0}>
-          <form action={addConversion} className="grid gap-3 sm:grid-cols-4 sm:items-end">
-            <input type="hidden" name="ingredient_id" value={ingredient.id} />
-            <Field label="One of this unit…">
-              <select name="unit_id" required className={inputClass} style={inputStyle}>
-                {(units ?? [])
-                  .filter((u) => u.id !== ingredient.base_unit_id && !converted.has(u.id))
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-                  ))}
-              </select>
-            </Field>
-            <Field label={`…holds this much ${baseCode}`}>
-              <input name="qty_in_base" type="number" step="any" min="0" required
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <Submit>Save conversion</Submit>
-          </form>
-        </Disclosure>
-
         {conversions && conversions.length > 0 ? (
-          <ul className="space-y-2">
-            {conversions.map((c) => (
-              <li key={c.id}>
-                <Card>
-                  <p className="text-sm">
-                    1 {unitById.get(c.unit_id)?.code ?? '?'} ={' '}
-                    <span className="tabular-nums">{Number(c.qty_in_base)}</span> {baseCode}
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-4">
+          <ul className="mm-buy-rows">
+            {conversions.map((c) => {
+              const code = unitById.get(c.unit_id)?.code ?? '?'
+              return (
+                <li key={c.id} className="px-[.9rem] py-2">
+                  <div className="flex min-h-[44px] flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                    <p className="font-medium">
+                      1 {code} = <span className="mm-num">{Number(c.qty_in_base)}</span> {baseCode}
+                    </p>
+                    {canRemove && (
+                      <form action={removeConversion}>
+                        <input type="hidden" name="ingredient_id" value={ingredient.id} />
+                        <input type="hidden" name="conversion_id" value={c.id} />
+                        <ConfirmSubmit message={`Remove the ${code} measure? Anything recorded in it cannot be costed until you add it again.`}>Remove</ConfirmSubmit>
+                      </form>
+                    )}
+                  </div>
+                  {canMeasure && (
                     <Disclosure summary="Edit">
-                      <form action={updateConversion} className="mt-2 flex flex-wrap items-end gap-2">
+                      <form action={updateConversion} className="flex flex-wrap items-end gap-2">
                         <input type="hidden" name="ingredient_id" value={ingredient.id} />
                         <input type="hidden" name="conversion_id" value={c.id} />
                         <label className="block">
-                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>1 {unitById.get(c.unit_id)?.code ?? '?'} holds this much {baseCode}</span>
+                          <span className="text-xs" style={{ color: 'var(--mm-muted)' }}>1 {code} holds this much {baseCode}</span>
                           <input name="qty_in_base" type="number" step="any" min="0" inputMode="decimal"
-                            defaultValue={Number(c.qty_in_base)}
-                            className="mt-1 w-32 rounded border px-2 py-2 text-base" />
+                            defaultValue={Number(c.qty_in_base)} className="mm-input mt-1" style={{ width: '8rem' }} />
                         </label>
                         <InlineSubmit>Update</InlineSubmit>
                       </form>
                     </Disclosure>
-                    <form action={removeConversion}>
-                      <input type="hidden" name="ingredient_id" value={ingredient.id} />
-                      <input type="hidden" name="conversion_id" value={c.id} />
-                      <ConfirmSubmit message={`Remove the ${unitById.get(c.unit_id)?.code ?? ''} measure? Anything recorded in it cannot be costed until you add it again.`}>Remove</ConfirmSubmit>
-                    </form>
-                  </div>
-                </Card>
-              </li>
-            ))}
+                  )}
+                </li>
+              )
+            })}
           </ul>
         ) : (
-          <Empty>No local measurements yet. If you buy this in paints, dericas, bags or baskets, tell us how much one holds — it is different for every ingredient.</Empty>
+          <Empty>None yet. Bought in paints, dericas, bags or baskets? Say how much one holds.</Empty>
+        )}
+
+        {canMeasure && (
+          <Disclosure summary="Add a local measure (paint, derica, bag…)" open={(conversions ?? []).length === 0 && (missing ?? []).length > 0}>
+            <form action={addConversion} className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:items-end">
+              <input type="hidden" name="ingredient_id" value={ingredient.id} />
+              <Field label="One of this unit…">
+                <select name="unit_id" required className={inputClass} style={inputStyle}>
+                  {(units ?? [])
+                    .filter((u) => u.id !== ingredient.base_unit_id && !converted.has(u.id))
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                    ))}
+                </select>
+              </Field>
+              <Field label={`…holds this much ${baseCode}`}>
+                <input name="qty_in_base" type="number" step="any" min="0" required inputMode="decimal"
+                  className={inputClass} style={inputStyle} />
+              </Field>
+              <div className="col-span-2 sm:col-span-1"><Submit>Save conversion</Submit></div>
+            </form>
+          </Disclosure>
         )}
       </section>
 
-      <Disclosure summary="Put this item away">
-        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
-          It leaves your ingredient list and the purchase screen. Dishes and purchases
-          that already use it keep it, and you can bring it back from the Ingredients page.
-        </p>
-        <form action={archiveIngredient} className="mt-2">
-          <input type="hidden" name="ingredient_id" value={ingredient.id} />
-          <InlineSubmit>Put this item away</InlineSubmit>
-        </form>
-      </Disclosure>
+      {canEdit && (
+        <Disclosure summary="Edit this item">
+          <form action={updateIngredient} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <input type="hidden" name="ingredient_id" value={ingredient.id} />
+            <div className="sm:col-span-2">
+              <Field label="Name">
+                <input name="name" required maxLength={120} defaultValue={ingredient.name}
+                  className={inputClass} style={inputStyle} />
+              </Field>
+            </div>
+            <Field label="What is it?">
+              <select name="kind" defaultValue={ingredient.kind} className={inputClass} style={inputStyle}>
+                <option value="ingredient">Something you cook with</option>
+                <option value="packaging">Packaging</option>
+              </select>
+            </Field>
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="purchase_yield_pct" className="text-sm font-medium">Usable after cleaning (%)</label>
+                <Info label="About usable after cleaning">
+                  What is left after peeling, boning or trimming: a yam that loses 30% to the peel is 70%.
+                  Leave it at 100 if nothing is thrown away.
+                </Info>
+              </div>
+              <input id="purchase_yield_pct" name="purchase_yield_pct" type="number" step="any" min="1" max="100" inputMode="decimal"
+                defaultValue={ingredient.purchase_yield_pct ?? 100} className={inputClass} style={inputStyle} />
+            </div>
+            {measureLocked ? (
+              <p className="sm:col-span-3 text-xs" style={{ color: 'var(--mm-muted)' }}>
+                Measured in <strong>{measuredIn}</strong>. That cannot change now:
+                purchases or recipes are already recorded in it. Put this item away and add a new one if it was wrong.
+              </p>
+            ) : (
+              <div className="sm:col-span-3">
+                <Field label="Measured in">
+                  <select name="base_unit_id" defaultValue={ingredient.base_unit_id} className={inputClass} style={inputStyle}>
+                    {(units ?? []).filter((u) => u.is_base || u.id === ingredient.base_unit_id).map((u) => (
+                      <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            )}
+            <div className="flex items-end"><Submit>Save changes</Submit></div>
+          </form>
+        </Disclosure>
+      )}
+
+      {canEdit && (
+        <Disclosure summary="Put this item away">
+          <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+            It leaves your ingredient list and the purchase screen. Dishes and purchases
+            that already use it keep it, and you can bring it back from the Ingredients page.
+          </p>
+          <form action={archiveIngredient} className="mt-2">
+            <input type="hidden" name="ingredient_id" value={ingredient.id} />
+            <InlineSubmit>Put this item away</InlineSubmit>
+          </form>
+        </Disclosure>
+      )}
     </div>
   )
 }

@@ -10,10 +10,13 @@ export type Role = InviteRole | 'owner'
 
 export const ROLE_WORDS: Record<Role, { label: string; hint: string }> = {
   owner:      { label: 'Owner',      hint: 'Everything, including billing and who is on the account.' },
-  manager:    { label: 'Manager',    hint: 'Costs, prices, purchases and sales. Cannot invite or bill.' },
-  accountant: { label: 'Accountant', hint: 'Sees costs and reports. Cannot change recipes or record sales.' },
-  kitchen:    { label: 'Kitchen',    hint: 'Recipes and purchases. Sees no costs, prices or margins.' },
-  sales:      { label: 'Sales',      hint: 'Records sales and customers. Sees no costs or margins.' },
+  manager:    { label: 'Manager',    hint: 'Dishes, costs, prices, purchases and sales. Cannot invite people or pay.' },
+  accountant: { label: 'Accountant', hint: 'Costs, prices, purchases and reports. Cannot change dishes or record sales.' },
+  // Kitchen has never been able to record a purchase (purchases INSERT is
+  // owner, manager and accountant, 0015); it can add dish photos (0063).
+  kitchen:    { label: 'Kitchen',    hint: 'Dishes, ingredients and dish photos. Sees no costs or prices.' },
+  // Sales reads selling prices since 0064 (fn_menu_prices), never costs.
+  sales:      { label: 'Sales',      hint: 'Sales and customers, with selling prices. Never sees costs.' },
 }
 
 export function roleLabel(role: string): string {

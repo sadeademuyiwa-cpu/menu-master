@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, describeWriteError } from '@/lib/data/context'
 import { localToday } from '@/lib/dates'
+import { writeMeasure } from '../../ingredients/measure'
 
 export type PurchaseResult = { error: string } | null
 
@@ -81,7 +82,7 @@ export async function recordPurchase(_prev: PurchaseResult, formData: FormData):
       const names = (posted.blockers ?? [])
         .map((b: { ingredient_name?: string; unit_code?: string }) => `${b.ingredient_name ?? 'an item'} (${b.unit_code ?? 'that unit'})`)
         .join(', ')
-      return { error: `We do not know how much one of those is yet: ${names}. Choose another unit, or add the measurement on the ingredient's page.` }
+      return { error: `We do not know how much one of those holds yet: ${names}. Say how much one holds on its line, or save this purchase for later.` }
     }
     return { error: `That purchase could not be recorded: ${String(posted.reason).replace(/_/g, ' ')}.` }
   }
@@ -91,4 +92,58 @@ export async function recordPurchase(_prev: PurchaseResult, formData: FormData):
   revalidatePath('/recipes')
   const n = Number(posted?.price_rows_written ?? lines.length)
   redirect(`/purchases/${purchase.id}?notice=${encodeURIComponent(`Purchase recorded. ${n} price${n === 1 ? '' : 's'} updated.`)}`)
+}
+
+export type MeasureResult = { error: string } | { saved: true } | null
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * "How much is one paint of rice?", answered on the purchase screen without
+ * leaving it, so the rows already typed stay where they are.
+ *
+ * The size is said the way she knows it ("3 kg") and turned into the item's
+ * base unit by fn_resolve_qty_to_base, the database's own resolver, never by
+ * arithmetic here. It is then saved through writeMeasure, the same write the
+ * ingredient page makes. Owner, manager and kitchen may save one (0015);
+ * anyone else is refused by the database and told so in plain words.
+ */
+export async function saveMeasure(input: {
+  ingredientId: string
+  unitId: string
+  size: number | null
+  sizeUnitId: string
+}): Promise<MeasureResult> {
+  const { ingredientId, unitId, size, sizeUnitId } = input ?? {}
+  if (![ingredientId, unitId, sizeUnitId].every((v) => typeof v === 'string' && UUID.test(v))) {
+    return { error: 'Choose the item and the unit again, then say how much one holds.' }
+  }
+  if (!(typeof size === 'number' && Number.isFinite(size) && size > 0)) {
+    return { error: 'Say how much one holds. It must be more than zero.' }
+  }
+
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) return { error: 'Your session has ended. Sign in again, then add the size.' }
+
+  const { data: qtyBase, error: resolveError } = await supabase.rpc('fn_resolve_qty_to_base', {
+    p_ingredient_id: ingredientId, p_qty: size, p_unit_id: sizeUnitId,
+  })
+  if (resolveError) return { error: describeWriteError(resolveError) ?? 'We could not read that size. Try again.' }
+  const inBase = qtyBase === null || qtyBase === undefined ? NaN : Number(qtyBase)
+  if (!Number.isFinite(inBase) || inBase <= 0) {
+    return { error: 'We could not read that size. Give it in the units offered.' }
+  }
+
+  const { error } = await writeMeasure(supabase, { accountId, ingredientId, unitId, qtyInBase: inBase })
+  if (error) {
+    return {
+      error: error.code === '23505'
+        ? 'That measure already has a size for this item. Choose it from the list.'
+        : describeWriteError(error) ?? 'We could not save that size. Try again.',
+    }
+  }
+  revalidatePath(`/ingredients/${ingredientId}`)
+  revalidatePath('/ingredients')
+  return { saved: true }
 }

@@ -1,0 +1,164 @@
+/* The layer order first, as globals.css has it, so this file cannot put
+ components below base if it happens to load before globals.css. */
+@layer theme, base, components, utilities;
+
+/*
+  New sale: the menu as a grid of dish pictures, food-app style, with a "+"
+  on each and a stepper once it is in the basket.
+
+  Everything is inside @layer components, so a Tailwind utility passed in
+  (className="rounded-none") still wins over these rules, and the loose
+  mm-* rules in globals.css (.mm-step-btn, .mm-btn) still win over these.
+  Tap targets are 44px or more; nothing here is wider than its column, so a
+  360px phone never scrolls sideways (the chip row scrolls inside itself).
+*/
+@layer components {
+  .mm-sell-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .6rem;
+  }
+  @media (min-width: 640px) {
+    .mm-sell-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+  }
+  @media (min-width: 1024px) {
+    .mm-sell-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+
+  .mm-sell-card {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--mm-line);
+    border-radius: var(--mm-radius);
+    background: var(--mm-surface);
+    box-shadow: var(--mm-shadow-soft);
+  }
+  .mm-sell-card[data-in-cart="true"] { border-color: var(--mm-accent); box-shadow: 0 0 0 1px var(--mm-accent); }
+
+  /* The picture: tapping it adds one, like the "+". */
+  .mm-sell-media { position: relative; }
+  .mm-sell-photo {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mm-sell-photo:active { opacity: .88; }
+
+  /* Above the photo (which sits at z-index 2 inside the tile). */
+  .mm-sell-add {
+    position: absolute;
+    right: .5rem;
+    bottom: .5rem;
+    z-index: 3;
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 1px solid var(--mm-line);
+    border-radius: 999px;
+    background: var(--mm-surface);
+    color: var(--mm-accent-strong);
+    font-size: 1.6rem;
+    font-weight: 600;
+    line-height: 1;
+    box-shadow: 0 6px 14px -6px rgb(24 38 29 / .45);
+    cursor: pointer;
+    transition: transform var(--mm-motion-fast) var(--mm-ease);
+  }
+  .mm-sell-add:active { transform: scale(.94); }
+  .mm-sell-count {
+    position: absolute;
+    left: .5rem;
+    top: .5rem;
+    z-index: 3;
+    display: grid;
+    min-width: 30px;
+    height: 30px;
+    place-items: center;
+    padding: 0 .5rem;
+    border-radius: 999px;
+    background: var(--mm-accent-strong);
+    color: #fff;
+    font-size: .875rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  @media (prefers-color-scheme: dark) {
+    /* Leaf is light in dark mode; the page's own dark keeps the count
+       readable and stays on the palette. */
+    .mm-sell-count { color: var(--mm-bg); }
+  }
+
+  .mm-sell-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: .1rem;
+    padding: .55rem .6rem .6rem;
+  }
+  /* Narrower than .mm-stepper so two 46px buttons and the count fit a 160px card. */
+  .mm-sell-stepper {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .25rem;
+    margin-top: .45rem;
+  }
+
+  /* Category chips, and the recent-extras chips in the "not on the menu" sheet. */
+  .mm-sell-chips {
+    display: flex;
+    gap: .5rem;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .mm-sell-chips::-webkit-scrollbar { display: none; }
+  .mm-sell-chip {
+    display: inline-flex;
+    flex: none;
+    min-height: 44px;
+    align-items: center;
+    padding: 0 1rem;
+    border: 1px solid var(--mm-line);
+    border-radius: 999px;
+    background: var(--mm-surface);
+    color: var(--mm-fg);
+    font-size: .9rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .mm-sell-chip[aria-pressed="true"] { border-color: var(--mm-forest); background: var(--mm-forest); color: #fff; }
+
+  /* Paid now / Part paid / Not paid. */
+  .mm-sell-seg {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .25rem;
+    padding: .25rem;
+    border-radius: 12px;
+    background: var(--mm-surface-2);
+  }
+  .mm-sell-seg > button {
+    min-height: 44px;
+    padding: 0 .25rem;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--mm-muted);
+    font-size: .875rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mm-sell-seg > button[aria-checked="true"] {
+    background: var(--mm-surface);
+    color: var(--mm-fg);
+    box-shadow: var(--mm-shadow-soft);
+  }
+}

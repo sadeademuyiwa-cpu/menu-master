@@ -16,6 +16,26 @@ export type CatalogItem = {
    * The default (most likely) unit comes first.
    */
   units: CatalogUnit[]
+  /**
+   * Buying only: local measures (paint, derica, bag...) this item has no size
+   * for yet. Offered so the owner can pick the unit she actually bought in and
+   * say, once, how much one holds. Never costed until she does.
+   */
+  unsized?: CatalogUnit[]
+  /** Buying only: the units a size can be given in (kg or grams for rice). */
+  sizeUnits?: CatalogUnit[]
+}
+
+/** A purchase line from history: what was bought last time, in her own unit. */
+export type LastBought = {
+  qty: number
+  /** The unit it was bought in, to offer first again. */
+  unitId: string
+  /** "bag", "kg", "paint". */
+  unit: string
+  /** What was paid. Only present for a role that may see costs. */
+  amount?: number
+  day: string
 }
 
 /** The words owners use for the units, where they differ from the database name. */
@@ -30,6 +50,22 @@ const ORDER = ['kg', 'g', 'mg', 'l', 'ml', 'cup_m', 'tbsp', 'tsp', 'cl', 'unit',
 const PREFERRED: Record<string, string> = { mass: 'kg', volume: 'l', count: 'unit' }
 /** Units things are actually bought in. Nobody buys rice by the milligram or teaspoon. */
 const BUYING_UNITS = new Set(['kg', 'g', 'l', 'ml', 'cl', 'unit', 'pair', 'dozen'])
+/**
+ * Local measures in the order a market buyer reaches for them. Any not named
+ * here follow in alphabetical order. A portion is a serving, not something
+ * bought, so it is not offered for buying.
+ */
+const LOCAL_ORDER = ['paint', 'derica', 'bag', 'basket', 'mudu', 'congo', 'kongo', 'tin', 'crate', 'carton',
+  'bunch', 'heap', 'tuber', 'sachet', 'pack', 'bottle', 'gallon', 'jerrican', 'keg', 'drum', 'sack']
+const NOT_BOUGHT_IN = new Set(['portion'])
+/** The units a size is given in: "one paint is 3 kg". */
+const SIZE_UNITS = new Set(['kg', 'g', 'l', 'ml', 'unit'])
+
+/** "paint" for "Paint (rubber)", "cup" for "Cup (local tin)": the word said at the market. */
+export function localWord(u: { code: string; name: string }): string {
+  return UNIT_LABEL[u.code] ?? (u.name.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase() || u.code)
+}
+
 /** Units a recipe measures in: the buying units plus the kitchen spoons and cups. */
 const COOKING_UNITS = new Set([...BUYING_UNITS, 'mg', 'tsp', 'tbsp', 'cup_m'])
 
@@ -60,7 +96,12 @@ export async function loadPurchaseCatalog(supabase: Supabase, purpose: 'buy' | '
   const convOf = new Map<string, { unit_id: string; qty_in_base: string }[]>()
   for (const c of conversions ?? []) convOf.set(c.ingredient_id, [...(convOf.get(c.ingredient_id) ?? []), c])
 
-  const label = (u: { code: string; name: string }) => UNIT_LABEL[u.code] ?? u.name.toLowerCase()
+  const label = localWord
+  const localRank = (code: string) => { const i = LOCAL_ORDER.indexOf(code); return i < 0 ? LOCAL_ORDER.length : i }
+  const measures = purpose === 'buy'
+    ? (units ?? []).filter((u) => u.factor_to_base === null && !NOT_BOUGHT_IN.has(u.code))
+        .sort((a, b) => localRank(a.code) - localRank(b.code) || label(a).localeCompare(label(b)))
+    : []
 
   const items: CatalogItem[] = (ingredients ?? []).map((i) => {
     const base = unitById.get(i.base_unit_id)
@@ -76,14 +117,96 @@ export async function loadPurchaseCatalog(supabase: Supabase, purpose: 'buy' | '
       return u && base ? [{ id: u.id, label: `${label(u)} (yours: ${Number(c.qty_in_base).toLocaleString('en-NG')} ${base.code})` }] : []
     })
     const ownUnits = base && !sameKind.some((u) => u.id === base.id) ? [base] : []
-    return {
+    const item: CatalogItem = {
       id: i.id,
       name: i.name,
       group: i.kind === 'packaging' ? 'Packaging' : (groupOf.get(i.category_id ?? '') ?? 'Your own items'),
       units: [...sameKind, ...ownUnits].map((u) => ({ id: u.id, label: label(u) })).concat(local),
     }
+    if (purpose === 'buy' && base) {
+      const sized = new Set((convOf.get(i.id) ?? []).map((c) => c.unit_id))
+      item.unsized = measures.filter((u) => !sized.has(u.id) && u.id !== base.id)
+        .map((u) => ({ id: u.id, label: label(u) }))
+      item.sizeUnits = [...sameKind, ...ownUnits].filter((u) => SIZE_UNITS.has(u.code) || u.id === base.id)
+        .map((u) => ({ id: u.id, label: label(u) }))
+    }
+    return item
   }).sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name))
 
   const recent = [...new Set((prices ?? []).map((p) => p.ingredient_id))].slice(0, purpose === 'buy' ? 12 : 60)
   return { items, recent }
+}
+
+/**
+ * What this business has bought before, from its own recorded purchases:
+ * the items it buys most often (for the "Bought before" chips), the items and
+ * units of its last purchase ("Same as last market run"), and the last line
+ * of each item ("last time: 1 bag for ₦85,000").
+ *
+ * Quantities and amounts are hints only. They are never copied into a new
+ * purchase: unit cost is what she paid divided by how much she bought, so a
+ * stale quantity would silently give every dish a wrong cost.
+ *
+ * withAmounts: pass canSeeCosts(role). Without it no amount is selected at
+ * all, so what was paid never reaches a phone that may not see costs.
+ */
+export async function loadBuyingHistory(supabase: Supabase, { withAmounts }: { withAmounts: boolean }): Promise<{
+  /** Ingredient ids, most often bought first. */
+  often: string[]
+  /** The last recorded purchase's items, each with the unit it was bought in. */
+  lastRun: { ingredientId: string; unitId: string }[]
+  lastRunDay: string | null
+  lastBought: Record<string, LastBought>
+}> {
+  // Recorded purchases only: a draft has not happened yet, a cancelled one was
+  // undone, and a cancellation's own record (reverses set) holds no items.
+  const { data: purchases } = await supabase.from('purchases').select('id,purchase_date')
+    .eq('status', 'posted').is('reverses', null)
+    .order('purchase_date', { ascending: false }).order('created_at', { ascending: false })
+    .limit(40).returns<{ id: string; purchase_date: string }[]>()
+  const list = purchases ?? []
+  if (list.length === 0) return { often: [], lastRun: [], lastRunDay: null, lastBought: {} }
+
+  const [{ data: lines }, { data: units }] = await Promise.all([
+    supabase.from('purchase_lines')
+      .select(withAmounts ? 'purchase_id,ingredient_id,qty,unit_id,amount' : 'purchase_id,ingredient_id,qty,unit_id')
+      .in('purchase_id', list.map((p) => p.id))
+      .returns<{ purchase_id: string; ingredient_id: string; qty: string; unit_id: string; amount?: string }[]>(),
+    supabase.from('units').select('id,code,name').returns<{ id: string; code: string; name: string }[]>(),
+  ])
+  const unitWord = new Map((units ?? []).map((u) => [u.id, localWord(u)]))
+  const rank = new Map(list.map((p, i) => [p.id, i]))
+  const dayOf = new Map(list.map((p) => [p.id, p.purchase_date]))
+  // Newest purchase first, so the first line seen for an item is its last.
+  const ordered = [...(lines ?? [])].sort((a, b) => (rank.get(a.purchase_id) ?? 0) - (rank.get(b.purchase_id) ?? 0))
+
+  const count = new Map<string, number>()
+  const lastBought: Record<string, LastBought> = {}
+  for (const l of ordered) {
+    count.set(l.ingredient_id, (count.get(l.ingredient_id) ?? 0) + 1)
+    if (lastBought[l.ingredient_id]) continue
+    const amount = withAmounts && l.amount !== undefined ? Number(l.amount) : undefined
+    lastBought[l.ingredient_id] = {
+      qty: Number(l.qty),
+      unitId: l.unit_id,
+      unit: unitWord.get(l.unit_id) ?? '',
+      ...(amount !== undefined && Number.isFinite(amount) ? { amount } : {}),
+      day: dayOf.get(l.purchase_id) ?? '',
+    }
+  }
+  // Most often first; between equals, the one bought most recently.
+  const firstSeen = new Map<string, number>()
+  ordered.forEach((l, i) => { if (!firstSeen.has(l.ingredient_id)) firstSeen.set(l.ingredient_id, i) })
+  const often = [...count.keys()].sort((a, b) =>
+    (count.get(b) ?? 0) - (count.get(a) ?? 0) || (firstSeen.get(a) ?? 0) - (firstSeen.get(b) ?? 0))
+
+  const last = list[0]
+  const seen = new Set<string>()
+  const lastRun: { ingredientId: string; unitId: string }[] = []
+  for (const l of ordered) {
+    if (l.purchase_id !== last.id || seen.has(l.ingredient_id)) continue
+    seen.add(l.ingredient_id)
+    lastRun.push({ ingredientId: l.ingredient_id, unitId: l.unit_id })
+  }
+  return { often, lastRun, lastRunDay: last.purchase_date, lastBought }
 }

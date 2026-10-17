@@ -1,0 +1,211 @@
+/*
+ * Lists and their figures: Dishes, Sizes, Prices, Reports, More.
+ *
+ * Every rule is in @layer components, the layer globals.css declares through
+ * Tailwind, so a utility a page passes in still wins, as it reads. A rule
+ * outside a layer would beat every utility (see .mm-account-chip).
+ *
+ * Brand greens and neutrals only. No gold anywhere here: gold is the screen's
+ * one highlight, and these screens carry amber and red dots.
+ */
+@layer components {
+  /* --- Rows: one card per dish or size, the way a food app lists a menu --- */
+  .mm-rows { display: grid; gap: .5rem; }
+  @media (min-width: 768px) {
+    .mm-rows[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .mm-row {
+    display: flex;
+    min-height: 72px;
+    align-items: center;
+    gap: .75rem;
+    padding: .6rem .75rem;
+    border: 1px solid var(--mm-line);
+    border-radius: var(--mm-radius);
+    background: var(--mm-surface);
+    box-shadow: var(--mm-shadow-soft);
+    transition: border-color var(--mm-motion-fast) var(--mm-ease), transform var(--mm-motion-fast) var(--mm-ease);
+  }
+  .mm-row[data-size="short"] { min-height: 56px; }
+  a.mm-row:hover { border-color: color-mix(in srgb, var(--mm-accent) 45%, var(--mm-line)); }
+  a.mm-row:active { transform: scale(.99); }
+  .mm-row-main { min-width: 0; flex: 1; }
+  /* A long dish name wraps to two lines and is never cut off mid-word on a
+     360px phone; a third line would push the figure out of sight. */
+  .mm-row-name {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-weight: 600;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  .mm-row-figure {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: .4rem;
+    margin-top: .2rem;
+    color: var(--mm-muted);
+    font-size: .875rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .mm-row-figure strong { color: var(--mm-fg); font-weight: 600; }
+  .mm-row-end {
+    flex: none;
+    color: var(--mm-fg);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .mm-row-chevron { flex: none; color: var(--mm-muted); }
+
+  /* --- The coloured dot: green at target, amber under it, red at a loss,
+     an empty ring while a figure is missing (not finished is not wrong). --- */
+  .mm-dot {
+    display: inline-block;
+    width: .625rem;
+    height: .625rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--mm-muted);
+  }
+  .mm-dot[data-tone="good"] { background: var(--mm-accent); }
+  .mm-dot[data-tone="warn"] { background: var(--mm-warn); }
+  .mm-dot[data-tone="bad"] { background: var(--mm-bad); }
+  .mm-dot[data-tone="muted"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--mm-muted); }
+
+  /* --- Filter chips. They scroll sideways inside themselves on a narrow
+     phone; the page never does. --- */
+  .mm-chips {
+    display: flex;
+    gap: .5rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mm-chips::-webkit-scrollbar { display: none; }
+  .mm-chip {
+    display: inline-flex;
+    min-height: 44px;
+    flex: none;
+    align-items: center;
+    gap: .35rem;
+    padding: 0 .75rem;
+    border: 1px solid var(--mm-line);
+    border-radius: 999px;
+    background: var(--mm-surface);
+    color: var(--mm-fg);
+    font-size: .8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: border-color var(--mm-motion-fast) var(--mm-ease);
+  }
+  .mm-chip:hover { border-color: var(--mm-muted); }
+  .mm-chip[aria-current="page"] {
+    border-color: var(--mm-accent);
+    background: var(--mm-accent-soft);
+    color: var(--mm-accent-strong);
+  }
+  .mm-chip-count { color: var(--mm-muted); font-variant-numeric: tabular-nums; }
+  .mm-chip[aria-current="page"] .mm-chip-count { color: inherit; }
+
+  /* --- The ways into a tab's tools (Sizes and Prices on Dishes) --- */
+  .mm-entry {
+    display: flex;
+    min-height: 52px;
+    align-items: center;
+    gap: .6rem;
+    padding: .5rem .75rem;
+    border: 1px solid var(--mm-line);
+    border-radius: var(--mm-radius);
+    background: var(--mm-surface);
+    font-size: .95rem;
+    font-weight: 600;
+    line-height: 1.2;
+    transition: border-color var(--mm-motion-fast) var(--mm-ease);
+  }
+  .mm-entry:hover { border-color: color-mix(in srgb, var(--mm-accent) 45%, var(--mm-line)); }
+  .mm-entry-icon {
+    display: inline-grid;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    place-items: center;
+    border-radius: 10px;
+    background: var(--mm-accent-soft);
+    color: var(--mm-accent);
+  }
+
+  /* --- Prices: a compact table. On a phone it keeps the price only; the
+     cost and keep columns come in from 640px, where they fit. --- */
+  .mm-table-card {
+    overflow: hidden;
+    border: 1px solid var(--mm-line);
+    border-radius: var(--mm-radius);
+    background: var(--mm-surface);
+    box-shadow: var(--mm-shadow-soft);
+  }
+  .mm-price-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  .mm-price-table th {
+    padding: .55rem .75rem;
+    background: var(--mm-surface-2);
+    color: var(--mm-muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-align: left;
+    text-transform: uppercase;
+  }
+  .mm-price-table td { padding: .3rem .75rem; border-top: 1px solid var(--mm-line); vertical-align: top; }
+  .mm-price-table .mm-cell-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  /* The dish name is the row's link, a full 44px tall; each figure sits on
+     the same line as it, whatever wraps or follows underneath. */
+  .mm-price-table .mm-cell-name {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    gap: .5rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .mm-price-table .mm-cell-name:hover { text-decoration: underline; }
+  .mm-price-table .mm-cell-line { display: inline-flex; min-height: 44px; align-items: center; }
+
+  /* --- Reports: a month of bars, and dishes as horizontal bars --- */
+  .mm-month-days {
+    display: grid;
+    grid-template-columns: repeat(var(--mm-chart-n, 30), minmax(0, 1fr));
+    margin-top: .35rem;
+    color: var(--mm-muted);
+    font-size: 12px;
+  }
+  /* A day number wider than its slot spills over its empty neighbours. */
+  .mm-month-days > span { overflow: visible; text-align: center; white-space: nowrap; }
+
+  .mm-hbars { display: grid; gap: .75rem; margin: 0; padding: 0; list-style: none; }
+  .mm-hbar-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .75rem;
+    font-size: .875rem;
+  }
+  .mm-hbar-head > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mm-hbar-head > :last-child { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .mm-hbar-track {
+    height: 10px;
+    margin-top: .3rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--mm-surface-2);
+  }
+  .mm-hbar-fill { height: 100%; min-width: 4px; border-radius: 999px; background: var(--mm-chart-kept); }
+  .mm-hbar-fill[data-kind="sold"] { background: var(--mm-accent); }
+  .mm-hbar-fill[data-kind="loss"] { background: var(--mm-muted); }
+  /* Not known yet: a hatched track, never an empty one that reads as zero. */
+  .mm-hbar-track[data-unknown="true"] {
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--mm-muted) 55%, transparent) 0 1.5px, transparent 1.5px 5px);
+  }
+}

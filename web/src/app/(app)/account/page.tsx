@@ -7,6 +7,7 @@ import { NOT_ENTERED, money } from '@/lib/format'
 import { planStatusLabel } from '@/lib/trial'
 import { signOut } from '@/lib/auth-actions'
 import { Button } from '@/components/button'
+import { PhotoPreference } from '@/components/photo-preference'
 
 import Loading from './skeleton'
 
@@ -49,7 +50,8 @@ async function AccountPageBody() {
 
   return (
     <div className="space-y-8">
-      <BackLink href="/dashboard">Dashboard</BackLink>
+      {/* Account sits under More (lib/nav.ts), which is the tab that lights. */}
+      <BackLink href="/more">More</BackLink>
 
       <PageHeader title="Account" sub="Your business, your plan and your access." />
 
@@ -141,6 +143,13 @@ async function AccountPageBody() {
           <Link href="/terms" className="underline">Terms</Link> ·{' '}
           <Link href="/refunds" className="underline">Refunds and cancellation</Link>
         </p>
+      </section>
+
+      {/* A choice about this phone's data, not the account's, so it is
+          kept on the phone (components/photo-preference.tsx). */}
+      <section className="space-y-3">
+        <SectionHeading>Photos</SectionHeading>
+        <Card><PhotoPreference /></Card>
       </section>
 
       <section className="space-y-3">
