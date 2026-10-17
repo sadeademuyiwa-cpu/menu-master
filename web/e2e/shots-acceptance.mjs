@@ -95,7 +95,7 @@ async function inspect(p, label) {
       'COGS','snapshot','security_invoker','account_id','business_id','variant_id']
       .filter((w) => body.includes(w))
 
-    const zeroNaira = body.includes('₦0.00')
+    const zeroNaira = body.includes('₦0')
     return { overflow, clipped, smallestMoney, small, navCut, jargon, zeroNaira }
   })
 
@@ -119,6 +119,8 @@ const browser = await chromium.launch({ args: ['--no-proxy-server'] })
 
 // ---------------------------------------------------------------- build data
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+// Cancel this sale asks the browser to confirm first (components/confirm-submit.tsx).
+ctx.on('dialog', (d) => d.accept())
 const page = await ctx.newPage()
 
 await go(page, '/signup')
@@ -253,6 +255,7 @@ await inspect(page, 'desktop 11-dashboard')
 
 // ------------------------------------------------------------------- 360 px
 const ctxM = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true })
+ctxM.on('dialog', (d) => d.accept())
 const pageM = await ctxM.newPage()
 await go(pageM, '/login')
 await pageM.fill('input[type=email]', A.email)

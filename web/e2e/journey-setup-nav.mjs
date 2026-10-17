@@ -116,7 +116,7 @@ try {
   // --- what you paid: correct it -------------------------------------------------
   await tabLink(page, 'What you paid').click()
   await page.waitForURL('**/start?step=purchase', { timeout: 30000 })
-  await must(page, 'the purchase step shows what was recorded', 'Salt', '1 kg', '₦600.00', 'Correct what you entered')
+  await must(page, 'the purchase step shows what was recorded', 'Salt', '1 kg', '₦600', 'Correct what you entered')
   await openDetails(page, 'Correct what you entered')
   const amount = page.locator('form:has(input[name=purchase_id]) input[name=amount]').first()
   mark('the correction form opens with what was entered', (await amount.inputValue()) === '600', await amount.inputValue())
@@ -136,7 +136,7 @@ try {
   // --- the price step shows the corrected cost --------------------------------------
   await tabLink(page, 'Your price').click()
   await page.waitForURL('**/start?step=price', { timeout: 30000 })
-  await must(page, 'the price step shows the corrected cost (N12.00 a plate)', '₦12.00')
+  await must(page, 'the price step shows the corrected cost (N12.00 a plate)', '₦12')
   const priceNow = await page.locator('input[name=price]').inputValue()
   mark('and the price you set, ready to change', priceNow === '500', priceNow)
 
@@ -151,13 +151,13 @@ try {
   await page.fill('input[name=plates]', '5')
   await page.click('button:has-text("Save and work out the cost")')
   await page.waitForURL('**/start?step=price**', { timeout: 30000 })
-  await must(page, 'the changed dish is re-costed (N24.00 a plate)', 'Dish saved', '₦24.00')
+  await must(page, 'the changed dish is re-costed (N24.00 a plate)', 'Dish saved', '₦24')
 
   // --- your price: change it -----------------------------------------------------
   await page.fill('input[name=price]', '900')
   await page.click('button:has-text("Save my price")')
   await page.waitForURL('**/start?step=done**', { timeout: 30000 })
-  await must(page, 'the new price is saved and shown', 'Price saved', '₦900.00')
+  await must(page, 'the new price is saved and shown', 'Price saved', '₦900')
 
   // --- back and next ---------------------------------------------------------------
   await go(page, '/start?step=dish')

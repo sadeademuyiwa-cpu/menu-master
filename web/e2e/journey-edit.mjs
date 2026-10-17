@@ -98,11 +98,14 @@ s = await section(page, 'Edit this dish')
 mark('and the edit form reopens with the saved group',
   (await s.locator('input[name=category]').inputValue()) === 'Soups')
 
-// the unit of a line, not only its quantity
-const saltLine = page.locator('li:has-text("Salt")').first()
+// the unit of a line, not only its quantity. A row opens its sheet, which
+// holds the quantity and unit together (recipes/[id]/lines.tsx).
+await page.locator('li', { hasText: 'Salt' }).locator('button[aria-haspopup=dialog]').first().click()
+const saltLine = page.locator('dialog[open]').first()
+await saltLine.waitFor({ state: 'visible', timeout: 10000 })
 await saltLine.locator('input[name=qty]').fill('0.2')
 await saltLine.locator('select[name=unit_id]').selectOption({ label: 'kg — Kilogram' })
-await submit(page, saltLine.locator('button:has-text("Update")'))
+await submit(page, saltLine.locator('button:has-text("Save")'))
 await must(page, 'a recipe line changes unit and quantity together', 'Ingredient updated.', '0.2 kg')
 
 // ---- 2. the ingredient ------------------------------------------------------
@@ -144,7 +147,7 @@ const workRow = page.locator('li:has-text("Cooking")').first()
 await workRow.locator('summary:has-text("Edit")').click()
 await workRow.locator('input[name=rate_per_hour]').fill('2000')
 await submit(page, workRow.locator('button:has-text("Save")'))
-await must(page, 'a wage is edited and every dish re-costed', 'Kind of work updated.', 're-costed', '2,000.00')
+await must(page, 'a wage is edited and every dish re-costed', 'Kind of work updated.', 're-costed', '₦2,000')
 await submit(page, page.locator('li:has-text("Cooking") button:has-text("Hide")').first())
 await must(page, 'a kind of work can be hidden', 'Hidden', 'hidden')
 await submit(page, page.locator('li:has-text("Cooking") button:has-text("Show again")').first())
@@ -154,7 +157,7 @@ await page.locator('input[name=default_target_margin]').fill('45')
 await submit(page, page.locator('button:has-text("Save pricing")'))
 await must(page, 'the target margin is now editable', 'Pricing saved.')
 await go(page, dishUrl + '?view=pro')
-await must(page, 'and the dish reads the new target', 'Your target margin', '45.00%')
+await must(page, 'and the dish reads the new target', 'Your target margin', '45%')
 
 await go(page, '/settings')
 await page.locator('form:has(select[name=type]) input[name=name]').fill('Fix-it Kitchen Ltd')
@@ -164,7 +167,9 @@ await must(page, 'the business name is edited from Settings and shows in the hea
 // ---- 4. correcting a recorded purchase ----------------------------------------
 await go(page, '/purchases')
 await mustNot(page, 'no "0 items" cancellation records are listed', '0 items')
-await page.locator('a[href^="/purchases/"]:has-text("Recorded")').first().click()
+// A recorded purchase no longer says "Recorded" on the list (only the
+// exceptions carry a word); open the first row that is not cancelled.
+await page.locator('a.mm-buy-row').filter({ hasNotText: /Cancelled|Reversal|Not recorded yet/ }).first().click()
 await page.waitForURL(/\/purchases\/[0-9a-f-]{36}$/, { timeout: 30000 })
 await rendered(page)
 const originalUrl = new URL(page.url()).pathname
@@ -172,18 +177,25 @@ await must(page, 'a recorded purchase offers a one-step correction', 'Correct th
 await page.locator('a:has-text("Correct this purchase")').first().click()
 await page.waitForURL(/\/correct$/, { timeout: 30000 })
 await rendered(page)
-await must(page, 'the correction opens pre-filled', 'was 1 kg for ₦600.00')
+await must(page, 'the correction opens pre-filled', 'was 1 kg for ₦600')
 await page.locator('input[name=amount]').first().fill('700')
 await submit(page, page.locator('button:has-text("Save the corrected purchase")'))
 await page.waitForURL(/\/purchases\/[0-9a-f-]{36}(\?.*)?$/, { timeout: 30000 }).catch(() => {})
-await must(page, 'the corrected purchase is recorded with the new amount', 'Corrected.', '₦700.00', 'Recorded')
+await must(page, 'the corrected purchase is recorded with the new amount', 'Corrected.', '₦700', 'Recorded')
 mark('and it is a new record, not the old one edited', new URL(page.url()).pathname !== originalUrl)
 await go(page, originalUrl)
 await must(page, 'the original is cancelled and linked to its correction', 'This purchase was corrected', 'See the corrected purchase', 'Cancelled')
 await go(page, '/purchases')
 await mustNot(page, 'the bookkeeping twin of the cancellation stays out of the list', '0 items')
 await go(page, dishUrl)
-await must(page, 'the dish now costs from the corrected price', '700')
+// The line's sheet says where its cost came from, per buying unit.
+await page.locator('li', { hasText: 'Salt' }).locator('button[aria-haspopup=dialog]').first().click()
+await page.locator('dialog[open]').first().waitFor({ state: 'visible', timeout: 10000 })
+// Salt is 90% usable (set above), so the line costs ₦778 a usable kg; the sheet
+// names the purchase it came from: the corrected ₦700, not the cancelled ₦600.
+await must(page, 'the dish now costs from the corrected price', '1 kg for ₦700')
+await mustNot(page, 'and not from the cancelled one', '1 kg for ₦600')
+await page.keyboard.press('Escape')
 
 // ---- 5. suppliers -----------------------------------------------------------
 await go(page, '/suppliers')
@@ -283,17 +295,19 @@ await other.locator('input').nth(2).fill('1000')
 await other.locator('input').nth(3).fill('400')
 await other.locator('button:has-text("Add to sale")').click()
 await page.locator('button:has-text("Next")').click()
-await must(page, 'an extra sits on the sale with its price', 'Delivery', '₦1,000.00')
+await must(page, 'an extra sits on the sale with its price', 'Delivery', '₦1,000')
 await submit(page, page.locator('button:has-text("Save for later")'))
 await page.waitForURL(/\/sales\/[0-9a-f-]{36}/, { timeout: 30000 })
 await must(page, 'a saved draft offers itself as a quote', 'Send as a quote', 'prices hold for 7 days')
 await openDetails(page, 'See the quote')
 await must(page, 'the quote carries the items and the total', 'Quote ·', '1 × Delivery', 'Prices hold for 7 days')
 await submit(page, page.locator('button:has-text("Confirm sale")'))
-await must(page, 'after confirming, the extra has a known cost', 'Confirmed', 'Cost known', 'cost ₦400.00')
-const deliveryRow = page.locator('li:has-text("Delivery")').first()
+await must(page, 'after confirming, the extra has a known cost', 'Confirmed', 'Cost known', 'cost ₦400')
+// The receipt card also lists "Delivery × 1"; the line with its cost status is
+// the one that names the cost.
+const deliveryRow = page.locator('li', { hasText: 'Delivery' }).filter({ hasText: 'Cost known' }).first()
 mark('the delivery line reads "Cost known", not "Not a dish"',
-  /Cost known/.test(await deliveryRow.innerText()) && !/Not a dish/.test(await deliveryRow.innerText()),
+  /Cost known/.test(await deliveryRow.innerText()) && !/Not a dish/.test(await page.locator('main').innerText()),
   (await deliveryRow.innerText()).replace(/\s+/g, ' ').slice(0, 120))
 
 // ---- 11. price per head ------------------------------------------------------

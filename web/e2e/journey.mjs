@@ -10,6 +10,7 @@
  * customer would actually read.
  */
 import { chromium } from 'playwright'
+import { fileURLToPath } from 'node:url'
 import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
 
 const BASE = 'http://127.0.0.1:3100'
@@ -33,7 +34,15 @@ async function text(page) { return page.locator('body').innerText() }
  * assertion. Everything else stays exact -- amounts and percentages are
  * compared character for character.
  */
-const has = (body, needle) => body.toLowerCase().includes(needle.toLowerCase())
+const has = (body, needle) => needle instanceof RegExp
+  ? needle.test(body)
+  : body.toLowerCase().includes(needle.toLowerCase())
+/**
+ * A naira zero standing in for a number. money() prints whole naira now, so
+ * a zero reads "₦0" as well as the old "₦0.00"; both are caught. A real small
+ * amount ("₦0.60 of salt") is not.
+ */
+const ZERO_NAIRA = /₦0(?:\.00)?(?![\d.,])/
 /**
  * A page that a save re-renders can be read before the new render lands: a
  * fixed pause after the click raced under load. So a check waits up to 5 s
@@ -76,6 +85,43 @@ async function mustNot(page, name, ...needles) {
     return `${n} in "${line.trim()}" [context: ${near.trim()}]`
   })
   mark(name, present.length === 0, present.length ? `unexpectedly present -> ${context.join(' ;; ')}` : '')
+}
+/**
+ * mustNot, reading the page with some parts left out. The dish page's "What
+ * one portion is made of" bar (.mm-chart) shows each ingredient's own share --
+ * a per-line figure, like the line costs -- so a recipe-level check reads
+ * everything except that bar, and the bar is checked on its own.
+ */
+async function mustNotOutside(page, name, skip, ...needles) {
+  await rendered(page)
+  const body = await page.evaluate((sel) => {
+    const hidden = [...document.querySelectorAll(sel)]
+    const was = hidden.map((el) => el.style.display)
+    hidden.forEach((el) => { el.style.display = 'none' })
+    const t = document.body.innerText
+    hidden.forEach((el, i) => { el.style.display = was[i] })
+    return t
+  }, skip)
+  const present = needles.filter((n) => has(body, n))
+  const context = present.map((n) => {
+    const line = body.split('\n').find((l) => has(l, n)) ?? ''
+    return `${n} in "${line.trim()}"`
+  })
+  mark(name, present.length === 0, present.length ? `unexpectedly present -> ${context.join(' ;; ')}` : '')
+}
+/**
+ * A dish ingredient is a short row now; tapping it opens a sheet (a <dialog>)
+ * with where its cost came from and the forms to change or remove it.
+ */
+async function openLine(page, itemName) {
+  steps++
+  await page.locator('li', { hasText: itemName }).locator('button[aria-haspopup=dialog]').first().click()
+  await page.locator('dialog[open]').first().waitFor({ state: 'visible', timeout: 10000 })
+  return page.locator('dialog[open]').first()
+}
+async function closeSheet(page) {
+  await page.keyboard.press('Escape')
+  await page.locator('dialog[open]').first().waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
 }
 /** Playwright needs an exact label; the unit list is data, so match on text. */
 async function pick(scope, selector, needle) {
@@ -195,7 +241,7 @@ await must(page, 'onboarding reaches the dashboard', 'Ada Kitchen')
 // PHASE 5: a first-time owner is told what to do, not shown a wall of zeros.
 await must(page, 'a brand new business gets a guided next step, not an empty dashboard',
   'Getting started', 'Next', 'Record your first sale')
-await mustNot(page, 'and is not greeted by zero naira everywhere', '₦0.00')
+await mustNot(page, 'and is not greeted by zero naira everywhere', ZERO_NAIRA)
 await mustNot(page, 'no database words reach the owner',
   'allocation basis', 'basis dimension', 'snapshot', 'provenance',
   'recipe basis', 'reconciliation', 'variant resolver', 'NULL')
@@ -232,7 +278,7 @@ await settledForm(page)
 await must(page, 'a purchase in an unknown local unit is REFUSED with a plain explanation',
   'does not know how much one of those holds')
 await page.screenshot({ path: 'e2e/shots/rc-ingredient-unknown-unit.png', fullPage: true })
-await mustNot(page, 'no cost is invented for the refused purchase', '₦0.00', 'NaN')
+await mustNot(page, 'no cost is invented for the refused purchase', ZERO_NAIRA, 'NaN')
 
 // --- 2. conversion, then the purchase ---------------------------------------
 await openDetails(page, 'Add a local measure')
@@ -261,7 +307,7 @@ const stepsFirstPriced = steps
 
 // --- recipe -----------------------------------------------------------------
 await newDish(page, BASE, { name: 'Ofada Special', batch: '4000', unit: 'g — Gram', portion: '500' })
-await must(page, 'the recipe is created and opens', 'Ofada Special', 'Ingredients')
+await must(page, 'the recipe is created and opens', 'Ofada Special', 'What goes in')
 const recipeUrl = page.url().split('?')[0]
 const tFirstRecipe = Date.now() - t0
 const stepsFirstRecipe = steps
@@ -276,8 +322,9 @@ steps++
 await addLine.locator('button[type=submit]').click()
 await page.waitForTimeout(1200)
 await settledForm(page)
+// N281.25 a portion, shown as N281: whole naira from N100 up.
 await must(page, 'THE FIRST VALUE MOMENT: cost per portion, above the fold',
-  'Cost per portion', '₦281.25')
+  'Cost per portion', '₦281')
 await page.screenshot({ path: 'e2e/shots/rc-desktop-costed.png', fullPage: true })
 const tFirstCost = Date.now() - t0
 const stepsFirstCost = steps
@@ -285,14 +332,16 @@ const stepsFirstCost = steps
 // --- 5/6. selling price and margin ------------------------------------------
 // Found by its field, not its position: a costed dish with no price now asks
 // for the price straight under the numbers, as its next step.
-const priceForm = page.locator('form:has(input[name=price])').first()
+// Not the hidden price inside a "Use ₦X" confirm sheet: the one she types in.
+const priceForm = page.locator('form:has(input[name=price]:not([type=hidden]))').first()
 await priceForm.locator('input[name=price]').fill('500')
 steps++
 await priceForm.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
 await settledForm(page)
+// 500 - 281.25 = 218.75 kept, shown as N219; 43.75% as 44%.
 await must(page, 'profit, margin and a plain-language verdict appear',
-  '₦218.75', '43.75%', 'Healthy')
+  'You keep', '₦219', '44%', 'Healthy')
 const tFirstMargin = Date.now() - t0
 const stepsFirstMargin = steps
 
@@ -325,36 +374,47 @@ await page.screenshot({ path: 'e2e/shots/rc-desktop-missing-price.png', fullPage
 // true cost of the rice line, derived from the owner's own purchase, and
 // hiding it would hide what they already know. The blocker names what is
 // missing; the lines show what is not.
-await mustNot(page, 'no recipe cost, profit or margin is shown while incomplete',
-  '₦281.25', '₦218.75', '43.75%', 'Cost per portion', 'Profit per portion')
-await must(page, 'the priced line still shows its own true cost while incomplete',
-  '₦2,250.00', '₦1.13 per g')
-await mustNot(page, 'and no ₦0.00 stands in for the unknown cost', '₦0.00')
+// The "What one portion is made of" bar shows the rice line's own share
+// (N281 a portion) beside a hatched "not known yet" for the palm oil: per-line
+// figures, read on their own below. Everything else on the page must carry no
+// recipe-level figure.
+await mustNotOutside(page, 'no recipe cost, profit or margin is shown while incomplete', '.mm-chart',
+  '₦281', '₦219', '44%', 'Cost per portion', 'Profit per portion', 'You keep', 'you would keep')
+const bar = (await page.locator('.mm-chart').first().innerText().catch(() => '')).replace(/\s+/g, ' ')
+mark('the portion bar names the unknown part and gives no total while incomplete',
+  has(bar, `Palm Oil ${stamp}`) && has(bar, 'not known yet') && /One portion in all not known yet/i.test(bar), bar.slice(0, 200))
+await must(page, 'the priced line still shows its own true cost while incomplete', '₦2,250')
+// Where the line's cost came from is in its sheet now.
+await openLine(page, `Ofada Rice ${stamp}`)
+// Said the way it is bought: ₦1.125 a gram is ₦1,125 per kg.
+await must(page, 'and its sheet says where that cost came from', '₦1,125 per kg', 'You bought 8 kg for ₦9,000')
+await closeSheet(page)
+await mustNot(page, 'and no naira zero stands in for the unknown cost', ZERO_NAIRA)
 
 // remove it again so the rest of the journey has a complete recipe
-const removeForms = page.locator('form:has(input[name=line_id])')
-const n = await removeForms.count()
-steps++
-await removeForms.nth(n - 1).locator('button[type=submit]').click()
+const palmSheet = await openLine(page, `Palm Oil ${stamp}`)
+await palmSheet.locator('button:has-text("Remove from this dish")').click()
 await page.waitForTimeout(900)
 await settledForm(page)
-await must(page, 'removing the unpriced line restores the cost', '₦2,250.00')
+await must(page, 'removing the unpriced line restores the cost', '₦2,250', 'Cost per portion', '₦281')
 
 // --- 4. edit a quantity, recompute ------------------------------------------
-const qtyForm = page.locator('form:has(input[name=line_id])').first()
-await qtyForm.locator('input[name=qty]').fill('4000')
-steps++
-await qtyForm.locator('button[type=submit]').first().click()
+const riceSheet = await openLine(page, `Ofada Rice ${stamp}`)
+await riceSheet.locator('input[name=qty]').fill('4000')
+await riceSheet.locator('button:has-text("Save")').click()
 await page.waitForTimeout(1000)
 await settledForm(page)
-await must(page, 'editing the quantity recomputes the authoritative cost', '₦4,500.00', '₦562.50')
-await mustNot(page, 'the stale cost is gone', '₦2,250.00')
+// 4000 g of rice at N1.125/g is N4,500 a batch; 500 g of a 4000 g batch is
+// N562.50 a portion, shown as N563 (whole naira from N100 up).
+await must(page, 'editing the quantity recomputes the authoritative cost', '₦4,500', '₦563')
+await mustNot(page, 'the stale cost is gone', '₦2,250', '₦281')
 // The margin must follow the cost. At ₦500 a portion costing ₦562.50 now loses
-// money, and the product has to say so rather than keep showing the old 43.75%.
+// money, and the product has to say so rather than keep showing the old 44%.
+// (-12.5% shows as -13%: a half rounds away from zero, as PostgreSQL does.)
 await must(page, 'the margin follows the cost and turns negative',
-  '-12.50%', 'Loss', 'less than it costs you to make')
+  '-13%', 'Loss', 'less than it costs you to make')
 await page.screenshot({ path: 'e2e/shots/rc-desktop-below-cost.png', fullPage: true })
-await mustNot(page, 'the stale margin is gone', '43.75%')
+await mustNot(page, 'the stale margin is gone', '44%', '₦219')
 
 // --- full costing view -------------------------------------------------------
 await go(page, recipeUrl + '?view=pro')
@@ -363,7 +423,7 @@ await must(page, 'the full costing view shows the batch breakdown',
 // Owner rule: a customer must be able to reproduce a purchase-derived cost
 // from their own records, and an estimate must never look like a purchase.
 await must(page, 'the page states where the unit cost came from, in the units bought',
-  'You bought 8 kg for ₦9,000.00')
+  'You bought 8 kg for ₦9,000')
 // Phase 3: the worksheet's profitability panel, every figure from PostgreSQL.
 // Margin and markup are different numbers for the same dish and must both
 // appear, correctly labelled, so neither can be mistaken for the other.
@@ -386,7 +446,7 @@ await workForm.locator('input[name=rate_per_hour]').fill('500')
 await workForm.locator('button[type=submit]').click()
 await page.waitForTimeout(900)
 await settledForm(page)
-await must(page, 'a business can define what it pays per hour', 'Cooking', '₦500.00 an hour')
+await must(page, 'a business can define what it pays per hour', 'Cooking', '₦500 an hour')
 
 await go(page, '/formats')
 await openDetails(page, 'Add a size')
@@ -486,7 +546,7 @@ await settledForm(page)
 // appears only while the portion is the commercial unit.
 await must(page, 'MODEL 1 still applies until a format exists', 'Cost incomplete')
 
-await page.locator('summary:has-text("Sell this in a size")').first().click()
+await openDetails(page, 'Sizes you sell this in')
 const vForm = page.locator('form:has(select[name=format_id])')
 await pick(vForm, 'select[name=format_id]', `Family Bowl ${stamp}`)
 steps++
@@ -496,9 +556,13 @@ await settledForm(page)
 await rendered(page)
 await page.evaluate(() => document.querySelectorAll('details.mm-info').forEach((d) => { d.open = true }))
 await must(page, 'attaching a format switches the recipe to selling by size',
-  `Family Bowl ${stamp}`, 'You sell this in your own sizes')
-await must(page, 'each size shows what it costs, from the same batch',
-  'What each size costs you', 'Price to hit your target')
+  `Family Bowl ${stamp}`, 'Sizes you sell this in', '1 size')
+await mustNot(page, 'and it is no longer sold by the portion', 'Sold by the portion')
+// 10 kg of rice at N1.125/g is N11,250 for a 10 l batch; a 2.5 l bowl is a
+// quarter of it, N2,812.50, plus the bowl's share of the monthly bills set up
+// earlier, N1,250 (the engine's variant_overhead_cost): N4,062.50, shown as N4,063.
+await must(page, 'each size shows what it costs, from the same batch, ready to price',
+  'Costs ₦4,063', 'Your prices', `Price for Family Bowl ${stamp}`)
 // MODEL 2 now applies: the format is the commercial unit and no portion size
 // was ever supplied, yet nothing is blocked and nothing was invented.
 await mustNot(page, 'MODEL 2: no synthetic portion size is demanded',
@@ -506,23 +570,27 @@ await mustNot(page, 'MODEL 2: no synthetic portion size is demanded',
 await page.screenshot({ path: 'e2e/shots/p4-recipe-formats.png', fullPage: true })
 
 // price the size and read back profit, margin and markup for THAT size
-const fpForm = page.locator('form:has(input[name=variant_id])').first()
+const fpForm = page.locator('form:has(input[name=variant_id]):has(input[name=price]:not([type=hidden]))').first()
 await fpForm.locator('input[name=price]').fill('7500')
 steps++
 await fpForm.locator('button[type=submit]').click()
 await page.waitForTimeout(1500)
 await settledForm(page)
 await rendered(page)
+// N7,500 - N4,062.50 = N3,437.50 kept, shown as N3,438; 45.83% as 46%.
 await must(page, 'a size can be priced and reports its own profit and margin',
-  '₦7,500.00', 'You keep')
+  'sells for ₦7,500', 'You keep', '₦3,438', '46%')
 await go(page, fmtRecipeUrl)
 
 // --- PHASE 2: the purchase ledger, end to end -------------------------------
 // The single-line form on the ingredient page now goes through fn_post_purchase,
 // so a real purchase must appear in the ledger and be reversible.
 await go(page, '/purchases')
+// A recorded row carries no status word now (only drafts and cancellations
+// do); it names what was bought and what it came to.
 await must(page, 'the purchase the ingredient page recorded appears in the ledger',
-  'Purchase history', 'Recorded')
+  'Purchase history', `Ofada Rice ${stamp}`, '₦9,000')
+await mustNot(page, 'and it is recorded, not left as a draft', 'Not recorded yet')
 
 // A full multi-line purchase, entered the way a market run actually happens.
 await go(page, '/suppliers')
@@ -548,7 +616,7 @@ await page.waitForURL(/\/purchases\/[0-9a-f-]{36}/, { timeout: 60000 })
 await rendered(page)
 await settledForm(page)
 const purchaseUrl = page.url().split('?')[0]
-await must(page, 'the item is recorded with what was actually paid', '₦42,000.00', '25 kg')
+await must(page, 'the item is recorded with what was actually paid', '₦42,000', '25 kg')
 await must(page, 'recording the purchase reports the prices it updated',
   'Recorded', 'price updated')
 await must(page, 'and shows the dishes it re-costed', 'What this changed', 'Ofada Special')
@@ -567,7 +635,7 @@ await settledForm(page)
 await must(page, 'a purchase can be cancelled with a reason, and says so',
   'Cancelled', 'wrong amount')
 await go(page, purchaseUrl)
-await must(page, 'the cancelled purchase is kept as evidence, not deleted', '₦42,000.00')
+await must(page, 'the cancelled purchase is kept as evidence, not deleted', '₦42,000', 'Cancelled')
 
 // --- 3. the RECIPE-level missing-conversion blocker --------------------------
 // Distinct from the ingredient page refusing an unknown purchase unit: here the
@@ -606,7 +674,7 @@ await settledForm(page)
 await rendered(page)
 await must(page, 'a recipe line in an unconvertible unit blocks and says what is needed',
   'Cost incomplete', `Garri ${stamp}`, 'paint')
-await mustNot(page, 'no cost is guessed for the unconvertible line', '₦0.00', 'NaN')
+await mustNot(page, 'no cost is guessed for the unconvertible line', ZERO_NAIRA, 'NaN')
 await page.screenshot({ path: 'e2e/shots/rc-desktop-missing-conversion.png', fullPage: true })
 
 await go(page, recipeUrl)
@@ -615,11 +683,11 @@ await go(page, recipeUrl)
 steps++
 await page.reload({ waitUntil: 'domcontentloaded' })
 await rendered(page)
-await must(page, 'the recomputed cost survives a refresh', '₦4,500.00', '₦562.50')
+await must(page, 'the recomputed cost survives a refresh', '₦4,500', '₦563')
 
 // --- 7. direct URL ----------------------------------------------------------
 await go(page, recipeUrl)
-await must(page, 'the recipe opens from a direct URL', 'Ofada Special', '₦4,500.00')
+await must(page, 'the recipe opens from a direct URL', 'Ofada Special', '₦4,500')
 
 // --- 8. validation ----------------------------------------------------------
 await openDetails(page, 'Add an ingredient')
@@ -647,7 +715,7 @@ mark('a logged-out visitor is sent to the login page', page.url().includes('/log
 await logIn(page, A)
 await go(page, recipeUrl)
 await must(page, 'after logging back in the same authoritative figures return',
-  'Ofada Special', '₦4,500.00', '₦562.50', '-12.50%')
+  'Ofada Special', '₦4,500', '₦563', '-13%')
 
 // ===========================================================================
 // TENANT ISOLATION — a second real account, through the browser
@@ -660,7 +728,7 @@ await onboard(pageB, 'Bola Foods', 'Bola Kitchen')
 
 await go(pageB, recipeUrl)
 await mustNot(pageB, 'account B cannot read account A\'s recipe',
-  'Ofada Special', '₦4,500.00')
+  'Ofada Special', '₦4,500')
 await go(pageB, ingUrl)
 await mustNot(pageB, 'account B cannot read account A\'s ingredient or its prices',
   `Ofada Rice ${stamp}`, '₦1.13')
@@ -689,10 +757,16 @@ await page.waitForTimeout(1200)
 await settledForm(page)
 
 await go(page, '/dashboard')
+// Home's "Needs you": Ofada Special sells at N500 against a N562.50 cost.
 await must(page, 'the dashboard reports products that need attention',
-  'Needs attention')
+  'Needs you', 'Ofada Special')
 await must(page, 'and states them in plain business language',
-  'You may be undercharging')
+  'Selling at a loss')
+const lossRow = page.locator('section[aria-labelledby=home-needs] li', { hasText: 'Ofada Special' }).first()
+mark('and offers the fix, a price worked out from her own cost and target',
+  (await lossRow.locator('button:has-text("Use ₦")').count()) === 1,
+  (await lossRow.innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 120))
+await mustNot(page, 'and no naira zero stands in for a dish whose cost is not known', ZERO_NAIRA)
 await mustNot(page, 'the dashboard still uses no database words',
   'allocation basis', 'snapshot', 'provenance', 'variant', 'NULL', 'is_complete')
 await must(page, 'an ingredient a recipe uses but nobody priced is surfaced',
@@ -701,7 +775,7 @@ await must(page, 'an ingredient a recipe uses but nobody priced is surfaced',
 // until the business actually uses it.
 await mustNot(page, 'and the starter catalogue does not fill the list with noise',
   'Semovita', 'Poundo yam flour', 'Rice (imported)')
-await must(page, 'and quick actions are offered', 'New purchase', 'Record what you paid')
+await must(page, 'and quick actions are offered', 'Record a sale', 'Record a purchase')
 await page.screenshot({ path: 'e2e/shots/p5-dashboard-live.png', fullPage: true })
 
 // ===========================================================================
@@ -718,7 +792,7 @@ for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'ta
   // rather than asserting on whatever rendered first.
   await settled(pageM, recipeUrl, 'Ofada Special')
   await must(pageM, `${tag}px shows the portion cost and the margin above the fold`,
-    'Cost per portion', '₦562.50', '-12.50%')
+    'Cost per portion', '₦563', '-13%')
   const overflow = await pageM.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   mark(`no horizontal overflow at ${tag}px`, overflow === 0, `${overflow}px`)
@@ -766,11 +840,85 @@ for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'ta
     await go(pageM, '/ingredients')
     await must(pageM, 'mobile ingredient list renders', `Ofada Rice ${stamp}`)
     await go(pageM, '/dashboard')
-    await must(pageM, 'the dashboard is usable on a phone', 'Needs attention')
+    await must(pageM, 'the dashboard is usable on a phone', 'Needs you', 'Your dishes')
     await pageM.screenshot({ path: 'e2e/shots/p5-dashboard-mobile.png', fullPage: true })
   }
   await ctxM.close()
 }
+
+// ===========================================================================
+// THE DISH'S OWN PHOTO -- added on the dish page, then shown wherever the dish is
+// ===========================================================================
+const SAMPLE = fileURLToPath(new URL('../../branding/06-imagery/samples/pexels-34772940.jpg', import.meta.url))
+/** An <img> that has really loaded from the local storage gateway, not a broken one. */
+const photoLoaded = (loc) => loc.evaluate(async (img) => {
+  img.loading = 'eager'
+  img.scrollIntoView({ block: 'center' })
+  for (let i = 0; i < 40 && !(img.complete && img.naturalWidth > 0); i++) await new Promise((r) => setTimeout(r, 250))
+  return { ok: img.complete && img.naturalWidth > 0, src: img.getAttribute('src') ?? '' }
+}).catch((e) => ({ ok: false, src: String(e) }))
+
+await go(page, recipeUrl)
+mark('a dish with no photo shows its tile, not a broken picture',
+  (await page.locator('header img.mm-dish-photo').count()) === 0)
+steps++
+const [chooser] = await Promise.all([
+  page.waitForEvent('filechooser', { timeout: 15000 }),
+  page.locator('button:has-text("Add a photo")').first().click(),
+])
+await chooser.setFiles(SAMPLE)
+await page.waitForURL(/notice=/, { timeout: 60000 }).catch(() => {})
+await settledForm(page)
+await rendered(page)
+await must(page, 'a photo chosen on the dish page is shrunk, sent and saved', 'Photo saved.', 'Change photo', 'Remove photo')
+const dishPhoto = await photoLoaded(page.locator('header img.mm-dish-photo').first())
+mark('and the dish page shows it, from the dish bucket',
+  dishPhoto.ok && /\/storage\/v1\/object\/public\/dish\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f]{32}\.(webp|jpg)$/.test(dishPhoto.src),
+  dishPhoto.src)
+
+await go(page, '/dashboard')
+const homeCard = page.locator(`a[href="${new URL(recipeUrl).pathname}"]`, { has: page.locator('img.mm-dish-photo') }).first()
+const homePhoto = await photoLoaded(homeCard.locator('img.mm-dish-photo').first())
+mark('Home shows the photo on the dish, as a small thumbnail',
+  homePhoto.ok && /-320\.(webp|jpg)$/.test(homePhoto.src), homePhoto.src)
+
+await go(page, '/sales/new')
+await page.waitForTimeout(600)
+const sellPhoto = await photoLoaded(page.locator('li.mm-sell-card', { hasText: 'Ofada Special' }).locator('img.mm-dish-photo').first())
+mark('and New sale shows it on the dish she taps', sellPhoto.ok && /-320\.(webp|jpg)$/.test(sellPhoto.src), sellPhoto.src)
+await page.screenshot({ path: 'e2e/shots/p7-sale-photo.png', fullPage: true })
+
+// ===========================================================================
+// "USE ₦X" ON HOME -- the fix for a dish selling at a loss, in two taps
+// ===========================================================================
+await go(page, '/dashboard')
+const fixRow = page.locator('section[aria-labelledby=home-needs] li', { hasText: 'Ofada Special' }).first()
+const useBtn = fixRow.locator('button:has-text("Use ₦")').first()
+const offered = (await useBtn.innerText().catch(() => '')).trim().replace(/^Use\s+/, '')
+steps++
+await useBtn.click()
+const confirmSheet = page.locator('dialog[open]').first()
+await confirmSheet.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
+const sheetText = (await confirmSheet.innerText().catch(() => '')).replace(/\s+/g, ' ')
+mark('"Use ₦X" asks first, in one sentence, before changing anything',
+  /^₦[\d,]+$/.test(offered) && has(sheetText, `From now on, Ofada Special sells for ${offered}.`) && has(sheetText, 'Keep current price'),
+  `${offered} / ${sheetText.slice(0, 160)}`)
+await go(page, recipeUrl)
+await must(page, 'nothing is saved until she confirms', 'You sell it for', '₦500', 'Loss')
+await go(page, '/dashboard')
+await page.locator('section[aria-labelledby=home-needs] li', { hasText: 'Ofada Special' }).first()
+  .locator('button:has-text("Use ₦")').first().click()
+await page.locator('dialog[open] button:has-text("Confirm")').first().click()
+await page.waitForURL(/notice=/, { timeout: 30000 }).catch(() => {})
+await settledForm(page)
+await rendered(page)
+await must(page, 'confirming sets the price and says so', 'Selling price saved.')
+const stillLosing = await page.locator('section[aria-labelledby=home-needs] li', { hasText: 'Ofada Special' }).count()
+mark('and the dish no longer needs her', stillLosing === 0, `${stillLosing} row(s) left`)
+await go(page, recipeUrl)
+await must(page, 'the dish now sells at the offered price and keeps her target',
+  'You sell it for', offered, 'Healthy')
+await mustNot(page, 'and the loss is gone', '-13%', 'less than it costs you to make')
 
 await page.screenshot({ path: 'e2e/shots/real-desktop-recipe.png', fullPage: true })
 

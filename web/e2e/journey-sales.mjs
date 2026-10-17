@@ -179,7 +179,7 @@ await pick(addLine, 'select[name=ingredient_id]', `Rice ${stamp}`)
 await addLine.locator('input[name=qty]').fill('4500')
 await pick(addLine, 'select[name=unit_id]', 'g — Gram')
 await press(addLine, page, 'button[type=submit]')
-await must(page, 'the dish is costed at N850 a portion', '₦850.00')
+await must(page, 'the dish is costed at N850 a portion', '₦850')
 
 // A second dish whose only ingredient has never been priced. Its cost is
 // unknown, and must stay unknown all the way to the sale.
@@ -216,7 +216,7 @@ await page.screenshot({ path: 'e2e/shots/p6-customers.png', fullPage: true })
 await go(page, '/sales')
 await must(page, 'a business with no sales is invited to record one, not shown zeros',
   'New sale', 'No sales recorded yet')
-await mustNot(page, 'and is not greeted by naira zero', '₦0.00')
+await mustNot(page, 'and is not greeted by naira zero', '₦0')
 
 // An order taken now and served later: saved for later, it stays a draft.
 await takeOrder(page, { item: 'Party Jollof', qty: 10, price: 1500,
@@ -224,14 +224,14 @@ await takeOrder(page, { item: 'Party Jollof', qty: 10, price: 1500,
 const saleUrl = page.url().split('?')[0]
 await must(page, 'the sale opens as a draft and says what that means',
   'Saturday party', 'still a draft', 'not from when you typed it')
-await must(page, 'the item is on the draft at the price charged', '₦15,000.00')
+await must(page, 'the item is on the draft at the price charged', '₦15,000')
 await must(page, 'and its cost is honestly described as not yet locked in',
   'Not locked in yet')
-await mustNot(page, 'a draft line never shows a naira zero cost', '₦0.00')
+await mustNot(page, 'a draft line never shows a naira zero cost', '₦0')
 await page.screenshot({ path: 'e2e/shots/p6-sale-draft.png', fullPage: true })
 
 await go(page, '/sales')
-await mustNot(page, 'the draft is NOT counted as money taken', 'Sold today\n₦15,000.00')
+await mustNot(page, 'the draft is NOT counted as money taken', 'Sold today\n₦15,000')
 await must(page, 'but the owner is told it is waiting on them',
   'Needs your attention', 'Not confirmed')
 
@@ -252,15 +252,15 @@ await buy2.locator('input[name=amount]').fill('34000')
 await press(buy2, page, 'button[type=submit]')
 
 await go(page, jollofUrl)
-await must(page, 'the dish now costs more, because the rice does', '₦1,275.00')
+await must(page, 'the dish now costs more, because the rice does', '₦1,275')
 
 await go(page, saleUrl)
 const confirmForm = page.locator('form:has(button:has-text("Confirm sale"))')
 await press(confirmForm, page, 'button[type=submit]')
 await must(page, 'confirming locks in what the sale cost, at TODAY\'s prices',
-  'Confirmed', '₦12,750.00')
-await must(page, 'and reports the profit on it', '₦2,250.00', '15.00%')
-await mustNot(page, 'the cost frozen is NOT the cost when the line was typed', '₦8,500.00')
+  'Confirmed', '₦12,750')
+await must(page, 'and reports the profit on it', '₦2,250', '15%')
+await mustNot(page, 'the cost frozen is NOT the cost when the line was typed', '₦8,500')
 await page.screenshot({ path: 'e2e/shots/p6-sale-confirmed.png', fullPage: true })
 
 await must(page, 'a confirmed sale offers correction by cancelling, not editing',
@@ -278,7 +278,7 @@ await takeOrder(page, { item: 'Party Jollof', qty: 20, price: 1500, itemDiscount
   customer: 'Mrs Adeyemi', reference: 'Discounted party', mode: 'draft' })
 const discUrl = page.url().split('?')[0]
 await must(page, 'a line discount is shown as a discount, not a lower price',
-  '₦30,000.00', 'less ₦2,000.00 off', '₦28,000.00')
+  '₦30,000', 'less ₦2,000 off', '₦28,000')
 
 // The whole-sale discount is folded away on a draft until it is wanted.
 await page.locator('summary:has-text("Discount on the whole sale")').first().click()
@@ -286,7 +286,7 @@ const discForm = page.locator('form:has(input[name=order_discount])')
 await discForm.locator('input[name=order_discount]').fill('3000')
 await press(discForm, page, 'button[type=submit]')
 await must(page, 'a discount on the whole sale is shared across its items',
-  'share of the order discount', '₦3,000.00', '₦25,000.00')
+  'share of the order discount', '₦3,000', '₦25,000')
 await page.screenshot({ path: 'e2e/shots/p6-sale-discounts.png', fullPage: true })
 
 const confirm3 = page.locator('form:has(button:has-text("Confirm sale"))')
@@ -294,11 +294,11 @@ await press(confirm3, page, 'button[type=submit]')
 // 20 portions at N1,275 = N25,500 cost against N25,000 kept: a loss, and the
 // page must say so rather than round it away.
 await must(page, 'margin is worked out on what was actually taken, after discounts',
-  '₦25,000.00', '₦25,500.00', '-₦500.00')
+  '₦25,000', '₦25,500', '-₦500')
 
 await go(page, '/sales')
 await must(page, 'the day\'s figures show what was given away in discounts',
-  'Given away in discounts', '₦5,000.00')
+  'Given away in discounts', '₦5,000')
 
 // ===========================================================================
 // HISTORY DOES NOT MOVE
@@ -314,10 +314,10 @@ await press(buy3, page, 'button[type=submit]')
 
 await go(page, saleUrl)
 await must(page, 'a later price rise leaves the confirmed sale exactly as it was',
-  '₦12,750.00', '₦2,250.00', '15.00%')
+  '₦12,750', '₦2,250', '15%')
 await go(page, jollofUrl)
 await mustNot(page, 'while the dish itself is repriced -- it is the SALE that is frozen',
-  '₦1,275.00')
+  '₦1,275')
 
 // ===========================================================================
 // SOLD WITHOUT A KNOWN COST -- NEVER RENDERED AS ZERO
@@ -328,16 +328,20 @@ await takeOrder(page, { item: 'Mystery Stew', qty: 4, price: 2000,
 
 await must(page, 'a sale of an uncosted dish still confirms, and says what is missing',
   'no known cost', 'Cost not known')
-await must(page, 'the money taken is still counted in full', '₦8,000.00')
+await must(page, 'the money taken is still counted in full', '₦8,000')
 await must(page, 'but the profit is reported as not known, not as zero',
   'not known yet')
-await mustNot(page, 'NOTHING on this sale is rendered as naira zero', '₦0.00')
+await mustNot(page, 'NOTHING on this sale is rendered as naira zero', '₦0')
 await page.screenshot({ path: 'e2e/shots/p6-sale-no-cost.png', fullPage: true })
 
 await go(page, '/reports')
+// The month card says it in one sentence; the full table is one tap away.
 await must(page, 'reports say how much of the picture is trustworthy',
+  'Kept covers', 'of sales had no known cost yet')
+await openDetails(page, 'See the figures')
+await must(page, 'and the figures behind it name the money with no known cost',
   'of revenue has a verified cost', 'Money in with no known cost')
-await mustNot(page, 'and never show a zero cost for revenue with no cost', '₦0.00')
+await mustNot(page, 'and never show a zero cost for revenue with no cost', '₦0')
 
 // ===========================================================================
 // VOID AND REISSUE
@@ -349,11 +353,26 @@ await voidForm.locator('input[name=reason]').fill('priced it wrong')
 await press(voidForm, page, 'button[type=submit]')
 await must(page, 'a confirmed sale is cancelled with a reason, and keeps its record',
   'was cancelled', 'priced it wrong', 'nothing disappears without a trace')
+// Ported from cancelled-sale-history.mjs (its mock backend predates guided
+// setup): a cancelled sale still shows what it was, marked as not counted.
+await must(page, 'a cancelled sale still shows what it was, marked as not counted',
+  'The original cancelled sale', 'NOT counted in your revenue, cost or profit')
+await mustNot(page, 'and never claims there was nothing on it', 'Nothing on this sale yet')
+const cancelledPath = new URL(page.url()).pathname
 
 const reissueForm = page.locator('form:has(button:has-text("Start the replacement"))')
 await press(reissueForm, page, 'button[type=submit]')
 await must(page, 'the replacement is a new draft that points back at the original',
   'replacement sale has been started', 'This replaces an earlier sale')
+const replacementPath = new URL(page.url()).pathname
+await go(page, cancelledPath)
+mark('the cancelled sale links to its replacement',
+  (await page.locator(`a[href="${replacementPath}"]`).count()) > 0, replacementPath)
+await go(page, '/reports')
+await must(page, 'Reports list the cancelled sale with its reason and who cancelled it',
+  'priced it wrong', 'cancelled by you')
+mark('and the replacement is reachable from the report',
+  (await page.locator(`a[href="${replacementPath}"]`).count()) > 0)
 await page.screenshot({ path: 'e2e/shots/p6-sale-reissued.png', fullPage: true })
 
 // ===========================================================================
@@ -363,8 +382,8 @@ await go(page, '/customers')
 await page.locator('a:has-text("Mrs Adeyemi")').first().click()
 await page.waitForTimeout(700)
 await must(page, 'a customer page shows what they bought and what it earned',
-  'Mrs Adeyemi', 'They have bought', '₦15,000.00', 'No pepper for the children')
-await mustNot(page, 'and never a naira zero', '₦0.00')
+  'Mrs Adeyemi', 'They have bought', '₦15,000', 'No pepper for the children')
+await mustNot(page, 'and never a naira zero', '₦0')
 await page.screenshot({ path: 'e2e/shots/p6-customer.png', fullPage: true })
 
 // ===========================================================================
@@ -393,7 +412,7 @@ for (const [tag, width] of [['360', 360], ['390', 390]]) {
 
   await pageM.screenshot({ path: `e2e/shots/p6-sales-mobile-${tag}.png`, fullPage: true })
   await go(pageM, saleUrl)
-  await must(pageM, `a confirmed sale reads correctly at ${width}px`, '₦12,750.00', '₦2,250.00')
+  await must(pageM, `a confirmed sale reads correctly at ${width}px`, '₦12,750', '₦2,250')
   await pageM.screenshot({ path: `e2e/shots/p6-sale-mobile-${tag}.png`, fullPage: true })
   await go(pageM, '/customers')
   await pageM.screenshot({ path: `e2e/shots/p6-customers-mobile-${tag}.png`, fullPage: true })

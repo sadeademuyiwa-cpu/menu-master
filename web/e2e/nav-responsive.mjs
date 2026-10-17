@@ -23,7 +23,7 @@ const jwt = [
   'signature',
 ].join('.')
 
-const DESTINATIONS = ['Home', 'Sales', 'Purchases', 'Recipes', 'More']
+const DESTINATIONS = ['Home', 'Sales', 'Purchases', 'Dishes', 'More']
 let pass = 0, fail = 0
 const check = (name, ok, detail = '') => {
   if (ok) { pass++; console.log(`  ok   ${name}`) }
@@ -95,12 +95,13 @@ for (const [label, width, height] of [['desktop', 1280, 800], ['mobile', 390, 84
     ['/dashboard', 'Home'],
     ['/sales', 'Sales'],
     ['/purchases', 'Purchases'],
-    ['/recipes', 'Recipes'],
+    ['/recipes', 'Dishes'],
     ['/more', 'More'],
     // a child page must light its parent
-    ['/recipes/00000000-0000-0000-0000-000000000020', 'Recipes'],
-    // a page with no section of its own is reached from More
-    ['/ingredients/00000000-0000-0000-0000-000000000010', 'More'],
+    ['/recipes/00000000-0000-0000-0000-000000000020', 'Dishes'],
+    // a tool page lights the tab it belongs to: ingredients are bought, so
+    // they sit under Purchases (lib/nav.ts activeHref)
+    ['/ingredients/00000000-0000-0000-0000-000000000010', 'Purchases'],
   ]) {
     const page = await ctx.newPage()
     await page.setViewportSize({ width, height })
