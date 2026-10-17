@@ -88,23 +88,25 @@ permissive SELECT policies; 7 unused indexes.
 
 ## Proposed, not yet applied
 
-*(Section updated 12 October 2026. Production is at **0062**: 0052–0059 were
-applied on 2–3 October (commits `5f08f2f`, `f8d5022`), and 0060–0062 on
-12 October over the session pooler (PRE/POST all PASS, 118 policies, 98
-`fn_*`, both paying subscriptions untouched). The rest of this file still
-describes 10 September and is older than those facts.)*
+*(Section updated 17 October 2026. Production is at **0064**: 0052–0059 were
+applied on 2–3 October (commits `5f08f2f`, `f8d5022`), 0060–0062 on
+12 October, and 0063–0064 on 17 October, all over the session pooler with
+`psql --single-transaction`. The rest of this file still describes
+10 September and is older than those facts.)*
 
-| Migration | What | Gate |
+**Nothing is proposed.** The last two shipped with the food-app redesign
+(`branding/09-uiux/04-simplify-plan.md`), and the app that needs them is live
+(`6e64741`):
+
+| Migration | What | Production result, 17 Oct |
 |---|---|---|
-| `0063_dish_photos.sql` | `recipes.photo_path` (nullable; must sit in the dish's own business folder), public storage bucket `dish` (JPEG/WebP, 512 KB), four `mm_dish_*` storage policies: owner, manager and kitchen of an entitled account may add or change a dish's photo, members may list. 118 policies and 98 `fn_*` in `public` unchanged | `deploy/runbook/DEPLOY_0063.md` |
-| `0064_sales_reads_prices.sql` (after 0063) | `fn_menu_prices()`: current selling prices for owner, manager, sales and accountant, never kitchen, never anything cost-like; `recipe_prices` stays cost-gated. 118 policies, `fn_*` 98 → 99 | `deploy/runbook/DEPLOY_0064.md` |
+| `0063_dish_photos.sql` | `recipes.photo_path` (nullable; must sit in the dish's own business folder), public storage bucket `dish` (JPEG/WebP, 512 KB), four `mm_dish_*` storage policies: owner, manager and kitchen of an entitled account may add or change a dish's photo, members may list | PRE 9/9, `0063 OK`. Its POST re-run after 0064 passes 6/7: row 6 expects 98 `fn_*` and reads 99, which 0064 adds by design |
+| `0064_sales_reads_prices.sql` | `fn_menu_prices()`: current selling prices for owner, manager, sales and accountant, never kitchen, never anything cost-like; `recipe_prices` stays cost-gated | POST 7/7. The API answers a logged-out call with 42501 (permission denied), so the function is exposed and gated |
 
-*(Added 17 October 2026.)* Both have rollbacks, acceptance suites
-(`tests/049`, `tests/050`; 48 suites, 1,013 checks pass on a repository-built
-0064 database) and were applied cleanly to a copy of real 0062 data. They
-belong to the food-app redesign (`branding/09-uiux/04-simplify-plan.md`).
-**Order matters:** apply 0063, then 0064, then deploy the app; Home, Dishes
-and New sale select `recipes.photo_path`.
+After both: 118 policies in `public`, 99 `fn_*`, both paying subscriptions
+untouched. Runbooks: `deploy/runbook/DEPLOY_0063.md`, `DEPLOY_0064.md`.
+Rollbacks: `migrations/rollbacks/0064_rollback.sql`, then `0063_rollback.sql`,
+after redeploying the previous app.
 
 ## What is not done
 

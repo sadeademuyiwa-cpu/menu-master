@@ -32,7 +32,9 @@ pages that moved out of it.
 
 ## Before the first session (once)
 
-1. **Ship the build.** Production is at 0062. Apply 0063 (dish photos), then
+1. **Ship the build.** *Done 17 October 2026: 0063 and 0064 are applied and
+   the app is live. Only the phone check at the end of this step is left.*
+   Production was at 0062. Apply 0063 (dish photos), then
    0064 (staff see selling prices), then deploy the app: in that order,
    because the app reads the photo column that 0063 adds. Follow
    `deploy/runbook/DEPLOY_0063.md`, then `deploy/runbook/DEPLOY_0064.md`

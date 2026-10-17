@@ -31,6 +31,7 @@ with checks(n, check_name, ok, detail) as (
             and coalesce(qual, '') || coalesce(with_check, '') like '%fn_account_is_entitled%') = 3, ''
   union all select 5, 'the website bucket''s four mm_site_* policies are unchanged',
          (select count(*) from pg_policies where schemaname='storage' and policyname like 'mm\_site\_%') = 4, ''
+  -- Row 6 holds only between 0063 and 0064: 0064 adds fn_menu_prices (99 fn_*).
   union all select 6, '118 policies in public and 98 fn_* functions, unchanged',
          (select count(*) from pg_policies where schemaname='public') = 118
          and (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%') = 98,

@@ -8,12 +8,12 @@ companies.
 - [x] Landing logo: `BrandLockup` (mark + wordmark as real text) is the default header, so Admin → Website `logoUrl` can stay empty; set it only for a custom image. Static files for other services: `web/public/brand/` (lockups, app icons, mark), served at `menumasterng.com/brand/…`
 - [x] Icons: `web/src/app/icon.svg` (tile), `favicon.ico` (48/32/16), `apple-icon.png` (180, opaque square so iOS does not paint black corners), `manifest.ts` (Android install, 192/512 + maskable, theme colour matching the page canvas), theme-color meta; `/manifest.webmanifest` added to the public paths
 - [x] Fonts: Plus Jakarta Sans + Inter self-hosted with `next/font/local` from `web/src/app/fonts/` (Latin, Pan-Nigerian letters and ₦; 95 KB + 30 KB; OFL files beside them), not Google-hosted, so builds and phones never reach a third host. `h1`/`h2` use the display face from Tailwind's base layer, so utilities on a heading still win; eleven weight-500 headings raised to semibold
-- [ ] After the first Vercel preview, view the page source and confirm a `<link rel="preload" as="font">` for each woff2. Local Windows builds omit it because of a path check in Next 15.5's font manifest plugin (it looks for `/next-font-loader/` with forward slashes); Linux builds should not be affected
+- [x] After the first Vercel preview, view the page source and confirm a `<link rel="preload" as="font">` for each woff2. Confirmed on the production deployment of 17 October 2026: both woff2 files are preloaded. Local Windows builds omit it because of a path check in Next 15.5's font manifest plugin (it looks for `/next-font-loader/` with forward slashes); Linux builds should not be affected
 - [x] Tokens `--mm-forest`, `--mm-gold`, `--mm-gold-text`, `--mm-gold-soft` added to `globals.css` (light and dark); `--mm-accent-strong` is now Forest Green; the plan chooser's "Founding price" label is the first gold use
 - [x] Open Graph / Twitter image: `web/src/app/opengraph-image.jpg` and `twitter-image.jpg` (1200 × 630, 87 KB) with alt text; the landing page's `generateMetadata` carries the parent's images into its own `openGraph` block, which would otherwise drop them, so the preview keeps its content-hashed URL
 - [x] Credit for the link-preview photo (Pexels 17952748, Studio Saiz), re-checked 17 October 2026: `06-imagery/credits.md`
 
-## Product (web/): the food look, built 17 October 2026, uncommitted on launch/2026-10-02
+## Product (web/): the food look, built and released 17 October 2026 (4f05659, 075880a, 6e64741 on launch/2026-10-02)
 
 Phases 1 and 2 of `09-uiux/04-simplify-plan.md`, as adjusted in its section
 1, with the owner's four decisions: sales staff see selling prices but never
@@ -51,13 +51,15 @@ release below runs.
 - [x] Sales staff see each dish's selling price on New sale (`fn_menu_prices`, migration 0064), never a cost, "you keep", margin or "Use ₦…"; kitchen sees no price, as before
 
 **Still to do before the release**
-- [ ] Update the e2e journeys for the new words and money format (about 69 exact `.00` checks, the "Recipes" tab label in `nav-responsive.mjs` and `shoot.mjs`), and add the `people.mjs` check that a sales member's Home and New sale show no "you keep" and no "Use ₦"
-- [ ] Run the journeys and the four-width layout audit on the finished build
-- [ ] Commit the build, apart from the untracked root files (`.htaccess`, `MenumasterNG.html`) unless they are meant to be added
+- [x] Update the e2e journeys for the new words and money format (about 69 exact `.00` checks, the "Recipes" tab label in `nav-responsive.mjs` and `shoot.mjs`), and add the `people.mjs` check that a sales member's Home and New sale show no "you keep" and no "Use ₦"
+- [x] Run the journeys and the four-width layout audit on the finished build
+- [x] Commit the build, apart from the untracked root files (`.htaccess`, `MenumasterNG.html`) unless they are meant to be added
 
 ## Release: 0063, then 0064, then the app
 
-Production is at 0062. The order matters: an app that reads
+**Released 17 October 2026.** 0063 and 0064 are applied on production (POST_VERIFY_0064 7/7; POST_VERIFY_0063 re-run afterwards shows its function count at 99, which 0064 adds by design) and the app is live. Only step 5's checks on a phone are left.
+
+Production was at 0062. The order matters: an app that reads
 `recipes.photo_path` fails to load Home, Dishes and New sale on a database
 without 0063. Each step is in its runbook; do not skip the PRE and POST
 checks.

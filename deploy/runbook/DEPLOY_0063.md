@@ -4,6 +4,11 @@
 
 Expected starting state: **0062 applied**, 118 policies in `public`, 98 `fn_*`
 functions, the four `mm_site_*` storage policies from 0059.
+
+*Applied on production 17 October 2026, followed by 0064. Re-running
+`POST_VERIFY_0063.sql` once 0064 is in fails row 6 alone, reading 99 `fn_*`:
+0064 adds `fn_menu_prices`. That is expected; `POST_VERIFY_0064.sql` checks
+the 99.*
 Phase 2 of `branding/09-uiux/04-simplify-plan.md`; the owner's decision 2
 (16 Oct 2026): dish photos are **public by link, with unguessable names**.
 
