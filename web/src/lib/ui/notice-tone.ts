@@ -6,7 +6,7 @@
  * own regex for this; the union of them lives here so a refusal is coloured
  * the same wherever it appears. Kept free of React so it can be tested.
  */
-const REFUSAL = /could not|couldn’t|cannot|can’t|must be|do not|does not|not allow|already|give |needs|how many|not know|expired|more than zero|greater than zero|refused/i
+const REFUSAL = /could not|couldn’t|cannot|can’t|must be|do not|does not|not allow|already|give |needs|how many|not know|expired|more than zero|greater than zero|refused|nothing was changed/i
 
 export type NoticeTone = 'warn' | 'info'
 

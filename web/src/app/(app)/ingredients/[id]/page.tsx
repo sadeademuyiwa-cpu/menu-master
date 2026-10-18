@@ -2,7 +2,9 @@ import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import Link from 'next/link'
 import { requiredAmount } from '@/lib/money-input'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import {
+  currentContext, contextRedirect, describeWriteError, withNotice, closedRefusal, refusalNotice, writeNotice,
+} from '@/lib/data/context'
 import {
   PageHeader, Field, Submit, InlineSubmit, inputClass, inputStyle,
   Notice, SectionHeading, BackLink, Empty, Disclosure,
@@ -12,7 +14,7 @@ import { ConfirmSubmit } from '@/components/confirm-submit'
 import { money, percent, quantity, NOT_ENTERED } from '@/lib/format'
 import { localToday, formatDay } from '@/lib/dates'
 import { canSeeCosts } from '@/lib/pricing'
-import { NOT_CHANGED, canAddMeasures, canEditItems, canRecordPurchases, canRemoveMeasures } from '../../purchases/buy-roles'
+import { canAddMeasures, canEditItems, canRecordPurchases, canRemoveMeasures } from '../../purchases/buy-roles'
 import { dayShort, inSentence, perBuyingUnit, priceTrend, sinceWords, trendWords } from '../../purchases/buy-figures'
 import { writeMeasure } from '../measure'
 import { Info } from '../info'
@@ -95,6 +97,9 @@ async function addPrice(formData: FormData) {
   // role enforcement, draft-only posting (so a double submit cannot post
   // twice), zero-value refusal, and conversion blockers.
   const date = effective || localToday()
+  // Recording a purchase is closed after a trial (D3); say why, plainly.
+  const closed = await closedRefusal(ctx.role)
+  if (closed) redirect(withNotice(here, closed))
 
   const { data: purchase, error: pErr } = await supabase.from('purchases')
     .insert({ account_id: accountId, business_id: businessId, purchase_date: date })
@@ -166,12 +171,11 @@ async function updateConversion(formData: FormData) {
   if (!Number.isFinite(qtyInBase) || qtyInBase <= 0) {
     redirect(withNotice(here, 'Enter how much one of these holds. It must be greater than zero.'))
   }
-  // .select: a refused update is not an error, only zero rows (NOT_CHANGED).
+  // .select: a refused update is not an error, only zero rows (writeNotice).
   const { data, error } = await supabase.from('ingredient_unit_conversions')
     .update({ qty_in_base: qtyInBase }).eq('id', String(formData.get('conversion_id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error)
-    ?? (data?.length ? 'Measure updated. Dishes using it have been re-costed.' : NOT_CHANGED)))
+  redirect(withNotice(here, await writeNotice(error, data, 'Measure updated. Dishes using it have been re-costed.', ctx.role)))
 }
 
 async function removeConversion(formData: FormData) {
@@ -183,8 +187,8 @@ async function removeConversion(formData: FormData) {
   const { data, error } = await supabase.from('ingredient_unit_conversions')
     .delete().eq('id', String(formData.get('conversion_id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error)
-    ?? (data?.length ? 'Measure removed. Anything recorded in it is costed again once you add a new one.' : NOT_CHANGED)))
+  redirect(withNotice(here, await writeNotice(error, data,
+    'Measure removed. Anything recorded in it is costed again once you add a new one.', ctx.role)))
 }
 
 /**
@@ -216,13 +220,11 @@ async function updateIngredient(formData: FormData) {
   const { data, error } = await supabase.from('ingredients').update(patch).eq('id', id).select('id')
   revalidatePath(here)
   revalidatePath('/ingredients')
-  redirect(withNotice(here, error
-    ? (error.code === '23505'
-        ? `You already have an item called “${name}”.`
-        : error.code === '23514' && /measure/i.test(error.message)
-          ? 'Its measure cannot change: purchases or dishes are already recorded in it.'
-          : describeWriteError(error))
-    : data?.length ? 'Item updated.' : NOT_CHANGED))
+  redirect(withNotice(here, error?.code === '23505'
+    ? `You already have an item called “${name}”.`
+    : error?.code === '23514' && /measure/i.test(error.message)
+      ? 'Its measure cannot change: purchases or dishes are already recorded in it.'
+      : await writeNotice(error, data, 'Item updated.', ctx.role)))
 }
 
 /** Put away, never deleted: purchases and recipe lines keep pointing at it. */
@@ -236,7 +238,7 @@ async function archiveIngredient(formData: FormData) {
     .select('name').maybeSingle<{ name: string }>()
   if (error) redirect(withNotice(`/ingredients/${id}`, describeWriteError(error)))
   // No row back: refused quietly, so it is not put away. Say so on its page.
-  if (!data) redirect(withNotice(`/ingredients/${id}`, NOT_CHANGED))
+  if (!data) redirect(withNotice(`/ingredients/${id}`, await refusalNotice(ctx.role)))
   revalidatePath('/ingredients')
   redirect(withNotice('/ingredients', `${data.name} has been put away. Find it under “Put away” to bring it back.`))
 }

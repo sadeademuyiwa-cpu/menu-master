@@ -1,11 +1,20 @@
 import 'server-only'
+import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import { resolveContext, type ResolvedContext } from './resolve-context'
+import {
+  knownVerdict, pausedLine, refusalAfterWrite, refusalText,
+  type AccessVerdict, type PgError,
+} from './write-notice'
 
 export {
   contextRedirect, withNotice,
   type ContextStatus, type ResolvedContext,
 } from './resolve-context'
+export {
+  describeWriteError, NOT_CHANGED, changedRows, wrote,
+  type AccessVerdict, type PgError,
+} from './write-notice'
 
 /**
  * The caller's account and default business.
@@ -84,16 +93,20 @@ export type EntitlementStatus = {
  * fn_my_entitlement_status() derives from fn_account_is_entitled, so this is
  * the same rule the 69 write policies enforce -- not a second reading of
  * subscription dates that could drift from it. If the function is not present
- * (0032 not yet applied) this returns null and callers fall back to saying
- * nothing, which is honest.
+ * (0032 not yet applied), the lookup fails or the answer is not a verdict at
+ * all, this returns null and callers fall back to saying nothing, which is
+ * honest.
+ *
+ * cache(): the bar, the page and a refusal notice in one request share one
+ * database call. Outside a render (a server action) it simply calls through.
  */
-export async function entitlementStatus(): Promise<EntitlementStatus | null> {
+export const entitlementStatus = cache(async (): Promise<EntitlementStatus | null> => {
   const supabase = await createClient()
   const { data, error } = await supabase.rpc('fn_my_entitlement_status')
   if (error || !data || (Array.isArray(data) && data.length === 0)) return null
-  const row = Array.isArray(data) ? data[0] : data
-  return row as EntitlementStatus
-}
+  const row = knownVerdict(Array.isArray(data) ? data[0] : data)
+  return row ? { ...row, status: row.status ?? '' } : null
+})
 
 /**
  * Whether this account has paid for Sales.
@@ -109,47 +122,85 @@ export async function entitlementStatus(): Promise<EntitlementStatus | null> {
  * a paying customer they cannot sell would be worse than showing a button the
  * database will refuse.
  */
-export async function hasSalesEntitlement(): Promise<boolean | null> {
+export const hasSalesEntitlement = cache(async (): Promise<boolean | null> => {
   const supabase = await createClient()
   const { data, error } = await supabase.rpc('fn_my_has_sales')
   if (error || data === null || data === undefined) return null
   return data === true
-}
-
-type PgError = { code?: string; message?: string; details?: string | null } | null
+})
 
 /**
- * Turn a database refusal into something a food-business owner can act on.
- *
- * A raw RLS denial reads as "new row violates row-level security policy" and
- * tells the customer nothing. The database is still the authority -- this only
- * translates its verdict. It never decides whether a write is allowed, and it
- * never invents a reason the database did not give.
+ * Whether this account may record new work: the database's verdict, or null
+ * when it is not known. Only an explicit false hides a control or refuses an
+ * action -- null keeps today's behaviour, exactly as hasSalesEntitlement's
+ * null does. A courtesy: the database (0066's fn_require_entitled and the
+ * write policies) is the boundary either way.
  */
-export function describeWriteError(error: PgError): string | null {
-  if (!error) return null
+export async function recordingOpen(): Promise<boolean | null> {
+  const s = await entitlementStatus()
+  return s ? s.entitled : null
+}
 
-  const code = error.code ?? ''
-  const message = error.message ?? ''
+type RefusalScope = {
+  /** The write was a Sales record (orders, order_lines, customers): a plan
+   *  without Sales is then also a reason. */
+  sales?: boolean
+}
 
-  // Row-level security refused. During a live trial this is a role problem;
-  // after the trial boundary it is the entitlement gate. Both are "you cannot
-  // record new work right now", and neither should surface as SQL.
-  if (code === '42501' || /row-level security/i.test(message)) {
-    return 'Menu Master could not save that. Your subscription or your role on ' +
-      'this account does not allow recording new work at the moment. Everything ' +
-      'you have already entered is still here and still readable.'
-  }
+/** Whether a plan without Sales is the reason, asked only when it could be. */
+async function salesMissing(verdict: AccessVerdict | null, scope: RefusalScope): Promise<boolean> {
+  if (!scope.sales || verdict?.entitled === false) return false
+  return (await hasSalesEntitlement()) === false
+}
 
-  if (code === '23505') return 'That already exists. Give it a different name.'
-  if (code === '23503') return 'That refers to something which no longer exists. Reload and try again.'
-  if (code === '23514' || code === '23502') {
-    return 'Some of those values are not valid. Quantities and amounts must be ' +
-      'greater than zero, and every field marked required must be filled in.'
-  }
+/**
+ * What an edit or remove that changed nothing says: "Nothing was changed."
+ * plus the real reason, for this person's role (lib/data/write-notice.ts).
+ */
+export async function refusalNotice(role?: string | null, scope: RefusalScope = {}): Promise<string> {
+  const verdict = await entitlementStatus()
+  return refusalText(verdict, role, { noSales: await salesMissing(verdict, scope) })
+}
 
-  // A raise exception from one of our own guards already reads as English.
-  if (message) return message
+/**
+ * After an update or delete that asked for its rows back (.select('id')):
+ * null when it changed something, otherwise the notice to show -- the
+ * database's own error, or refusalNotice(). Use it to decide whether to
+ * re-cost: nothing changed means nothing to re-cost.
+ */
+export async function writeRefusal(
+  error: PgError, data: unknown, role?: string | null, scope: RefusalScope = {},
+): Promise<string | null> {
+  return refusalAfterWrite(error, data, () => refusalNotice(role, scope))
+}
 
-  return 'Menu Master could not save that. Nothing was changed.'
+/** writeRefusal, or `saved` when the write really changed something. */
+export async function writeNotice(
+  error: PgError, data: unknown, saved: string, role?: string | null, scope: RefusalScope = {},
+): Promise<string> {
+  return (await writeRefusal(error, data, role, scope)) ?? saved
+}
+
+/**
+ * Before an action the trial gate would refuse (record, cancel or correct a
+ * purchase; confirm, cancel or re-issue a sale): the refusal when recording
+ * is explicitly closed -- or, with `sales`, when the plan explicitly has no
+ * Sales -- and null to go ahead. Unknown goes ahead, as today.
+ *
+ * Never used for recording a payment on a confirmed sale: that stays open
+ * whatever the plan or the trial (fn_record_order_payment, 0066).
+ */
+export async function closedRefusal(role?: string | null, scope: RefusalScope = {}): Promise<string | null> {
+  const verdict = await entitlementStatus()
+  if (verdict?.entitled === false) return refusalText(verdict, role)
+  if (await salesMissing(verdict, scope)) return refusalText(verdict, role, { noSales: true })
+  return null
+}
+
+/**
+ * The one line a page shows where Record, Cancel or Correct used to be, when
+ * recording is closed; null otherwise (including when it is not known).
+ */
+export async function closedLine(role: string | null | undefined, what: string): Promise<string | null> {
+  return pausedLine(await entitlementStatus(), role, what)
 }

@@ -18,3 +18,16 @@ test('roles follow the 0015 write matrix', () => {
   assert.equal(r.quickActions('owner', true).length, 4)
   assert.deepEqual(r.quickActions(undefined, true), [])
 })
+
+test('money received on a confirmed sale: the sale roles, whatever the plan or the trial', () => {
+  // D2 / fn_record_order_payment (0066): canRecordPayments takes no plan and
+  // no trial state at all, so a Costing plan or an ended trial cannot hide
+  // the payment form from the people who take the money.
+  for (const role of ['owner', 'manager', 'sales']) assert.equal(r.canRecordPayments(role), true, role)
+  for (const role of ['kitchen', 'accountant', '', null, undefined]) {
+    assert.equal(r.canRecordPayments(role), false, String(role))
+  }
+  assert.equal(r.canRecordPayments.length, 1)
+  // ...while recording a new sale still follows the plan.
+  assert.equal(r.canRecordSales('sales', false), false)
+})

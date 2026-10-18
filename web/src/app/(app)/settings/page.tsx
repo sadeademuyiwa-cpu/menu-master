@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import {
+  currentContext, contextRedirect, describeWriteError, withNotice, writeNotice, writeRefusal,
+} from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading, Disclosure, BackLink,
 } from '@/components/ui'
@@ -21,6 +23,11 @@ export const dynamic = 'force-dynamic'
  *
  * Before 0060 the function does not exist (42883): the change is still saved,
  * and the owner is told to open a dish to refresh it.
+ *
+ * Called ONLY after an update that really changed a row (writeRefusal said
+ * null). A refused update changes nothing -- after a trial ends, RLS refuses
+ * every one quietly -- and re-costing then wrote new snapshots on a closed
+ * account while the notice claimed the edit was saved.
  */
 async function recomputeAll(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -131,12 +138,13 @@ async function saveOverheadSettings(formData: FormData) {
   if ((qty === null) !== (unitRaw === '')) {
     redirect(withNotice('/settings', 'Give both how much you produce and its unit, or neither.'))
   }
-  const { error } = await supabase.from('business_settings').update({
+  const { data, error } = await supabase.from('business_settings').update({
     overhead_enabled: formData.get('overhead_enabled') === 'on',
     overhead_basis_qty: qty,
     overhead_basis_unit_id: unitRaw || null,
-  }).eq('business_id', businessId)
-  if (error) redirect(withNotice('/settings', describeWriteError(error)))
+  }).eq('business_id', businessId).select('business_id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice('/settings', refused))
   const note = await recomputeAll(supabase, businessId)
   revalidatePath('/settings')
   redirect(withNotice('/settings', `Saved.${note}`))
@@ -146,20 +154,20 @@ async function deactivateRate(formData: FormData) {
   'use server'
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('labour_rates')
-    .update({ is_active: false }).eq('id', String(formData.get('id') ?? ''))
+  const { data, error } = await supabase.from('labour_rates')
+    .update({ is_active: false }).eq('id', String(formData.get('id') ?? '')).select('id')
   revalidatePath('/settings')
-  redirect(withNotice('/settings', describeWriteError(error) ?? 'Hidden. Dishes that use it keep it.'))
+  redirect(withNotice('/settings', await writeNotice(error, data, 'Hidden. Dishes that use it keep it.', ctx.role)))
 }
 
 async function restoreRate(formData: FormData) {
   'use server'
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('labour_rates')
-    .update({ is_active: true }).eq('id', String(formData.get('id') ?? ''))
+  const { data, error } = await supabase.from('labour_rates')
+    .update({ is_active: true }).eq('id', String(formData.get('id') ?? '')).select('id')
   revalidatePath('/settings')
-  redirect(withNotice('/settings', describeWriteError(error) ?? 'Shown again.'))
+  redirect(withNotice('/settings', await writeNotice(error, data, 'Shown again.', ctx.role)))
 }
 
 /** A changed wage reaches every dish that uses it, at once. */
@@ -175,9 +183,10 @@ async function updateRate(formData: FormData) {
   if (rate !== null && (!Number.isFinite(rate) || rate < 0)) {
     redirect(withNotice('/settings', 'An hourly rate cannot be negative.'))
   }
-  const { error } = await supabase.from('labour_rates')
-    .update({ name, rate_per_hour: rate }).eq('id', String(formData.get('id') ?? ''))
-  if (error) redirect(withNotice('/settings', describeWriteError(error)))
+  const { data, error } = await supabase.from('labour_rates')
+    .update({ name, rate_per_hour: rate }).eq('id', String(formData.get('id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice('/settings', refused))
   const note = await recomputeAll(supabase, businessId)
   revalidatePath('/settings')
   redirect(withNotice('/settings', `Kind of work updated.${note}`))
@@ -187,9 +196,10 @@ async function deactivateOverhead(formData: FormData) {
   'use server'
   const ctx = await currentContext()
   const { supabase, businessId } = ctx
-  const { error } = await supabase.from('overhead_items')
-    .update({ is_active: false }).eq('id', String(formData.get('id') ?? ''))
-  if (error) redirect(withNotice('/settings', describeWriteError(error)))
+  const { data, error } = await supabase.from('overhead_items')
+    .update({ is_active: false }).eq('id', String(formData.get('id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice('/settings', refused))
   const note = businessId ? await recomputeAll(supabase, businessId) : ''
   revalidatePath('/settings')
   redirect(withNotice('/settings', `Hidden.${note}`))
@@ -199,9 +209,10 @@ async function restoreOverhead(formData: FormData) {
   'use server'
   const ctx = await currentContext()
   const { supabase, businessId } = ctx
-  const { error } = await supabase.from('overhead_items')
-    .update({ is_active: true }).eq('id', String(formData.get('id') ?? ''))
-  if (error) redirect(withNotice('/settings', describeWriteError(error)))
+  const { data, error } = await supabase.from('overhead_items')
+    .update({ is_active: true }).eq('id', String(formData.get('id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice('/settings', refused))
   const note = businessId ? await recomputeAll(supabase, businessId) : ''
   revalidatePath('/settings')
   redirect(withNotice('/settings', `Shown again.${note}`))
@@ -228,10 +239,11 @@ async function updateOverhead(formData: FormData) {
   if ((bQty === null) !== (uRaw === '')) {
     redirect(withNotice('/settings', 'Give both an amount and its unit, or leave both blank.'))
   }
-  const { error } = await supabase.from('overhead_items').update({
+  const { data, error } = await supabase.from('overhead_items').update({
     name, monthly_cost: cost, basis_qty: bQty, basis_unit_id: uRaw || null,
-  }).eq('id', String(formData.get('id') ?? ''))
-  if (error) redirect(withNotice('/settings', describeWriteError(error)))
+  }).eq('id', String(formData.get('id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice('/settings', refused))
   const note = await recomputeAll(supabase, businessId)
   revalidatePath('/settings')
   redirect(withNotice('/settings', `Running cost updated.${note}`))
@@ -259,13 +271,14 @@ async function savePricing(formData: FormData) {
   if (!Number.isInteger(window) || window < 1 || window > 365) {
     redirect(withNotice('/settings', 'The price window is a number of days, from 1 to 365.'))
   }
-  const { error } = await supabase.from('business_settings').update({
+  const { data, error } = await supabase.from('business_settings').update({
     default_target_margin: margin,
     price_rounding_to: rounding,
     wavg_window_days: window,
     show_markup_alongside: formData.get('show_markup_alongside') === 'on',
-  }).eq('business_id', businessId)
-  if (error) redirect(withNotice('/settings', describeWriteError(error)))
+  }).eq('business_id', businessId).select('business_id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice('/settings', refused))
   const note = await recomputeAll(supabase, businessId)
   revalidatePath('/settings')
   redirect(withNotice('/settings', `Pricing saved.${note}`))
@@ -281,10 +294,10 @@ async function saveBusiness(formData: FormData) {
   if (!name) redirect(withNotice('/settings', 'Your business needs a name.'))
   const type = formData.get('type')
   if (!isBusinessType(type)) redirect(withNotice('/settings', 'Choose what kind of business this is.'))
-  const { error } = await supabase.from('businesses').update({ name, type }).eq('id', businessId)
+  const { data, error } = await supabase.from('businesses').update({ name, type }).eq('id', businessId).select('id')
   revalidatePath('/settings')
   revalidatePath('/', 'layout')
-  redirect(withNotice('/settings', describeWriteError(error) ?? 'Business details saved.'))
+  redirect(withNotice('/settings', await writeNotice(error, data, 'Business details saved.', ctx.role)))
 }
 
 export default async function SettingsPage({

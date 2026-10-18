@@ -12,7 +12,7 @@ import {
   dishInitials, dishTileTone, DISH_TILE_TONES,
   PHOTO_PREFERENCE_KEY, PHOTO_PREFERENCE_SCRIPT,
   DISH_BUCKET, DISH_PHOTO_MAX_BYTES, DISH_PHOTO_TYPES,
-  dishPhotoDimensions, canAddDishPhotos, DISH_PHOTO_ROLES,
+  dishPhotoDimensions, canAddDishPhotos, DISH_PHOTO_ROLES, photoRefusal,
 } from '../src/lib/dish-photo.ts'
 
 const BIZ = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
@@ -105,6 +105,34 @@ test('owner, manager and kitchen may add photos, as 0063 lets them', () => {
   for (const role of ['owner', 'manager', 'kitchen']) assert.equal(canAddDishPhotos(role), true, role)
   for (const role of ['sales', 'accountant', '', null, undefined]) {
     assert.equal(canAddDishPhotos(role), false, String(role))
+  }
+})
+
+test('a refused photo names the real reason, and never tells the owner to ask the owner', () => {
+  const ended = { entitled: false, reason: 'trial_ended' }
+  assert.equal(photoRefusal('owner', ended),
+    'Your free trial has ended, so photos can’t be added. Choose a plan on Plans & billing to add them again.')
+  for (const role of ['manager', 'kitchen']) {
+    assert.equal(photoRefusal(role, ended),
+      'Your free trial has ended, so photos can’t be added. Ask the owner to choose a plan.', role)
+  }
+  assert.match(photoRefusal('owner', { entitled: false, reason: 'payment_failed' }), /last payment.*Update your card/)
+  assert.match(photoRefusal('kitchen', { entitled: false, reason: 'payment_failed' }), /Ask the owner to update the card/)
+  assert.match(photoRefusal('owner', { entitled: false, reason: 'subscription_ended' }), /^Your subscription has ended/)
+  // The wrong role is the reason whatever the plan says.
+  for (const role of ['sales', 'accountant', undefined]) {
+    assert.equal(photoRefusal(role, ended), 'Your role does not allow adding photos. Ask the owner.', String(role))
+  }
+  // Live or not known: no reason is claimed, and the owner is not sent to herself.
+  for (const access of [{ entitled: true, reason: 'trial_active' }, null, undefined]) {
+    const owner = photoRefusal('owner', access)
+    assert.doesNotMatch(owner, /ask the owner|trial|plan/i, JSON.stringify(access))
+    assert.match(photoRefusal('kitchen', access), /ask the owner/i)
+  }
+  for (const role of ['owner', 'manager', 'kitchen', 'sales']) {
+    for (const access of [ended, { entitled: true, reason: 'active' }, null]) {
+      if (role === 'owner') assert.doesNotMatch(photoRefusal(role, access), /ask the owner/i)
+    }
   }
 })
 

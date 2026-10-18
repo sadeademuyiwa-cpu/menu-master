@@ -1,13 +1,13 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice, refusalNotice } from '@/lib/data/context'
 import { PageHeader, Card, Field, Submit, InlineSubmit, Empty, Notice, Disclosure, SectionHeading, BackLink } from '@/components/ui'
 import { money, priceState } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
 import { parentTab } from '@/lib/nav'
 import { canSeeCosts } from '@/lib/pricing'
-import { NOT_CHANGED, canEditItems } from '../purchases/buy-roles'
+import { canEditItems } from '../purchases/buy-roles'
 import { inSentence, perBuyingUnit } from '../purchases/buy-figures'
 import '../purchases/buy.css'
 
@@ -35,7 +35,7 @@ async function restoreIngredient(formData: FormData) {
   }
   // No row back: refused quietly, so it is still put away and its page would
   // not open. Stay on the put-away list and say so.
-  if (!data) redirect(withNotice('/ingredients?show=away', NOT_CHANGED))
+  if (!data) redirect(withNotice('/ingredients?show=away', await refusalNotice(ctx.role)))
   redirect(withNotice(`/ingredients/${id}`, `${data.name} is back.`))
 }
 

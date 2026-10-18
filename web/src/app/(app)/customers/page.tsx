@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice, refusalNotice } from '@/lib/data/context'
 import { PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading, Disclosure, BackLink } from '@/components/ui'
 import { money } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
@@ -31,7 +31,7 @@ async function restoreCustomer(formData: FormData) {
   if (error) redirect(withNotice('/customers?show=away', describeWriteError(error)))
   if ((data ?? []).length === 0) {
     redirect(withNotice('/customers?show=away', (SALE_ROLES as readonly string[]).includes(ctx.role ?? '')
-      ? 'That customer could not be brought back. Reload and try again.'
+      ? await refusalNotice(ctx.role, { sales: true })
       : 'Your role cannot bring a customer back. Ask the owner, a manager or sales staff.'))
   }
   redirect(withNotice(`/customers/${id}`, 'Customer is back.'))

@@ -8,6 +8,9 @@
  *   the trial and its days left are on every page, with a way to the plans
  *   the plans page says where the account stands and what each plan costs
  *   an ended trial says so, and that nothing entered is lost
+ *   after the trial an edit says "Nothing was changed" and why, and costs
+ *     nothing again; a purchase cannot be recorded, cancelled or corrected;
+ *     and a balance owed on a confirmed sale can still be recorded (0066)
  *   sign out is reachable, and so is "Forgot password?"
  *   a reset link signs you in to choose a new password, once
  *   an expired or edited link never leaves the site
@@ -17,7 +20,7 @@
  */
 import { chromium } from 'playwright'
 import pg from 'pg'
-import { onboardBusiness, finishSetup } from './setup-helper.mjs'
+import { onboardBusiness, finishSetup, openDetails } from './setup-helper.mjs'
 
 const BASE = 'http://127.0.0.1:3100'
 const GATEWAY = 'http://127.0.0.1:54321'
@@ -57,6 +60,15 @@ async function waitText(page, needle, ms = 30000) {
   return false
 }
 const path = (page) => new URL(page.url()).pathname
+/** Press a form's button and wait for the page it lands on. */
+async function submit(page, locator) {
+  await Promise.all([page.waitForLoadState('domcontentloaded'), locator.click()])
+  await settle(page)
+  await page.locator('button[aria-busy="true"]').first().waitFor({ state: 'detached', timeout: 20000 }).catch(() => {})
+}
+/** This owner's own rows, read straight from the database. */
+const OWN = `join memberships m on m.account_id = t.account_id
+             join auth.users u on u.id = m.user_id and u.email = $1`
 
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
@@ -91,6 +103,28 @@ try {
   await settle(page)
   await must(page, 'the plans page says where the account stands',
     'Free trial', 'days left', 'Costing', 'Costing + Sales', '/month', 'What happens when my free trial ends?')
+
+  // --- a sale with a balance still owed, while the trial runs ----------------
+  // The same order screen as journey-sales.mjs: two plates at N500, confirmed,
+  // then a N300 deposit recorded on the sale's own page.
+  await go(page, '/sales/new')
+  await page.waitForTimeout(600)
+  await page.click('button[aria-label="Add Setup pepper soup"]')
+  if (!(await page.locator('dialog[open]').count())) {
+    await page.click('button[aria-label^="How many Setup pepper soup"]')
+  }
+  await page.fill('dialog[open] input[name=item_qty]', '2')
+  await page.fill('dialog[open] input[name=item_price]', '500')
+  await page.click('dialog[open] button:has-text("Done")')
+  await page.click('button:has-text("Next")')
+  await page.click('button:has-text("Confirm sale")')
+  await page.waitForURL(/\/sales\/[0-9a-f-]{36}/, { timeout: 60000 })
+  await settle(page)
+  const saleId = path(page).split('/').pop()
+  await page.fill('input[name=amount_paid]', '300')
+  await page.locator('select[name=payment_status]').selectOption('part_paid')
+  await submit(page, page.locator('button:has-text("Save payment")'))
+  await must(page, 'during the trial a deposit is recorded and the balance shown', 'Payment updated.', 'still to pay')
 
   // --- More, Account, sign out ----------------------------------------------
   await go(page, '/more')
@@ -167,6 +201,62 @@ try {
   await must(page, 'and says nothing entered is lost, with the way back', 'Your free trial ended', 'Everything you entered is still here to read', 'Choose a plan')
   await go(page, '/subscribe')
   await must(page, 'the plans page says the trial has ended', 'ended')
+
+  // --- after the trial: an edit changes nothing, and says why (APP1) ----------
+  const { rows: [own] } = await db.query(
+    `select (select t.id from recipes t ${OWN} where t.name = 'Setup pepper soup' and t.deleted_at is null limit 1) as recipe_id,
+            (select t.id from purchases t ${OWN} where t.status = 'posted' and t.reverses is null
+              order by t.created_at limit 1) as purchase_id,
+            (select count(*)::int from cost_snapshots t ${OWN}) as snapshots,
+            (select count(*)::int from ingredient_prices t ${OWN}) as prices`, [A.email])
+  mark('(test) the setup dish and purchase were found', !!own?.recipe_id && !!own?.purchase_id, JSON.stringify(own))
+
+  await go(page, '/settings')
+  await page.locator('form:has(select[name=type]) input[name=name]').fill('Renamed after the trial')
+  await submit(page, page.locator('form:has(select[name=type]) button:has-text("Save")'))
+  await must(page, 'after the trial, saving Business details says nothing was changed, and why',
+    'Nothing was changed', 'Your free trial ended on', 'Choose a plan', 'Everything you entered is still here')
+  await mustNot(page, 'and never claims it was saved', 'Business details saved.')
+
+  await go(page, `/recipes/${own.recipe_id}`)
+  await openDetails(page, 'Edit this dish')
+  const editDish = page.locator('details:has(> summary:has-text("Edit this dish"))').first()
+  await editDish.locator('input[name=name]').fill('Setup pepper soup renamed')
+  await submit(page, editDish.locator('button:has-text("Save changes")'))
+  await must(page, 'after the trial, renaming a dish says nothing was changed, and why', 'Nothing was changed', 'Your free trial ended on')
+  await mustNot(page, 'and does not claim the dish was updated', 'Dish updated.')
+
+  // --- a recorded purchase can be neither cancelled nor corrected (APP2) ------
+  await go(page, `/purchases/${own.purchase_id}`)
+  await must(page, 'after the trial a recorded purchase says why it cannot be changed',
+    'can’t be cancelled or corrected', 'Choose a plan')
+  await mustNot(page, 'and offers no correction and no cancellation', 'Correct this purchase', 'Cancel it without a replacement')
+  await go(page, `/purchases/${own.purchase_id}/correct`)
+  mark('the correction page sends an ended trial back to the purchase', path(page) === `/purchases/${own.purchase_id}`, page.url())
+  await must(page, 'and says why', 'free trial ended', 'can’t be cancelled or corrected')
+  await go(page, '/purchases/new')
+  mark('a new purchase sends an ended trial back to Purchases', path(page) === '/purchases', page.url())
+  await must(page, 'and says why', 'new purchases can’t be recorded')
+  mark('Purchases has no New purchase button after the trial',
+    (await page.locator('a.mm-btn[href="/purchases/new"]').count()) === 0)
+
+  const { rows: [after] } = await db.query(
+    `select (select count(*)::int from cost_snapshots t ${OWN}) as snapshots,
+            (select count(*)::int from ingredient_prices t ${OWN}) as prices`, [A.email])
+  mark('none of that re-costed a dish or wrote a price', after.snapshots === own.snapshots && after.prices === own.prices,
+    `snapshots ${own.snapshots} -> ${after.snapshots}, prices ${own.prices} -> ${after.prices}`)
+
+  // --- money owed on a confirmed sale can still come in (D2, 0066) ------------
+  await go(page, `/sales/${saleId}`)
+  await must(page, 'after the trial the sale still says what is owed, and that it can be recorded',
+    'still to pay', 'can still be recorded')
+  await mustNot(page, 'but it can no longer be cancelled', 'Something is wrong with this sale')
+  await page.fill('input[name=amount_paid]', '1000')
+  await page.locator('select[name=payment_status]').selectOption('paid')
+  await submit(page, page.locator('button:has-text("Save payment")'))
+  await must(page, 'after the trial the balance is recorded and the sale reads paid', 'Payment updated.', 'Paid in full')
+  const { rows: [paidRow] } = await db.query('select amount_paid::text as paid, payment_status::text as status from orders where id = $1', [saleId])
+  mark('and the database holds the payment', paidRow?.status === 'paid' && Number(paidRow?.paid) === 1000, JSON.stringify(paidRow))
 } catch (e) {
   mark('the journey ran to the end', false, String(e?.stack ?? e))
 } finally {

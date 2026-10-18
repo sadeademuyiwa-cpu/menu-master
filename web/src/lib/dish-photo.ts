@@ -71,6 +71,39 @@ export function canAddDishPhotos(role: string | null | undefined): boolean {
   return (DISH_PHOTO_ROLES as readonly string[]).includes(role ?? '')
 }
 
+/** The account's state, as fn_my_entitlement_status() gives it; null when not known. */
+export type PhotoAccess = { entitled: boolean; reason: string } | null | undefined
+
+/**
+ * What the photo button says when storage refuses the upload (403), worked
+ * out on the server from the person's role and the account's state, and
+ * handed to DishPhotoUpload. It used to tell everyone, the owner included,
+ * "Ask the owner." after a trial ended.
+ *
+ *   wrong role                   the role, and ask the owner
+ *   paused, owner                why, and choose a plan (or update the card)
+ *   paused, manager or kitchen   why, and ask the owner to
+ *   live or not known            no reason is claimed
+ */
+export function photoRefusal(role: string | null | undefined, access: PhotoAccess): string {
+  if (!canAddDishPhotos(role)) return 'Your role does not allow adding photos. Ask the owner.'
+  const owner = role === 'owner'
+  if (access && access.entitled === false) {
+    const card = access.reason === 'payment_failed'
+    const why = access.reason === 'trial_ended' ? 'Your free trial has ended'
+      : card ? 'We could not take your last payment'
+        : access.reason === 'subscription_ended' ? 'Your subscription has ended'
+          : 'This account has no plan at the moment'
+    const fix = owner
+      ? (card ? 'Update your card on Plans & billing to add them again.' : 'Choose a plan on Plans & billing to add them again.')
+      : (card ? 'Ask the owner to update the card on Plans & billing.' : 'Ask the owner to choose a plan.')
+    return `${why}, so photos can’t be added. ${fix}`
+  }
+  return owner
+    ? 'That photo could not be added just now. Reload the page and try again.'
+    : 'That photo could not be added just now. Reload the page and try again, or ask the owner.'
+}
+
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const RANDOM = '[0-9a-f]{32}'
 /** A full photo's name. The thumbnail's "-320" cannot match RANDOM, so a

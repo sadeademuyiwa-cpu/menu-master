@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { currentContext, contextRedirect } from '@/lib/data/context'
+import { currentContext, contextRedirect, closedLine, recordingOpen } from '@/lib/data/context'
 import { PageHeader, Notice, Empty, SectionHeading } from '@/components/ui'
 import { AppIcon } from '@/components/icons'
 import { Sparkline } from '@/components/charts'
@@ -36,7 +36,12 @@ export default async function PurchasesPage({
   // from. The database lets every member read purchase lines, so the gate is
   // here, on the server: for sales and kitchen no amount is selected at all.
   const costs = canSeeCosts(ctx.role)
-  const canRecord = canRecordPurchases(ctx.role)
+  // Only an explicit false closes (a lookup that fails keeps the button).
+  const open = await recordingOpen()
+  const canRecord = canRecordPurchases(ctx.role) && open !== false
+  const paused = canRecordPurchases(ctx.role) && !canRecord
+    ? await closedLine(ctx.role, 'new purchases can’t be recorded')
+    : null
   const today = localToday()
   const weeks = lastWeeks(today, WEEKS)
   const month = monthStart(today)
@@ -105,7 +110,7 @@ export default async function PurchasesPage({
         title="Purchases"
         sub="What you actually paid. Every ingredient cost in Menu Master comes from here."
       />
-      {notice && <Notice tone={/could not|cannot/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={/could not|cannot|can’t|nothing was changed/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
 
       <nav aria-label="Buying" className="grid grid-cols-2 gap-2">
         <Link href="/ingredients" className="mm-buy-tile">
@@ -154,6 +159,7 @@ export default async function PurchasesPage({
           <AppIcon name="plus" size={20} /> New purchase
         </Link>
       )}
+      {paused && !notice && <Notice tone="warn">{paused}</Notice>}
 
       <section className="space-y-3">
         <SectionHeading>Purchase history</SectionHeading>

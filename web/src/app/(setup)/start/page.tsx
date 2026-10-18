@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { requiredAmount } from '@/lib/money-input'
 import {
   currentContext, contextRedirect, describeWriteError, withNotice, hasSalesEntitlement,
+  closedRefusal, refusalNotice, writeRefusal,
 } from '@/lib/data/context'
 import {
   wizardStep, resolveView, neighbours, isRevisit, SETUP_COOKIE, type SetupView,
@@ -19,7 +20,7 @@ import { queueEvent } from '@/lib/analytics/queue'
 import { BUSINESS_TYPES, isBusinessType } from '@/lib/business-types'
 import { money, quantity, marginVerdict } from '@/lib/format'
 import { recipeIdOrNull } from '@/lib/pricing'
-import { canAddDishPhotos, isDishPhotoPath } from '@/lib/dish-photo'
+import { canAddDishPhotos, isDishPhotoPath, photoRefusal } from '@/lib/dish-photo'
 import { Card, Notice, HeroStat, Badge, Disclosure } from '@/components/ui'
 import { Button } from '@/components/button'
 import { AppIcon, type IconName } from '@/components/icons'
@@ -155,6 +156,9 @@ async function postPurchase(
   ctx: Ctx & { accountId: string; businessId: string }, lines: PurchaseLine[], back: string,
 ): Promise<string> {
   const { supabase, accountId, businessId } = ctx
+  // Recording a purchase is closed after a trial (D3); say why first.
+  const closed = await closedRefusal(ctx.role)
+  if (closed) redirect(withNotice(back, closed))
   const { data: purchase, error: pErr } = await supabase.from('purchases')
     .insert({ account_id: accountId, business_id: businessId, purchase_date: localToday() })
     .select('id').single()
@@ -282,7 +286,7 @@ async function createFirstDish(formData: FormData) {
  */
 async function updateFirstDish(formData: FormData) {
   'use server'
-  const { supabase, accountId } = await requireOwner()
+  const { supabase, accountId, role } = await requireOwner()
   const back = at('dish')
   const recipeId = String(formData.get('recipe_id') ?? '')
 
@@ -313,15 +317,20 @@ async function updateFirstDish(formData: FormData) {
     redirect(withNotice(back, 'Keep at least one ingredient in the dish.'))
   }
 
-  const { error: rErr } = await supabase.from('recipes').update({ name, batch_yield_qty: plates }).eq('id', recipeId)
-  if (rErr) redirect(withNotice(back, describeWriteError(rErr) ?? 'We could not save that dish.'))
+  // The dish first: one row that is always there, so when it changes nothing
+  // (refused quietly -- a trial that ended does that), nothing has changed and
+  // the dish is not re-costed. Its lines are written by the same roles.
+  const { data: saved, error: rErr } = await supabase.from('recipes')
+    .update({ name, batch_yield_qty: plates }).eq('id', recipeId).select('id')
+  const refused = await writeRefusal(rErr, saved, role)
+  if (refused) redirect(withNotice(back, refused))
 
   for (const c of changes) {
     let error = null
     if (c.lineId && c.qty === null) {
-      ({ error } = await supabase.from('recipe_lines').delete().eq('id', c.lineId))
+      ({ error } = await supabase.from('recipe_lines').delete().eq('id', c.lineId).select('id'))
     } else if (c.lineId && c.qty !== null) {
-      ({ error } = await supabase.from('recipe_lines').update({ qty: c.qty, unit_id: c.unitId }).eq('id', c.lineId))
+      ({ error } = await supabase.from('recipe_lines').update({ qty: c.qty, unit_id: c.unitId }).eq('id', c.lineId).select('id'))
     } else if (!c.lineId && c.qty !== null) {
       ({ error } = await supabase.from('recipe_lines')
         .insert({ account_id: accountId, recipe_id: recipeId, ingredient_id: c.ingredientId, qty: c.qty, unit_id: c.unitId }))
@@ -359,7 +368,7 @@ async function setFirstPrice(formData: FormData) {
 /** Step 1, revisited: the business's name and what it sells. */
 async function updateBusiness(formData: FormData) {
   'use server'
-  const { supabase, businessId } = await requireOwner()
+  const { supabase, businessId, role } = await requireOwner()
   const back = at('business')
   const name = String(formData.get('name') ?? '').trim()
   const type = String(formData.get('business_type') ?? '')
@@ -367,12 +376,12 @@ async function updateBusiness(formData: FormData) {
   if (name.length > 120) redirect(withNotice(back, 'That name is too long. Keep it under 120 characters.'))
   if (!isBusinessType(type)) redirect(withNotice(back, 'Choose what you sell.'))
 
-  const { error } = await supabase.from('businesses').update({ name, type }).eq('id', businessId)
-  if (error) {
-    redirect(withNotice(back, error.code === '23505'
-      ? 'You already have a business with that name. Try a slightly different name.'
-      : describeWriteError(error) ?? 'We could not save your business details.'))
+  const { data, error } = await supabase.from('businesses').update({ name, type }).eq('id', businessId).select('id')
+  if (error?.code === '23505') {
+    redirect(withNotice(back, 'You already have a business with that name. Try a slightly different name.'))
   }
+  const refused = await writeRefusal(error, data, role)
+  if (refused) redirect(withNotice(back, refused))
   revalidatePath('/', 'layout')
   redirect(withNotice(at('purchase'), 'Business details saved.'))
 }
@@ -406,7 +415,8 @@ async function saveSetupDishPhoto(formData: FormData) {
   revalidatePath(`/recipes/${recipeId}`)
   revalidatePath('/sales/new')
   if (error) redirect(withNotice(back, describeWriteError(error) ?? refused))
-  if (!data?.length) redirect(withNotice(back, refused))
+  // No row back: the role may (checked above), so it is the account's state.
+  if (!data?.length) redirect(withNotice(back, await refusalNotice(ctx.role)))
   redirect(withNotice(back, raw ? 'Photo saved.' : 'Photo removed.'))
 }
 
@@ -963,7 +973,8 @@ async function DoneStep({ supabase, businessId, role }: { supabase: Supabase; bu
                 {!photo && <span className="font-normal" style={{ color: 'var(--mm-muted)' }}>(optional)</span>}
               </p>
               <DishPhotoUpload businessId={businessId} recipeId={dish.recipe_id} photoPath={photo}
-                               action={saveSetupDishPhoto} returnTo={at('done')} />
+                               action={saveSetupDishPhoto} returnTo={at('done')}
+                               refusal={photoRefusal(role, entitlement)} />
             </div>
           )}
         </Card>

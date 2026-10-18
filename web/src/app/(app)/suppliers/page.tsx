@@ -1,9 +1,9 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice, writeNotice } from '@/lib/data/context'
 import { PageHeader, Field, Submit, InlineSubmit, Notice, Empty, Disclosure, BackLink } from '@/components/ui'
 import { parentTab } from '@/lib/nav'
-import { NOT_CHANGED, canEditSuppliers } from '../purchases/buy-roles'
+import { canEditSuppliers } from '../purchases/buy-roles'
 import '../purchases/buy.css'
 
 export const dynamic = 'force-dynamic'
@@ -36,12 +36,11 @@ async function deactivate(formData: FormData) {
   'use server'
   const ctx = await currentContext()
   const { supabase } = ctx
-  // .select: a refused update is not an error, only zero rows (NOT_CHANGED).
+  // .select: a refused update is not an error, only zero rows (writeNotice).
   const { data, error } = await supabase.from('suppliers')
     .update({ is_active: false }).eq('id', String(formData.get('id') ?? '')).select('id')
   revalidatePath('/suppliers')
-  redirect(withNotice('/suppliers', describeWriteError(error)
-    ?? (data?.length ? 'Supplier hidden. Past purchases keep it.' : NOT_CHANGED)))
+  redirect(withNotice('/suppliers', await writeNotice(error, data, 'Supplier hidden. Past purchases keep it.', ctx.role)))
 }
 
 async function restore(formData: FormData) {
@@ -51,7 +50,7 @@ async function restore(formData: FormData) {
   const { data, error } = await supabase.from('suppliers')
     .update({ is_active: true }).eq('id', String(formData.get('id') ?? '')).select('id')
   revalidatePath('/suppliers')
-  redirect(withNotice('/suppliers', describeWriteError(error) ?? (data?.length ? 'Supplier shown again.' : NOT_CHANGED)))
+  redirect(withNotice('/suppliers', await writeNotice(error, data, 'Supplier shown again.', ctx.role)))
 }
 
 async function updateSupplier(formData: FormData) {
@@ -67,7 +66,7 @@ async function updateSupplier(formData: FormData) {
     notes: String(formData.get('notes') ?? '').trim() || null,
   }).eq('id', String(formData.get('id') ?? '')).select('id')
   revalidatePath('/suppliers')
-  redirect(withNotice('/suppliers', describeWriteError(error) ?? (data?.length ? 'Supplier updated.' : NOT_CHANGED)))
+  redirect(withNotice('/suppliers', await writeNotice(error, data, 'Supplier updated.', ctx.role)))
 }
 
 export default async function SuppliersPage({

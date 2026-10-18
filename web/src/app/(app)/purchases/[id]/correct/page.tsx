@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import {
+  currentContext, contextRedirect, describeWriteError, withNotice, closedLine, closedRefusal,
+} from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Notice, SectionHeading, BackLink, inputClass, inputStyle,
 } from '@/components/ui'
@@ -55,6 +57,9 @@ async function correct(formData: FormData) {
   const unitIds = formData.getAll('unit_id').map(String)
   const amounts = formData.getAll('amount').map(String)
   const lines: { ingredient_id: string; qty: number; unit_id: string; amount: number }[] = []
+  // A correction records a purchase and cancels one: closed after a trial (D3).
+  const closed = await closedRefusal(ctx.role)
+  if (closed) redirect(withNotice(`/purchases/${id}`, closed))
   for (let i = 0; i < ingredientIds.length; i++) {
     if (!ingredientIds[i]) continue
     const qty = Number(qtys[i])
@@ -114,6 +119,10 @@ export default async function CorrectPurchase({
   // Correcting is recording a purchase (owner, manager, accountant; 0015), and
   // this form shows every amount paid. Anyone else goes back to the purchase.
   if (!canRecordPurchases(ctx.role)) redirect(`/purchases/${id}`)
+  // After a trial ends a correction cannot be saved, so the form is not
+  // offered: back to the purchase, which says why.
+  const paused = await closedLine(ctx.role, 'this purchase can’t be cancelled or corrected')
+  if (paused) redirect(withNotice(`/purchases/${id}`, paused))
 
   const [{ data: lines }, { data: ingredients }, { data: units }, { data: suppliers }] = await Promise.all([
     supabase.from('purchase_lines')

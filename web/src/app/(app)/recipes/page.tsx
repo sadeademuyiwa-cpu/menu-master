@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice, refusalNotice } from '@/lib/data/context'
 import { PageHeader, Notice, SectionHeading, Empty, Card, InlineSubmit } from '@/components/ui'
 import { AppIcon } from '@/components/icons'
 import { DishTile } from '@/components/dish-tile'
@@ -35,10 +35,12 @@ async function restoreRecipe(formData: FormData) {
   }
   // A refused UPDATE is not an error: RLS (p_recipes_update) just matches no
   // row. Saying "is back" then sent her to a dish that was still put away.
-  // The policy wants a dish role and a live subscription; either can be why.
+  // The policy wants a dish role and a live subscription; the role is named
+  // when it is the role, and otherwise refusalNotice says which it is.
   if (!data) {
-    redirect(withNotice('/recipes?show=away', 'That dish could not be brought back. Only the owner, a manager or the ' +
-      'kitchen can bring a dish back, and only while the subscription is active.'))
+    redirect(withNotice('/recipes?show=away', NEW_DISH_ROLES.includes(ctx.role ?? '')
+      ? await refusalNotice(ctx.role)
+      : 'That dish could not be brought back. Only the owner, a manager or the kitchen can bring a dish back.'))
   }
   redirect(withNotice(`/recipes/${id}`, `${data.name} is back.`))
 }

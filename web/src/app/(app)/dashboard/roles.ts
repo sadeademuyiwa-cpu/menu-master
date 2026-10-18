@@ -31,6 +31,17 @@ export function canRecordSales(role: Role, salesPlan: boolean | null): boolean {
   return has(SALE_ROLES, role) && salesPlan !== false
 }
 
+/**
+ * Record money received on a sale that was already confirmed. Deliberately
+ * NOT tied to the plan or the trial: fn_record_order_payment (0066) lets
+ * owner, manager and sales settle a confirmed, not-cancelled sale whatever
+ * either says, because a balance paid later is for work already done (D2).
+ * Kitchen sees no money and accountant does not take it.
+ */
+export function canRecordPayments(role: Role): boolean {
+  return has(SALE_ROLES, role)
+}
+
 export function canRecordPurchases(role: Role): boolean {
   return has(PURCHASE_ROLES, role)
 }

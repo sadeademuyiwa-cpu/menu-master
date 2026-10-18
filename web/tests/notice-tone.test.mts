@@ -19,6 +19,10 @@ test('the refusals every page used to match on their own are warn', () => {
     'Your session expired — sign in again.',
     'We couldn’t complete that request. Please try again.',
     'How much this is spread across must be more than zero.',
+    // An edit that changed nothing (lib/data/write-notice.ts), in every form it takes.
+    'Nothing was changed. Your free trial ended on 17 October 2026. Choose a plan on Plans & billing to carry on. Everything you entered is still here.',
+    'Nothing was changed. It may have been changed or removed already, or your role on this account does not allow it. Reload the page to see the latest.',
+    'Your free trial ended on 17 October 2026, so this purchase can’t be cancelled or corrected. Choose a plan on Plans & billing to carry on.',
   ]) assert.equal(noticeTone(n), 'warn', n)
 })
 

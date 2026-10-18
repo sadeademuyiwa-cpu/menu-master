@@ -3,7 +3,9 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import {
+  currentContext, contextRedirect, describeWriteError, withNotice, refusalNotice, writeRefusal,
+} from '@/lib/data/context'
 import { priceReturnPath, recipeIdOrNull } from '@/lib/pricing'
 import { DISH_BUCKET, canAddDishPhotos, dishThumbPath, isDishPhotoPath } from '@/lib/dish-photo'
 
@@ -19,6 +21,13 @@ import { DISH_BUCKET, canAddDishPhotos, dishThumbPath, isDishPhotoPath } from '@
 // cycle guard. Every line mutation is followed by an explicit snapshot, and
 // EXACTLY ONE per action -- two snapshots in one transaction share now(), and
 // v_recipe_cost_current's "latest" is then ambiguous (tests/021 check 20).
+//
+// AN EDIT THAT CHANGED NOTHING IS NOT A SAVE. Row-level security refuses an
+// update or delete with no error and zero rows -- after a trial ends it does
+// so to every role. Every edit and remove here asks for its rows back
+// (.select('id')); when none come back it says "Nothing was changed." and why
+// (writeRefusal, lib/data/context.ts), and the dish is NOT re-costed: there is
+// nothing new to cost, and the snapshot would be a write on a closed account.
 // ---------------------------------------------------------------------------
 
 type Client = Awaited<ReturnType<typeof createClient>>
@@ -133,6 +142,14 @@ export async function scaleRecipe(formData: FormData) {
     supabase.from('recipe_labour').select('id,hours').eq('recipe_id', recipeId).returns<{ id: string; hours: string }[]>(),
   ])
   const round = (v: number, places: number) => Number(v.toFixed(places))
+  // The batch first, on its own: one row that is always there, written by
+  // the same roles as its lines and its work (0015). If it changes nothing,
+  // nothing at all has changed and the notice can say so truthfully. A line
+  // that then comes back empty was removed in another tab meanwhile.
+  const { data: batched, error } = await supabase.from('recipes')
+    .update({ batch_yield_qty: target }).eq('id', recipeId).select('id')
+  const refused = await writeRefusal(error, batched, ctx.role)
+  if (refused) redirect(withNotice(here, refused))
   for (const l of lines ?? []) {
     const { error } = await supabase.from('recipe_lines').update({ qty: round(Number(l.qty) * factor, 3) }).eq('id', l.id)
     if (error) redirect(withNotice(here, describeWriteError(error)))
@@ -141,8 +158,6 @@ export async function scaleRecipe(formData: FormData) {
     const { error } = await supabase.from('recipe_labour').update({ hours: round(Number(l.hours) * factor, 2) }).eq('id', l.id)
     if (error) redirect(withNotice(here, describeWriteError(error)))
   }
-  const { error } = await supabase.from('recipes').update({ batch_yield_qty: target }).eq('id', recipeId)
-  if (error) redirect(withNotice(here, describeWriteError(error)))
 
   const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
@@ -164,9 +179,10 @@ export async function updateLine(formData: FormData) {
   const patch: { qty: number; unit_id?: string } = { qty }
   if (unitId) patch.unit_id = unitId
 
-  const { error } = await supabase.from('recipe_lines')
-    .update(patch).eq('id', String(formData.get('line_id') ?? ''))
-  if (error) redirect(withNotice(here, describeWriteError(error)))
+  const { data, error } = await supabase.from('recipe_lines')
+    .update(patch).eq('id', String(formData.get('line_id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice(here, refused))
 
   const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
@@ -179,9 +195,10 @@ export async function removeLine(formData: FormData) {
   const ctx = await currentContext()
   const { supabase } = ctx
 
-  const { error } = await supabase.from('recipe_lines')
-    .delete().eq('id', String(formData.get('line_id') ?? ''))
-  if (error) redirect(withNotice(here, describeWriteError(error)))
+  const { data, error } = await supabase.from('recipe_lines')
+    .delete().eq('id', String(formData.get('line_id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice(here, refused))
 
   const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
@@ -217,19 +234,19 @@ export async function updateRecipe(formData: FormData) {
     redirect(withNotice(here, 'What is left after cooking is a percentage between 1 and 100.'))
   }
 
-  const { error } = await supabase.from('recipes').update({
+  const { data, error } = await supabase.from('recipes').update({
     name,
     category: String(formData.get('category') ?? '').trim() || null,
     batch_yield_qty: batch,
     yield_unit_id: yieldUnit,
     portion_qty: portion,
     cooking_yield_pct: cooking,
-  }).eq('id', recipeId)
-  if (error) {
-    redirect(withNotice(here, error.code === '23505'
-      ? `You already have a dish called “${name}”. Give this one a different name.`
-      : describeWriteError(error)))
+  }).eq('id', recipeId).select('id')
+  if (error?.code === '23505') {
+    redirect(withNotice(here, `You already have a dish called “${name}”. Give this one a different name.`))
   }
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice(here, refused))
 
   const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
@@ -250,9 +267,12 @@ export async function archiveRecipe(formData: FormData) {
   const { data, error } = await supabase.from('recipes')
     .update({ deleted_at: new Date().toISOString() }).eq('id', recipeId)
     .is('deleted_at', null).select('name').maybeSingle<{ name: string }>()
-  if (error) redirect(withNotice(`/recipes/${recipeId}`, describeWriteError(error)))
+  // No row back: refused quietly (or put away already), so it is still on the
+  // list. "Has been put away" would send her looking for it in the wrong place.
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused || !data) redirect(withNotice(`/recipes/${recipeId}`, refused))
   revalidatePath('/recipes')
-  redirect(withNotice('/recipes', `${data?.name ?? 'The dish'} has been put away. Find it under “Put away” to bring it back.`))
+  redirect(withNotice('/recipes', `${data.name} has been put away. Find it under “Put away” to bring it back.`))
 }
 
 /**
@@ -336,11 +356,13 @@ export async function removeVariant(formData: FormData) {
   // Switched off, not deleted. recipe_variants has no DELETE policy (0021),
   // so a delete would match nothing and still say "removed". Past sales and
   // prices in this size keep their reference.
-  const { error } = await supabase.from('recipe_variants')
-    .update({ is_active: false }).eq('id', String(formData.get('id') ?? ''))
-  const failed = error ? null : await recompute(supabase, recipeId)
+  const { data, error } = await supabase.from('recipe_variants')
+    .update({ is_active: false }).eq('id', String(formData.get('id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice(here, refused))
+  const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? failed ?? 'Size removed from this dish.'))
+  redirect(withNotice(here, failed ?? 'Size removed from this dish.'))
 }
 
 /**
@@ -429,11 +451,13 @@ export async function removeLabour(formData: FormData) {
   const here = `/recipes/${recipeId}`
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('recipe_labour')
-    .delete().eq('id', String(formData.get('id') ?? ''))
-  const failed = error ? null : await recompute(supabase, recipeId)
+  const { data, error } = await supabase.from('recipe_labour')
+    .delete().eq('id', String(formData.get('id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice(here, refused))
+  const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? failed ?? 'Work removed.'))
+  redirect(withNotice(here, failed ?? 'Work removed.'))
 }
 
 export async function updateLabour(formData: FormData) {
@@ -445,11 +469,13 @@ export async function updateLabour(formData: FormData) {
   if (!Number.isFinite(hours) || hours <= 0) {
     redirect(withNotice(here, 'How many hours does one batch take? It must be more than zero.'))
   }
-  const { error } = await supabase.from('recipe_labour')
-    .update({ hours }).eq('id', String(formData.get('id') ?? ''))
-  const failed = error ? null : await recompute(supabase, recipeId)
+  const { data, error } = await supabase.from('recipe_labour')
+    .update({ hours }).eq('id', String(formData.get('id') ?? '')).select('id')
+  const refused = await writeRefusal(error, data, ctx.role)
+  if (refused) redirect(withNotice(here, refused))
+  const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? failed ?? 'Hours updated.'))
+  redirect(withNotice(here, failed ?? 'Hours updated.'))
 }
 
 /**
@@ -465,8 +491,9 @@ export async function updateLabour(formData: FormData) {
  * .select() because an update RLS does not allow (sales, accountant) returns
  * no error and no rows; without it the page would say "Photo saved." For
  * owner, manager and kitchen the role is allowed (0063 mirrors
- * p_recipes_update), so no rows means the other gate, the subscription:
- * telling an owner to "ask the owner" would help nobody.
+ * p_recipes_update), so no rows means the other gate, the subscription, and
+ * refusalNotice names it for this role: the owner is told to choose a plan,
+ * never to "ask the owner".
  *
  * The old files are removed after the new name is saved, best effort: a
  * failure there leaves an unused file behind, never a dish without a photo.
@@ -493,7 +520,7 @@ export async function setDishPhoto(formData: FormData) {
     .update({ photo_path: raw || null }).eq('id', recipeId).select('id')
   if (!error && (data ?? []).length === 0) {
     redirect(withNotice(back, canAddDishPhotos(ctx.role)
-      ? (describeWriteError({ code: '42501' }) ?? 'Menu Master could not save that. Nothing was changed.')
+      ? await refusalNotice(ctx.role)
       : 'Your role does not allow changing this dish’s photo. Ask the owner.'))
   }
 
