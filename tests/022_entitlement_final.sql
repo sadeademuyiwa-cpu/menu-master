@@ -230,9 +230,12 @@ from pg_policies
 where schemaname='public' and cmd='SELECT'
   and (coalesce(qual,'')||coalesce(with_check,'')) like '%fn_account_is_entitled%';
 
+-- 0066 gates one more, p_units_write, replaced under the same name: 70 from then on.
 insert into t22
-select 24, '69 write policies carry the entitlement gate (60 + the 9 V-7 ones)',
-       case when count(*)=69 then 'PASS' else 'FAIL' end, count(*)||' policy(ies)'
+select 24, '69 write policies carry the entitlement gate (60 + the 9 V-7 ones; 70 once 0066 gates custom units)',
+       case when count(*) = case when to_regprocedure('public.fn_require_entitled(uuid,boolean)') is null
+                                 then 69 else 70 end
+            then 'PASS' else 'FAIL' end, count(*)||' policy(ies)'
 from pg_policies
 where schemaname='public'
   and (coalesce(qual,'')||coalesce(with_check,'')) like '%fn_account_is_entitled%';
