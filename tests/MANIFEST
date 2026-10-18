@@ -50,3 +50,4 @@
 048_sub_recipe_lines.sql              requires=0062 era=0062
 049_dish_photos.sql                   requires=0063
 050_sales_reads_prices.sql            requires=0064
+053_billing_self_serve.sql            requires=0067

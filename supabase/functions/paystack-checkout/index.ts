@@ -23,16 +23,31 @@
 //   SUPABASE_URL                 provided by the platform
 //   SUPABASE_SERVICE_ROLE_KEY    provided by the platform
 //   SITE_URL                     where Paystack sends the browser back
+//   BILLING_SELF_SERVE           optional; "off" refuses every plan change of
+//                                a live paid plan (switch_needs_support), the
+//                                safe state if 0067 is ever rolled back
+//
+// 0067 (owner decision D5): an account that already pays may change plan by
+// itself. Before any quote or founder hold this refuses already_on_plan (the
+// same tier, active or past_due) and owner_only (the account already pays and
+// the caller is not its owner), and switch_needs_support when no Paystack
+// subscription code is on file to switch off. A plan change carries
+// metadata.replaces, the old subscription's code, so the webhook can switch
+// it off once the new one is on file.
 // ============================================================================
 
 import {
   billableEmail,
+  checkoutRefusal,
   initializeBody,
   missingPlanCode,
   parseTier,
-  pickAccount,
+  pickAccountRole,
+  readSubState,
+  replacesCode,
   resolveCallbackUrl,
   safeError,
+  selfServeOn,
   type Quote,
 } from "./lib.ts";
 
@@ -100,21 +115,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // No limit=1: a user on two accounts must NOT have one of them picked for
   // them and billed. pickAccount refuses instead, the same way the quote
   // refuses when no price exists.
+  const serviceHeaders = {
+    apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!}`,
+  };
   const memRes = await fetch(
     `${Deno.env.get("SUPABASE_URL")}/rest/v1/memberships` +
-      `?user_id=eq.${user.id}&select=account_id`,
-    {
-      headers: {
-        apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-        Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!}`,
-      },
-    },
+      `?user_id=eq.${user.id}&select=account_id,role`,
+    { headers: serviceHeaders },
   );
-  const picked = pickAccount(memRes.ok ? await memRes.json() : []);
+  const picked = pickAccountRole(memRes.ok ? await memRes.json() : []);
   if ("error" in picked) {
     return json(safeError(picked.error), picked.error === "no_account" ? 403 : 409);
   }
   const accountId = picked.accountId;
+
+  // 0067: WHAT THEY ALREADY PAY FOR. Read with the service role, before the
+  // quote, so a refusal never takes a founder hold. If it cannot be read,
+  // refuse: guessing "not paying" is how a second subscription gets opened.
+  const subRes = await fetch(
+    `${Deno.env.get("SUPABASE_URL")}/rest/v1/subscriptions` +
+      `?account_id=eq.${accountId}` +
+      `&select=status,current_period_end,provider_subscription_code,plans(tier)`,
+    { headers: serviceHeaders },
+  );
+  if (!subRes.ok) {
+    console.error(`paystack-checkout: subscription read failed with ${subRes.status}`);
+    return json(safeError("provider_unavailable"), 502);
+  }
+  const sub = readSubState(await subRes.json().catch(() => null));
+  const refusal = checkoutRefusal(sub, tier, picked.isOwner, new Date(),
+                                  selfServeOn(Deno.env.get("BILLING_SELF_SERVE")));
+  if (refusal) return json(safeError(refusal.error), refusal.status);
 
   // THE QUOTE. The database decides plan, price, price tier, founding
   // eligibility and slot availability. This function decides nothing.
@@ -140,7 +172,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
     body: JSON.stringify(
-      initializeBody(quote, email, callbackUrl),
+      initializeBody(quote, email, callbackUrl, replacesCode(sub)),
     ),
   });
 
