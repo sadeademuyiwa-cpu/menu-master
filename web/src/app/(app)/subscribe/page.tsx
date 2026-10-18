@@ -1,7 +1,6 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
-import { entitlementStatus } from '@/lib/data/context'
+import { currentContext, entitlementStatus } from '@/lib/data/context'
 import { loadPlanOffers } from '@/lib/data/plans'
 import { PageHeader, Card, Badge, Disclosure, SectionHeading, BackLink } from '@/components/ui'
 import { money } from '@/lib/format'
@@ -9,38 +8,57 @@ import { parentTab } from '@/lib/nav'
 import { daysLeft, planStatusLabel } from '@/lib/trial'
 import { PlanChooser } from '@/components/plan-chooser'
 import { COSTING_FEATURES, TRADING_FEATURES, PLAN_FAQ as FAQ } from '@/lib/site/plan-features'
+import { accountBilling, changeLabel, endingText, isPaying, lagosLongDate, planAction } from './billing-choices'
 import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
 
+type Sub = {
+  plan_id: string; status: string
+  current_period_end: string | null; cancel_at_period_end: boolean | null
+}
+
 async function SubscribePageBody() {
-  const supabase = await createClient()
+  const { supabase, accountId, role } = await currentContext()
+  // The account the app shows (the oldest membership), the same one
+  // paystack-checkout bills, so the buttons here match its refusals.
+  const subQuery = supabase.from('subscriptions').select('plan_id,status,current_period_end,cancel_at_period_end')
   const [{ offers, slotsLeft }, { data: sub }, entitlement] = await Promise.all([
     loadPlanOffers(supabase),
-    supabase.from('subscriptions').select('plan_id,status,current_period_end')
-      .maybeSingle<{ plan_id: string; status: string; current_period_end: string | null }>(),
+    (accountId ? subQuery.eq('account_id', accountId) : subQuery).maybeSingle<Sub>(),
     entitlementStatus(),
   ])
 
   const { data: currentPlan } = sub
     ? await supabase.from('plans').select('name,tier').eq('id', sub.plan_id).maybeSingle<{ name: string; tier: string }>()
     : { data: null }
-  const paying = sub?.status === 'active'
+
+  // What each card and the status line offer: decided here, on the server,
+  // from the row and the caller's role (billing-choices.ts). paystack-checkout
+  // makes the same refusals itself, so this is never the only guard.
+  const billingSub = sub ? { ...sub, tier: currentPlan?.tier ?? null } : null
+  const paying = isPaying(billingSub)
+  const { ending, cancel } = accountBilling(billingSub, role)
+  const owner = role === 'owner'
   const days = entitlement?.reason === 'trial_active' ? daysLeft(entitlement.boundary) : null
-  const renews = sub?.current_period_end
-    ? new Date(sub.current_period_end).toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' })
-    : null
+  const renews = lagosLongDate(sub?.current_period_end ?? null)
 
   const statusLine = !sub ? null
-    : sub.status === 'trialing'
-      ? (entitlement?.entitled
-          ? `You are on the free trial${days !== null ? `: ${days === 0 ? 'it ends today' : `${days} day${days === 1 ? '' : 's'} left`}` : ''}.`
-          : 'Your free trial has ended. Choose a plan to record new work again.')
-      : sub.status === 'active'
-        ? `You are on ${currentPlan?.name ?? 'a paid plan'}${renews ? `, renewing on ${renews}` : ''}.`
-        : sub.status === 'past_due'
-          ? 'We could not take your last payment. Choose your plan below to pay again.'
-          : `Your plan: ${planStatusLabel(sub.status)}.`
+    : ending
+      ? endingText(renews)
+      : sub.status === 'trialing'
+        ? (entitlement?.entitled
+            ? `You are on the free trial${days !== null ? `: ${days === 0 ? 'it ends today' : `${days} day${days === 1 ? '' : 's'} left`}` : ''}.`
+            : 'Your free trial has ended. Choose a plan to record new work again.')
+        : sub.status === 'active'
+          ? `You are on ${currentPlan?.name ?? 'a paid plan'}${renews ? `, renewing on ${renews}` : ''}.`
+          : sub.status === 'past_due'
+            ? (owner
+                ? 'We could not take your last payment. Use Update your card below to carry on.'
+                : 'We could not take your last payment. The account owner can update the card.')
+            : sub.status === 'cancelled'
+              ? 'Your plan has ended. Choose a plan to record new work again.'
+              : `Your plan: ${planStatusLabel(sub.status)}.`
 
   // One name per thing: More calls this page "Plans & billing", so it does too.
   const tab = parentTab('/subscribe')
@@ -48,14 +66,26 @@ async function SubscribePageBody() {
   return (
     <div className="space-y-5">
       {tab && <BackLink href={tab.href}>{tab.label}</BackLink>}
-      <PageHeader title="Plans & billing" sub="Monthly billing in naira. Cancel whenever you like." />
+      <PageHeader
+        title="Plans & billing"
+        sub="Monthly billing in naira. Change plan here, and cancel from your Account page whenever you like."
+      />
 
       {statusLine && (
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-semibold">{statusLine}</span>
-            {sub && <Badge tone={sub.status === 'active' ? 'good' : sub.status === 'trialing' ? 'plain' : 'warn'}>{planStatusLabel(sub.status)}</Badge>}
+            {sub && (
+              <Badge tone={ending ? 'warn' : sub.status === 'active' ? 'good' : sub.status === 'trialing' ? 'plain' : 'warn'}>
+                {ending ? 'Not renewing' : planStatusLabel(sub.status)}
+              </Badge>
+            )}
           </div>
+          {cancel && (
+            <p className="mt-2 text-sm" style={{ color: 'var(--mm-muted)' }}>
+              To stop renewing, <Link href="/account" className="underline">cancel from your Account page</Link>.
+            </p>
+          )}
         </Card>
       )}
 
@@ -83,8 +113,17 @@ async function SubscribePageBody() {
           ? 'Know what your food costs and what to charge.'
           : 'Costing, plus everything you sell and who you sell to.',
         features: o.tier === 'costing' ? COSTING_FEATURES : TRADING_FEATURES,
-        current: paying && currentPlan?.tier === o.tier,
+        action: planAction(billingSub, o.tier, role),
+        changeLabel: changeLabel(billingSub, o.tier),
       }))} />
+
+      {paying && owner && (
+        <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
+          Switching plan: your new plan starts the day you pay and your old plan
+          stops, so you are never charged for both. Unused days on the old plan
+          are not refunded.
+        </p>
+      )}
 
       <section className="space-y-2">
         <SectionHeading>Questions</SectionHeading>

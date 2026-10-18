@@ -11,6 +11,17 @@
  *   sign out is reachable, and so is "Forgot password?"
  *   a reset link signs you in to choose a new password, once
  *   an expired or edited link never leaves the site
+ *   a paying owner sees "Your plan", can switch plan only past a caution,
+ *     and is refused a second payment for the plan already paid for
+ *   the owner can cancel, past a confirm step that names the end date (and
+ *     warns a founder), and afterwards is told when the plan ends
+ *   a failed payment offers the owner "Update your card", not a new payment
+ *   staff see no cancel, card or switch buttons, and the routes refuse them
+ *
+ * This stack serves no edge functions (the gateway answers 404 for
+ * /functions/v1/*), so a real cancel or card request is expected to be
+ * refused in plain words, and the subscription row to stay as it was: only
+ * the webhook ever writes it.
  *
  * Email links come from the local gateway's stand-in mailbox
  * (/__local/last-mail), which exists only in e2e/supabase-local.mjs.
@@ -23,6 +34,7 @@ const BASE = 'http://127.0.0.1:3100'
 const GATEWAY = 'http://127.0.0.1:54321'
 const stamp = Date.now()
 const A = { email: `acct-${stamp}@test.ng`, pass: 'correct-horse-battery' }
+const S = { email: `acct-sales-${stamp}@test.ng`, pass: 'correct-horse-battery' }
 
 const results = []
 const mark = (name, ok, detail = '') => {
@@ -167,6 +179,135 @@ try {
   await must(page, 'and says nothing entered is lost, with the way back', 'Your free trial ended', 'Everything you entered is still here to read', 'Choose a plan')
   await go(page, '/subscribe')
   await must(page, 'the plans page says the trial has ended', 'ended')
+  mark('an ended trial may pay for either plan', (await page.locator('[data-plan-action=pay]').count()) === 2)
+
+  // --- a paying account: switch plan, never pay twice -------------------------
+  // (test) Paystack is not reachable from this stack, so the row is set the
+  // way the webhook leaves it after a Costing payment.
+  const setSub = (sql, label) => db.query(
+    `update subscriptions s set ${sql}
+       from memberships m join auth.users u on u.id = m.user_id
+      where m.account_id = s.account_id and u.email = $1`, [A.email])
+    .then(({ rowCount }) => mark(`(test) ${label}`, rowCount === 1, `rows ${rowCount}`))
+  const subRow = async () => (await db.query(
+    `select s.status, s.cancel_at_period_end from subscriptions s
+       join memberships m on m.account_id = s.account_id join auth.users u on u.id = m.user_id
+      where u.email = $1`, [A.email])).rows[0]
+  const post = (url, body) => page.evaluate(async ([u, b]) => {
+    const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
+    return { status: r.status, body: await r.json().catch(() => ({})) }
+  }, [url, body])
+  const actionOf = (p, blurb) => p.locator(`.mm-card:has-text("${blurb}") [data-plan-action]`).first().getAttribute('data-plan-action')
+  const COSTING = 'Know what your food costs'
+  const TRADING = 'everything you sell'
+
+  await setSub(`plan_id = 'costing', status = 'active', cancel_at_period_end = false,
+                founding_price_active = false, current_period_end = now() + interval '20 days'`,
+    'the account now pays for Costing')
+  await go(page, '/subscribe')
+  await must(page, 'Plans & billing says which plan is paid for and when it renews',
+    'You are on Costing', 'renewing on', 'Change plan here', 'cancel from your Account page')
+  await mustNot(page, 'and never invites a second payment', 'Choose your plan below to pay again')
+  mark('the plan paid for reads "Your plan" and cannot be pressed',
+    (await actionOf(page, COSTING)) === 'your_plan'
+      && await page.locator('[data-plan-action=your_plan] button:has-text("Your plan")').isDisabled())
+  mark('the other plan is offered as a switch', (await actionOf(page, TRADING)) === 'change')
+  await page.click('button:has-text("Switch to this plan")')
+  await must(page, 'switching shows the caution before any payment',
+    'Your new plan starts the day you pay and your old plan stops', 'never charged for both',
+    'Unused days on the old plan are not refunded', 'Pay for Costing + Sales')
+  await page.click('button:has-text("Not now")')
+  mark('"Not now" closes it, and nothing is paid', (await page.locator('button:has-text("Pay for Costing + Sales")').count()) === 0)
+
+  const again = await post('/api/checkout', { tier: 'costing' })
+  mark('paying again for the plan already paid for is refused', again.status === 409 && again.body.error === 'already_on_plan', JSON.stringify(again))
+
+  // --- cancelling ---------------------------------------------------------------
+  await go(page, '/account')
+  await must(page, 'the owner sees when the plan renews, can change it or cancel, and how to get a copy',
+    'Renews on', 'Change your plan', 'Cancel plan', 'copy of your records', 'within one working day')
+  await mustNot(page, 'the Account page promises no export', 'export')
+  await page.click('button:has-text("Cancel plan")')
+  await must(page, 'cancelling asks first, and says what happens',
+    'Your plan stays on until', 'you can still open and read everything', 'cannot record new work',
+    'You will not be charged again', 'There is no undo', 'Keep my plan', 'Yes, cancel my plan')
+  await mustNot(page, 'a plan on the standard price is not warned about the founding price', 'You are on the founding price')
+  await page.click('button:has-text("Keep my plan")')
+  mark('"Keep my plan" changes nothing', (await page.locator('button:has-text("Yes, cancel my plan")').count()) === 0)
+
+  await page.click('button:has-text("Cancel plan")')
+  await page.click('button:has-text("Yes, cancel my plan")')
+  await waitText(page, 'Nothing has changed', 15000)
+  await must(page, 'with no billing service here, the cancel is refused in plain words', 'Nothing has changed', 'within one working day')
+  const kept = await subRow()
+  mark('and the plan is left as it was: only the webhook writes it',
+    kept?.status === 'active' && kept?.cancel_at_period_end === false, JSON.stringify(kept))
+
+  await setSub(`founding_price_active = true`, 'the account is on the founding price')
+  await go(page, '/account')
+  await page.click('button:has-text("Cancel plan")')
+  await must(page, 'a founder is warned that cancelling loses the founding price', 'You are on the founding price', 'standard price')
+
+  // Paystack's not_renew, as the webhook records it.
+  await setSub(`status = 'cancelled', cancel_at_period_end = true`, 'the plan is cancelled, paid month still running')
+  await go(page, '/account')
+  await must(page, 'after cancelling, the end date is said, with no further charge', 'Your plan ends on', 'You will not be charged again', 'Ends on')
+  mark('and there is no second Cancel plan', (await page.locator('button:has-text("Cancel plan")').count()) === 0)
+  await go(page, '/subscribe')
+  await must(page, 'Plans & billing says the same', 'Your plan ends on', 'Not renewing')
+  mark('the cancelled plan can be chosen again, past the caution', (await actionOf(page, COSTING)) === 'change'
+    && (await page.locator('button:has-text("Choose this plan again")').count()) === 1)
+
+  // --- a failed payment ---------------------------------------------------------
+  await setSub(`status = 'past_due', cancel_at_period_end = false, current_period_end = now() - interval '1 day'`,
+    'the last renewal failed, inside the grace period')
+  await go(page, '/subscribe')
+  await must(page, 'a failed payment points the owner to the card, not a new payment', 'We could not take your last payment', 'Update your card')
+  mark('the plan paid for offers "Update your card"', (await actionOf(page, COSTING)) === 'update_card')
+  mark('the other plan can still be switched to', (await actionOf(page, TRADING)) === 'change')
+  const twice = await post('/api/checkout', { tier: 'costing' })
+  mark('a second subscription for the overdue plan is refused', twice.status === 409 && twice.body.error === 'already_on_plan', JSON.stringify(twice))
+  await go(page, '/account')
+  await must(page, 'Account offers the owner "Update your card"', 'Update your card')
+  mark('and no Cancel plan while a payment is overdue', (await page.locator('button:has-text("Cancel plan")').count()) === 0)
+  await page.click('button:has-text("Update your card")')
+  await waitText(page, 'Nothing has changed', 15000)
+  await must(page, 'with no billing service here, the card link is refused in plain words', 'Nothing has changed')
+
+  // --- staff on a paying account -------------------------------------------------
+  await go(page, '/settings/people')
+  await page.fill('input[name=email]', S.email)
+  await page.selectOption('select[name=role]', 'sales')
+  await page.click('form:has(input[name=email]) button[type=submit]')
+  await waitText(page, `${S.email} invited`)
+  const staffCtx = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const staff = await staffCtx.newPage()
+  await go(staff, `/signup?email=${encodeURIComponent(S.email)}`)
+  await staff.fill('input[type=email]', S.email)
+  await staff.fill('input[type=password]', S.pass)
+  await staff.click('button[type=submit]')
+  await staff.waitForURL('**/dashboard**', { timeout: 60000 })
+  await go(staff, '/subscribe')
+  await must(staff, 'staff are told plan changes are the owner’s', 'Plan changes are made by the account owner.')
+  for (const b of ['Switch to this plan', 'Update your card', 'Choose plan']) {
+    mark(`staff see no "${b}" button`, (await staff.locator(`button:has-text("${b}")`).count()) === 0)
+  }
+  await go(staff, '/account')
+  await must(staff, 'Account tells staff the owner handles billing', 'Plan changes are made by the account owner.')
+  for (const b of ['Cancel plan', 'Update your card']) {
+    mark(`staff see no "${b}" on Account`, (await staff.locator(`button:has-text("${b}")`).count()) === 0)
+  }
+  const staffPost = (url, body) => staff.evaluate(async ([u, b]) => {
+    const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
+    return { status: r.status, body: await r.json().catch(() => ({})) }
+  }, [url, body])
+  const sCancel = await staffPost('/api/billing', { action: 'cancel' })
+  mark('the billing route refuses a staff cancel', sCancel.status === 403 && sCancel.body.error === 'owner_only', JSON.stringify(sCancel))
+  const sCard = await staffPost('/api/billing', { action: 'card_link' })
+  mark('and a staff card change', sCard.status === 403 && sCard.body.error === 'owner_only', JSON.stringify(sCard))
+  const sSwitch = await staffPost('/api/checkout', { tier: 'trading' })
+  mark('the checkout route refuses a staff plan change', sSwitch.status === 403 && sSwitch.body.error === 'owner_only', JSON.stringify(sSwitch))
+  await staffCtx.close()
 } catch (e) {
   mark('the journey ran to the end', false, String(e?.stack ?? e))
 } finally {

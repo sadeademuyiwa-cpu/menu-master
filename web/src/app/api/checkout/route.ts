@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { currentContext } from '@/lib/data/context'
+import { checkoutRefusal } from '@/app/(app)/subscribe/billing-choices'
 
 /**
  * Checkout initialization, proxied.
@@ -14,11 +15,20 @@ import { createClient } from '@/lib/supabase/server'
  *   Proving the caller is signed in before anything reaches Paystack, and
  *   keeping the request on our own origin. It forwards the user's own access
  *   token and the tier they chose. Nothing else crosses.
+ *
+ * THE TWO REFUSALS (contract K4), ANSWERED HERE FIRST
+ *   already_on_plan (409): this tier is already paid for (active or past_due).
+ *   owner_only (403): the account is already paying and the caller is not its
+ *   owner. paystack-checkout makes both refusals itself, before any quote or
+ *   founder hold, and is the authority. They are repeated here from the
+ *   caller's own reads (the same rules, billing-choices.ts) so a refusal never
+ *   depends on the edge function having been redeployed. This route only
+ *   refuses; when its reads fail it says nothing and the edge function decides.
  */
 export async function POST(request: NextRequest) {
-  const supabase = await createClient()
+  const { supabase, status, accountId, role } = await currentContext()
   const { data: { session } } = await supabase.auth.getSession()
-  if (!session) {
+  if (status === 'unauthenticated' || !session) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
 
@@ -28,6 +38,22 @@ export async function POST(request: NextRequest) {
   const tier = body?.tier
   if (tier !== 'costing' && tier !== 'trading') {
     return NextResponse.json({ error: 'choose_costing_or_trading' }, { status: 400 })
+  }
+
+  if (accountId) {
+    const { data: sub } = await supabase.from('subscriptions')
+      .select('plan_id,status,current_period_end,cancel_at_period_end')
+      .eq('account_id', accountId)
+      .maybeSingle<{
+        plan_id: string; status: string
+        current_period_end: string | null; cancel_at_period_end: boolean | null
+      }>()
+    if (sub) {
+      const { data: plan } = await supabase.from('plans').select('tier')
+        .eq('id', sub.plan_id).maybeSingle<{ tier: string }>()
+      const refusal = checkoutRefusal({ ...sub, tier: plan?.tier ?? null }, tier, role)
+      if (refusal) return NextResponse.json({ error: refusal.error }, { status: refusal.status })
+    }
   }
 
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL

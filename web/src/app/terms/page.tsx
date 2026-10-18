@@ -17,6 +17,10 @@ export const revalidate = 60
  * your data is yours, nothing is invented on your behalf, cancelling never
  * hides what you entered.
  *
+ * Self-serve now, and said so: the owner cancels from the Account page and
+ * changes plan on Plans & billing. There is no download yet, so a copy of
+ * your records is something we send when asked (tests/public-promises).
+ *
  * This is the owner's draft to review, not legal advice.
  */
 export default async function TermsPage() {
@@ -59,9 +63,11 @@ export default async function TermsPage() {
         the database level.
       </p>
       <p>
-        You can read and export what you entered at any time, including after
-        a subscription ends. Changing or cancelling a plan never deletes or
-        hides your own history.
+        You can open and read what you entered at any time, including after a
+        subscription ends. If you want a copy of your records, message us and
+        we send you a copy of your records as a spreadsheet, within one working
+        day. Write to <SupportContact />. Changing or cancelling a plan never
+        deletes or hides your own history.
       </p>
 
       <H2>4. Plans, trial and payment</H2>
@@ -74,6 +80,12 @@ export default async function TermsPage() {
         founding-member price are set out on the plan page inside the app and
         in our <Link href="/refunds" className="underline">refunds and
         cancellation</Link> terms, which form part of these terms.
+      </p>
+      <p>
+        The account owner changes plan on the Plans &amp; billing page. A new
+        plan starts the day you pay for it and the old one stops at the same
+        time, so you are never charged for both. Unused days on the old plan
+        are not refunded.
       </p>
 
       <H2>5. Acceptable use</H2>
@@ -105,9 +117,10 @@ export default async function TermsPage() {
 
       <H2>8. Ending the agreement</H2>
       <p>
-        You can cancel at any time from your account page. We may end the
-        agreement if you break these terms. Either way, you keep the right to
-        read and export what you entered, as set out in section 3.
+        The account owner can cancel at any time from the Account page in the
+        app. We may end the agreement if you break these terms. Either way, you
+        keep the right to read what you entered, and to ask us for a copy of
+        it, as set out in section 3.
       </p>
 
       <H2>9. Law and contact</H2>
