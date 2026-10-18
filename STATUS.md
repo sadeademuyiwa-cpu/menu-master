@@ -88,20 +88,28 @@ permissive SELECT policies; 7 unused indexes.
 
 ## Proposed, not yet applied
 
-*(Section updated 17 October 2026. Production is at **0064**: 0052–0059 were
-applied on 2–3 October (commits `5f08f2f`, `f8d5022`), 0060–0062 on
-12 October, and 0063–0064 on 17 October, all over the session pooler with
+*(Section updated 18 October 2026. Production is at **0066**: 0052–0059 were
+applied on 2–3 October, 0060–0062 on 12 October, 0063–0064 on 17 October,
+and 0065–0066 on 18 October, all over the session pooler with
 `psql --single-transaction`. The rest of this file still describes
 10 September and is older than those facts.)*
 
-**Proposed (18 October 2026), on branch `fix/trial-end`, not applied:**
+**Applied 18 October 2026:**
+
+| Migration | Production result |
+|---|---|
+| `0065_help_videos.sql` | PRE 5/5, `0065 OK`, POST 5/5. site_settings has its sixth row, `help` (empty until the admin sets links). 118 policies, 99 `fn_*` |
+| `0066_trial_gate.sql` | PRE 35/35, `0066 OK` (1 live trial moved later to 23:59:59 Lagos, logged), POST 17/17. 118 policies, 102 `fn_*`. The app that uses it (`5535561`) was deployed the same day with `BILLING_SELF_SERVE` unset, so paying owners are told to message us to change or cancel |
+
+Thirteen production function bodies (and three billing bodies) were stored
+with CRLF line ends; the preflights now compare their md5 with carriage
+returns removed (the text is otherwise identical to a repository build).
+
+**Still proposed:**
 
 | Migration | What | Gate |
 |---|---|---|
-| `0066_trial_gate.sql` | After a trial (or a lapsed plan) nothing new is saved, through the tables or through any elevated function, except money received on a confirmed sale (`fn_record_order_payment`). Trials end at 23:59:59 Lagos on day 14; live trials move later to match, each logged. Onboarding refuses a caller-chosen trial length and a login that already has a membership. Custom units follow the ingredient roles. 118 policies; `fn_*` 99 → 102 | `deploy/runbook/DEPLOY_0066.md` |
-| `0067_billing_self_serve.sql` (after 0066) | Paystack notices are matched to the account by subscription code or customer code; a replaced subscription is switched off and its later notices change nothing; a cancel or failed payment for a code we do not hold is held for review. Supports Cancel plan, Update your card, Pay now and self-serve plan change (`paystack-manage`, new). 118 policies; `fn_*` 102 → 107 | `deploy/runbook/DEPLOY_0067.md` |
-
-The whole release, edge functions and switches included, is `deploy/runbook/DEPLOY_TRIAL_PHASE1.md`. `0065_help_videos` (another session's work, uncommitted when this was written) must be applied **before** 0066 if it ships: its checks expect 99 `fn_*`.
+| `0067_billing_self_serve.sql` | Paystack notices are matched to the account by subscription code or customer code; a replaced subscription is switched off and its later notices change nothing; a cancel or failed payment for a code we do not hold is held for review. Supports Cancel plan, Update your card, Pay now and self-serve plan change (`paystack-manage`, new). 118 policies; `fn_*` 102 → 107 | `deploy/runbook/DEPLOY_0067.md`, then steps 5-11 of `DEPLOY_TRIAL_PHASE1.md` (edge functions, Paystack test-mode checks T1-T13, the two switches) |
 
 Before that, the last two shipped with the food-app redesign
 (`branding/09-uiux/04-simplify-plan.md`), and the app that needs them is live
