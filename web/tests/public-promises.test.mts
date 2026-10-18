@@ -276,7 +276,9 @@ test('switch off: every promise is "message us", and no paying state shows a sel
   }
   // And the screens say it.
   assert.match(read('src/app/(app)/account/page.tsx'), /billing\.messageUs &&[\s\S]*MESSAGE_US/)
-  assert.match(read('src/app/(app)/subscribe/page.tsx'), /subscribeHeader\([^)]*MESSAGE_US\)/)
+  assert.match(read('src/app/(app)/subscribe/page.tsx'), /subscribeNote\([^)]*MESSAGE_US\)/)
+  // and as visible text, not inside the title's (i)
+  assert.match(read('src/app/(app)/subscribe/page.tsx'), /\{billingNote && <p/)
 })
 
 test('retired promises stay retired', () => {

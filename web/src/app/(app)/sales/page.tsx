@@ -91,7 +91,13 @@ export default async function SalesPage({
   // fail is better than telling a paying customer they cannot sell. RLS
   // refuses either way, so nothing is protected by guessing.
   const canSell = await hasSalesEntitlement()
-  if (isSalesLocked(canSell)) {
+  // After a trial (or a lapsed plan) Sales is off because the account is
+  // closed, not because the plan lacks it: fn_account_has_sales needs an
+  // entitled account. Such an account keeps its own sales list, read only,
+  // under the paused line below; the "plan does not include Sales" page is
+  // for an open Costing plan only. An unknown verdict (null) keeps today's page.
+  const open = await recordingOpen()
+  if (isSalesLocked(canSell) && open !== false) {
     const { data: sub } = await supabase
       .from('subscriptions').select('plan_id').maybeSingle<{ plan_id: string }>()
     const { data: plan } = sub
@@ -122,8 +128,9 @@ export default async function SalesPage({
   // and only while recording is open: after a trial the order screen would
   // only be refused (D3), so the button gives way to one line saying why.
   // Only an explicit false closes it; a lookup that fails keeps the button.
-  const open = await recordingOpen()
-  const seller = canRecordSales(ctx.role, canSell)
+  // When closed, whether the plan has Sales cannot be told apart from the
+  // closure itself, so the role alone decides who is told why (D3).
+  const seller = canRecordSales(ctx.role, open === false ? null : canSell)
   const records = seller && open !== false
   const paused = seller && !records
     ? await closedLine(ctx.role, 'new sales can’t be recorded, though money for a sale already confirmed can still be recorded on that sale')

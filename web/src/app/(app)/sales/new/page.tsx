@@ -31,6 +31,14 @@ export default async function NewSalePage({
   const ctx = await currentContext()
   const { supabase, accountId, businessId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, '/sales/new'))
+  // After a trial ends a sale cannot be recorded (D3). Rather than a whole
+  // order typed in and then refused at Confirm, back to Sales with why -- as
+  // New purchase does. This comes first: a closed account also reads as
+  // "no Sales" (fn_account_has_sales needs an entitled account), and the
+  // reason it is given must be the real one. Only an explicit "closed" does this.
+  const paused = await closedLine(ctx.role, 'new sales can’t be recorded')
+  if (paused) redirect(withNotice('/sales', paused))
+
   // The Sales page explains a plan without Sales; send the owner there.
   const salesPlan = await hasSalesEntitlement()
   if (isSalesLocked(salesPlan)) redirect('/sales')
@@ -48,12 +56,6 @@ export default async function NewSalePage({
       </div>
     )
   }
-
-  // After a trial ends a sale cannot be recorded (D3). Rather than a whole
-  // order typed in and then refused at Confirm, back to Sales with why -- as
-  // New purchase does. Only an explicit "closed" does this.
-  const paused = await closedLine(ctx.role, 'new sales can’t be recorded')
-  if (paused) redirect(withNotice('/sales', paused))
 
   const showCosts = canSeeCosts(ctx.role)
   const [menu, { data: customers }, costs, extras] = await Promise.all([

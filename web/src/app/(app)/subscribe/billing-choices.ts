@@ -233,7 +233,33 @@ export function accountBilling(
   }
 }
 
-/** The line under "Plans & billing". messageUs is billing-words' MESSAGE_US. */
+/** What Plans & billing always says about money, behind the title's (i). */
+export const SUBSCRIBE_BASE = 'Monthly billing in naira.'
+
+/**
+ * Who changes a paying account's plan, and how: a sentence shown as visible
+ * text under the title, never behind the (i), because for a paying owner it is
+ * the instruction itself (message us, or change it here). Null when there is
+ * nothing to say (a trial, or a plan that is already ending).
+ * messageUs is billing-words' MESSAGE_US.
+ */
+export function subscribeNote(
+  sub: BillingSub | null | undefined,
+  role: string | null | undefined,
+  selfServe: boolean,
+  messageUs: string,
+  now: Date = new Date(),
+): string | null {
+  if (!isPaying(sub, now)) return null
+  if (role !== 'owner') return OWNER_ONLY_NOTE
+  if (!selfServe) return messageUs
+  if (isLive(sub) && !isEnding(sub, now)) {
+    return 'Change plan here, and cancel from your Account page whenever you like.'
+  }
+  return null
+}
+
+/** The base line and the note together, as one sentence pair. */
 export function subscribeHeader(
   sub: BillingSub | null | undefined,
   role: string | null | undefined,
@@ -241,14 +267,8 @@ export function subscribeHeader(
   messageUs: string,
   now: Date = new Date(),
 ): string {
-  const base = 'Monthly billing in naira.'
-  if (!isPaying(sub, now)) return base
-  if (role !== 'owner') return `${base} ${OWNER_ONLY_NOTE}`
-  if (!selfServe) return `${base} ${messageUs}`
-  if (isLive(sub) && !isEnding(sub, now)) {
-    return `${base} Change plan here, and cancel from your Account page whenever you like.`
-  }
-  return base
+  const note = subscribeNote(sub, role, selfServe, messageUs, now)
+  return note ? `${SUBSCRIBE_BASE} ${note}` : SUBSCRIBE_BASE
 }
 
 const LAGOS = 'Africa/Lagos'

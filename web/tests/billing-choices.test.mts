@@ -11,7 +11,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   isPaying, isLive, isEnding, knownTier, planAction, checkoutRefusal, checkoutGate,
-  accountBilling, changeLabel, changeCaution, subscribeHeader,
+  accountBilling, changeLabel, changeCaution, subscribeHeader, subscribeNote, SUBSCRIBE_BASE,
   lagosLongDate, cancelConfirmText, endingText, chooseAgainText, checkoutErrorText, billingErrorText,
   CHANGE_CAUTION, OWNER_ONLY_NOTE, FOUNDER_WARNING, PAY_NOW_TEXT, CANCELLED_NOW_TEXT, PLAN_UNREADABLE_TEXT,
   type BillingSub, type Tier,
@@ -301,6 +301,24 @@ test('the Plans & billing header promises only what this person can do', () => {
   for (const s of [costing, overdueCosting, cancelledInPeriod]) {
     assert.equal(subscribeHeader(s, 'owner', false, MESSAGE_US, now), `${base} ${MESSAGE_US}`)
   }
+})
+
+test('the visible note under Plans & billing is the header without its base line', () => {
+  assert.equal(SUBSCRIBE_BASE, 'Monthly billing in naira.')
+  for (const s of [trial, endedTrial, cancelledOver, null, costing, overdueCosting, cancelledInPeriod]) {
+    for (const role of ROLES) {
+      for (const on of BOTH) {
+        const note = subscribeNote(s, role, on, MESSAGE_US, now)
+        assert.equal(subscribeHeader(s, role, on, MESSAGE_US, now), note ? `${SUBSCRIBE_BASE} ${note}` : SUBSCRIBE_BASE)
+      }
+    }
+  }
+  // A paying owner with the switch off is always told to message us, in visible text.
+  for (const s of [costing, overdueCosting, cancelledInPeriod]) {
+    assert.equal(subscribeNote(s, 'owner', false, MESSAGE_US, now), MESSAGE_US)
+  }
+  // A trial has nothing to say there.
+  assert.equal(subscribeNote(trial, 'owner', true, MESSAGE_US, now), null)
 })
 
 test('dates are said on the Lagos calendar, in words', () => {

@@ -145,6 +145,11 @@ try {
   await page.waitForURL(/\/sales\/[0-9a-f-]{36}/, { timeout: 60000 })
   await settle(page)
   const saleId = path(page).split('/').pop()
+  // A new sale is recorded as paid in full unless told otherwise, so the
+  // payment form sits under "Change the payment"; open it to take a deposit.
+  if (await page.locator('details:has(> summary:has-text("Change the payment"))').count()) {
+    await openDetails(page, 'Change the payment')
+  }
   await page.fill('input[name=amount_paid]', '300')
   await page.locator('select[name=payment_status]').selectOption('part_paid')
   await submit(page, page.locator('button:has-text("Save payment")'))
@@ -318,6 +323,14 @@ try {
   // The web's own refusals; anything else came from the (absent) edge function.
   const WEB_REFUSALS = ['already_on_plan', 'owner_only', 'switch_needs_support', 'plan_unreadable']
 
+  // (test) Local plans carry no Paystack plan code, so every plan button
+  // would read "Online payment unavailable" and stay disabled. Give the
+  // active plans a stand-in code for this journey; the finally block takes
+  // them away again. Nothing here reaches Paystack.
+  const { rowCount: coded } = await db.query(
+    `update plans set provider_plan_code = 'PLN_e2e_' || id where is_active and provider_plan_code is null`)
+  mark('(test) the local plans can be paid for online', coded >= 0, `plans given a stand-in code: ${coded}`)
+
   await setSub(`plan_id = 'costing', status = 'active', cancel_at_period_end = false,
                 founding_price_active = false, current_period_end = now() + interval '20 days'`,
     'the account now pays for Costing')
@@ -336,10 +349,13 @@ try {
   mark('paying again for the plan already paid for is refused', again.status === 409 && again.body.error === 'already_on_plan', JSON.stringify(again))
 
   // The billing route takes only our own pages' JSON requests.
-  const foreign = await fetch(`${BASE}/api/billing`, {
-    method: 'POST', headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'cancel' }),
-  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }))
+  // Sent with the owner's own signed-in session (page.request shares the
+  // browser's cookies), so it reaches the route and only Origin differs; a
+  // request with no session is sent to the sign-in page before that.
+  const foreign = await page.request.post(`${BASE}/api/billing`, {
+    headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' },
+    data: JSON.stringify({ action: 'cancel' }), maxRedirects: 0,
+  }).then(async (r) => ({ status: r.status(), body: await r.json().catch(() => ({})) }))
   mark('another site cannot ask /api/billing to cancel', foreign.status === 403 && foreign.body.error === 'bad_origin', JSON.stringify(foreign))
   const notJson = await post('/api/billing', { action: 'cancel' }, 'text/plain')
   mark('and a body not sent as JSON is refused', notJson.status === 415 && notJson.body.error === 'bad_request', JSON.stringify(notJson))
@@ -485,7 +501,15 @@ try {
   await staff.fill('input[type=email]', S.email)
   await staff.fill('input[type=password]', S.pass)
   await staff.click('button[type=submit]')
-  await staff.waitForURL('**/dashboard**', { timeout: 60000 })
+  // The invitation is accepted on the first page that looks up the account,
+  // which can come a moment after sign-up has already sent the browser to
+  // setup. As people.mjs does: open Home until it is Home.
+  await staff.waitForURL((u) => !u.pathname.startsWith('/signup'), { timeout: 60000 })
+  for (let i = 0; i < 25 && path(staff) !== '/dashboard'; i++) {
+    await go(staff, '/dashboard')
+    if (path(staff) !== '/dashboard') await staff.waitForTimeout(400)
+  }
+  mark('the invited staff member lands in the business', path(staff) === '/dashboard', staff.url())
   await go(staff, '/subscribe')
   await must(staff, 'staff are told plan changes are the owner\'s', 'Plan changes are made by the account owner.')
   await mustNot(staff, 'and are not told to change or cancel it themselves', 'Change plan here', 'cancel from your Account page')
@@ -511,6 +535,7 @@ try {
 } catch (e) {
   mark('the journey ran to the end', false, String(e?.stack ?? e))
 } finally {
+  await db.query(`update plans set provider_plan_code = null where provider_plan_code like 'PLN\_e2e\_%'`).catch(() => {})
   await browser.close()
   await db.end()
 }

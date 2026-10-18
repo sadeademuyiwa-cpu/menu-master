@@ -12,7 +12,7 @@ import { SupportContact } from '@/components/legal-page'
 import { MESSAGE_US, billingSelfServe } from '@/lib/site/billing-words'
 import {
   accountBilling, changeCaution, changeLabel, endingText, isLive, lagosLongDate,
-  planAction, subscribeHeader,
+  planAction, subscribeNote, SUBSCRIBE_BASE,
 } from './billing-choices'
 import Loading from './skeleton'
 
@@ -46,6 +46,8 @@ async function SubscribePageBody() {
   const selfServe = billingSelfServe()
   const billingSub = sub ? { ...sub, tier: currentPlan?.tier ?? null } : null
   const { ending, cancel } = accountBilling(billingSub, role, selfServe)
+  // Visible, not behind the title's (i): for a paying owner it is the instruction.
+  const billingNote = subscribeNote(billingSub, role, selfServe, MESSAGE_US)
   const owner = role === 'owner'
   const days = entitlement?.reason === 'trial_active' ? daysLeft(entitlement.boundary) : null
   const renews = lagosLongDate(sub?.current_period_end ?? null)
@@ -93,7 +95,8 @@ async function SubscribePageBody() {
     // data-self-serve tells the account journey which state the server is in.
     <div className="space-y-5" data-self-serve={selfServe ? 'on' : 'off'}>
       {tab && <BackLink href={tab.href}>{tab.label}</BackLink>}
-      <PageHeader title="Plans & billing" sub={subscribeHeader(billingSub, role, selfServe, MESSAGE_US)} />
+      <PageHeader title="Plans & billing" sub={SUBSCRIBE_BASE} />
+      {billingNote && <p className="text-sm">{billingNote}</p>}
 
       {statusLine && (
         <Card>
