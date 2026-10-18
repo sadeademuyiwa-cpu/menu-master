@@ -3,8 +3,9 @@
 //
 // Emails owners whose free trial ends in 3 days, ends tomorrow, or has just
 // ended (0058), each at most once per account. Called hourly on a schedule
-// (deploy/runbook/DEPLOY_0058.md); safe to call any number of times -- a run
-// with nothing owed sends nothing.
+// (deploy/runbook/SCHEDULE_TRIAL_MAILER.md; is it running?
+// deploy/runbook/CHECK_TRIAL_MAILER.md); safe to call any number of times --
+// a run with nothing owed sends nothing.
 //
 // WHO MAY CALL IT
 //   Deployed with --no-verify-jwt because the caller is a scheduler, not a
@@ -25,7 +26,7 @@
 // ============================================================================
 
 import { safeError, tokenMatches } from "../platform-alert-mailer/lib.ts";
-import { type Due, idempotencyKey, priceLine, reminderEmail, resendBody, toSend } from "./lib.ts";
+import { type Due, idempotencyKey, placesLeft, priceLine, reminderEmail, resendBody, toSend } from "./lib.ts";
 
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -64,7 +65,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (rows.length === 0) return json({ sent: 0 }, 200);
 
   // The price line, by the same rule /subscribe sells by. Without it the
-  // email still goes, just without a price.
+  // email still goes, just without a price. If the founding-place count
+  // cannot be read, placesLeft gives null and no price is quoted: guessing 0
+  // would quote the standard price while founding places are still on sale.
   let price: string | null = null;
   try {
     const [plans, slots] = await Promise.all([
@@ -73,7 +76,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         headers: { ...service(), Prefer: "count=exact", Range: "0-0" },
       }),
     ]);
-    const left = Number((slots.headers.get("content-range") ?? "*/0").split("/")[1]) || 0;
+    const left = placesLeft(slots.ok, slots.headers.get("content-range"));
+    if (left === null) console.error(`trial-reminder-mailer: founding places unknown (HTTP ${slots.status}); no price line`);
     if (plans.ok) price = priceLine(await plans.json(), left);
   } catch {
     price = null;
