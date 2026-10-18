@@ -66,13 +66,19 @@ export type QuickAction = {
 /**
  * The phone's "+", for this role. "Add an item" opens the add form itself
  * (?add=1), not the top of a list of 180 starter items.
+ *
+ * `open` is recordingOpen(): after a trial (an explicit false) a sale or a
+ * purchase cannot be recorded (D3), and New sale and New purchase would only
+ * send the person back with the reason, so neither is offered. Null (not
+ * known) keeps both, as everywhere else.
  */
-export function quickActions(role: Role, salesPlan: boolean | null): QuickAction[] {
+export function quickActions(role: Role, salesPlan: boolean | null, open: boolean | null = null): QuickAction[] {
   const out: QuickAction[] = []
-  if (canRecordSales(role, salesPlan)) {
+  const recording = open !== false
+  if (recording && canRecordSales(role, salesPlan)) {
     out.push({ href: '/sales/new', icon: 'sales', label: 'Record a sale', meta: 'What you sold' })
   }
-  if (canRecordPurchases(role)) {
+  if (recording && canRecordPurchases(role)) {
     out.push({ href: '/purchases/new', icon: 'purchases', label: 'Record a purchase', meta: 'What you paid' })
   }
   if (canAddDishes(role)) {

@@ -10,6 +10,7 @@ import { money, percent, saleLabel } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
 import { canSeeCosts, canSeeSellingPrices } from '@/lib/pricing'
 import { SALE_ROLES } from '@/app/(app)/dashboard/roles'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -173,7 +174,7 @@ export default async function CustomerDetail({
           </p>
         )}
       </header>
-      {notice && <Notice tone={/could not|cannot|needs/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
 
       <section className="mm-card space-y-3" aria-label="What they have bought">
         <div className="flex items-end justify-between gap-3">

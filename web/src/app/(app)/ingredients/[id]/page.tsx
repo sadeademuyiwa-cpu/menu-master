@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { requiredAmount } from '@/lib/money-input'
 import {
   currentContext, contextRedirect, describeWriteError, withNotice, closedRefusal, refusalNotice, writeNotice,
+  closedLine,
 } from '@/lib/data/context'
 import {
   PageHeader, Field, Submit, InlineSubmit, inputClass, inputStyle,
@@ -19,6 +20,7 @@ import { dayShort, inSentence, perBuyingUnit, priceTrend, sinceWords, trendWords
 import { writeMeasure } from '../measure'
 import { Info } from '../info'
 import '../../purchases/buy.css'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -274,6 +276,9 @@ export default async function IngredientDetail(props: {
   // can reach their phone. The forms follow what each role may write (0015).
   const costs = canSeeCosts(ctx.role)
   const canBuy = canRecordPurchases(ctx.role)
+  // After a trial a purchase cannot be recorded (D3): the quick Record form
+  // gives way to one line saying why. Null (open, or not known) keeps it.
+  const buyPaused = canBuy ? await closedLine(ctx.role, 'new purchases can’t be recorded') : null
   const canEdit = canEditItems(ctx.role)
   const canMeasure = canAddMeasures(ctx.role)
   const canRemove = canRemoveMeasures(ctx.role)
@@ -425,7 +430,7 @@ export default async function IngredientDetail(props: {
           (yieldPct < 100 ? ` Usable after cleaning: ${yieldPct}%.` : '')}
       />
 
-      {notice && <Notice tone={/could not|not know|cannot|already|give the|between/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice, /between/i)}>{notice}</Notice>}
 
       {missing && missing.length > 0 && (
         <Notice>
@@ -488,41 +493,47 @@ export default async function IngredientDetail(props: {
             Record a purchase
           </SectionHeading>
 
-          <form action={addPrice} className="mm-card grid grid-cols-2 gap-3 sm:grid-cols-5 sm:items-end">
-            <input type="hidden" name="ingredient_id" value={ingredient.id} />
-            <Field label="Quantity bought">
-              <input name="qty" type="number" step="any" min="0" required inputMode="decimal"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Unit">
-              <select name="unit_id" required className={inputClass} style={inputStyle}
-                defaultValue={ingredient.base_unit_id}>
-                {usable.map((u) => (
-                  <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-                ))}
-                {needsConversion.length > 0 && (
-                  <optgroup label="Needs a conversion first">
-                    {needsConversion.map((u) => (
+          {buyPaused ? (
+            <Notice tone="warn">{buyPaused}</Notice>
+          ) : (
+            <>
+              <form action={addPrice} className="mm-card grid grid-cols-2 gap-3 sm:grid-cols-5 sm:items-end">
+                <input type="hidden" name="ingredient_id" value={ingredient.id} />
+                <Field label="Quantity bought">
+                  <input name="qty" type="number" step="any" min="0" required inputMode="decimal"
+                    className={inputClass} style={inputStyle} />
+                </Field>
+                <Field label="Unit">
+                  <select name="unit_id" required className={inputClass} style={inputStyle}
+                    defaultValue={ingredient.base_unit_id}>
+                    {usable.map((u) => (
                       <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
                     ))}
-                  </optgroup>
-                )}
-              </select>
-            </Field>
-            <Field label="Amount paid (₦)">
-              <input name="amount" type="number" step="0.01" min="0" required inputMode="decimal"
-                className={inputClass} style={inputStyle} />
-            </Field>
-            <Field label="Date">
-              <input name="effective_date" type="date" className={inputClass} style={inputStyle} />
-            </Field>
-            <div className="col-span-2 sm:col-span-1"><Submit>Record</Submit></div>
-          </form>
-          <p className="text-sm">
-            <Link href={`/purchases/new?ingredient=${ingredient.id}`} className="mm-tap underline">
-              Bought several things on one trip? Record them together →
-            </Link>
-          </p>
+                    {needsConversion.length > 0 && (
+                      <optgroup label="Needs a conversion first">
+                        {needsConversion.map((u) => (
+                          <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </Field>
+                <Field label="Amount paid (₦)">
+                  <input name="amount" type="number" step="0.01" min="0" required inputMode="decimal"
+                    className={inputClass} style={inputStyle} />
+                </Field>
+                <Field label="Date">
+                  <input name="effective_date" type="date" className={inputClass} style={inputStyle} />
+                </Field>
+                <div className="col-span-2 sm:col-span-1"><Submit>Record</Submit></div>
+              </form>
+              <p className="text-sm">
+                <Link href={`/purchases/new?ingredient=${ingredient.id}`} className="mm-tap underline">
+                  Bought several things on one trip? Record them together →
+                </Link>
+              </p>
+            </>
+          )}
         </section>
       )}
 

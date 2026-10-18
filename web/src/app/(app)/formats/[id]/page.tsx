@@ -11,6 +11,7 @@ import {
 import { quantity } from '@/lib/format'
 import { ConfirmSubmit } from '@/components/confirm-submit'
 import { canChangeSizes } from '../roles'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -173,7 +174,7 @@ export default async function FormatDetail({
             : 'Sold by the piece') + (format.is_active ? '' : ' · hidden')}
         </p>
       </div>
-      {notice && <Notice tone={/could not|must be|how many|already|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
 
       {changes && (
       <Disclosure summary="Edit this size">

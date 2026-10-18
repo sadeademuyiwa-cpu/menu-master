@@ -19,6 +19,16 @@ test('roles follow the 0015 write matrix', () => {
   assert.deepEqual(r.quickActions(undefined, true), [])
 })
 
+test('after a trial the "+" offers no sale and no purchase; not known keeps them', () => {
+  // open is recordingOpen(): only an explicit false closes (D3).
+  assert.deepEqual(r.quickActions('owner', true, false).map((a) => a.label), ['New dish', 'Add an item'])
+  assert.deepEqual(r.quickActions('sales', true, false), [])
+  assert.deepEqual(r.quickActions('accountant', true, false), [])
+  assert.equal(r.quickActions('owner', true, null).length, 4)
+  assert.equal(r.quickActions('owner', true, true).length, 4)
+  assert.equal(r.quickActions('owner', true).length, 4)
+})
+
 test('money received on a confirmed sale: the sale roles, whatever the plan or the trial', () => {
   // D2 / fn_record_order_payment (0066): canRecordPayments takes no plan and
   // no trial state at all, so a Costing plan or an ended trial cannot hide

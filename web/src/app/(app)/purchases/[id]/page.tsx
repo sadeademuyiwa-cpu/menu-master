@@ -22,6 +22,7 @@ import { inSentence } from '../buy-figures'
 import '../buy.css'
 // .mm-dot, the dish state dot, as /recipes and /pricing draw it.
 import '../../recipes/_list/lists.css'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -335,7 +336,7 @@ export default async function PurchaseDetail({
         ].filter(Boolean).join(' · ') || undefined}
       />
       {notice && (
-        <Notice tone={/could not|do not yet|cancelling|must be|nothing was changed|can’t/i.test(notice) ? 'warn' : 'info'}>
+        <Notice tone={noticeTone(notice, /cancelling/i)}>
           {notice}
         </Notice>
       )}

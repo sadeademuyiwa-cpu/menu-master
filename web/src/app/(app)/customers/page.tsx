@@ -8,6 +8,7 @@ import { formatDay } from '@/lib/dates'
 import { parentTab } from '@/lib/nav'
 import { canSeeSellingPrices } from '@/lib/pricing'
 import { SALE_ROLES } from '@/app/(app)/dashboard/roles'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,7 +115,7 @@ export default async function CustomersPage({
         title="Customers"
         sub="The people and companies you cook for. Tap a name to see what they have bought."
       />
-      {notice && <Notice tone={/could not|cannot|needs/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
 
       <Disclosure summary="Add a customer" open={!customers?.length}>
         <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>

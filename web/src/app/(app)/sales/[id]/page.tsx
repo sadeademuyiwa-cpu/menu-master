@@ -5,8 +5,9 @@ import { requiredAmount } from '@/lib/money-input'
 import { ProductAndPriceFields } from '@/components/product-price-field'
 import {
   currentContext, contextRedirect, describeWriteError, withNotice, hasSalesEntitlement,
-  closedLine, closedRefusal, recordingOpen, refusalNotice,
+  closedLine, closedRefusal, recordingOpen, refusalNotice, paymentAnswer, paymentProblem,
 } from '@/lib/data/context'
+import { noticeTone } from '@/lib/ui/notice-tone'
 import { loadMenuPrices } from '@/lib/data/menu'
 import { canRecordPayments, canRecordSales, SALE_ROLES } from '@/app/(app)/dashboard/roles'
 import {
@@ -92,7 +93,6 @@ const SALE_WRITERS = 'the owner, a manager or sales staff'
 /** orders DELETE and fn_void_order: owner and manager only (0015). */
 const SALE_REMOVERS = ['owner', 'manager'] as const
 const editRefused = (role: string | null | undefined) => notChanged(role, SALE_ROLES, 'change a sale', SALE_WRITERS)
-const PAYMENT_STATUSES = ['unpaid', 'part_paid', 'paid'] as const
 
 /** A day from formatDay inside a sentence: "Sale of today", "Sale of 12 Oct
  *  2026". Only Today and Yesterday are lowered; a month keeps its capital.
@@ -280,11 +280,15 @@ async function confirm(formData: FormData) {
  * that was not cancelled -- and does so whatever the plan or the trial: a
  * caterer's balance paid after the trial ended is money for work already
  * done, and the receipt must stop saying it is owed (D2). It refuses kitchen
- * and accountant, a cancelled sale and a negative amount itself; its message
- * is shown as it is.
+ * and accountant (42501), and a draft, a cancelled sale or a negative amount
+ * (MMPAY) itself; what each refusal says is paymentAnswer's (write-notice.ts,
+ * tested): MMPAY's sentence as it is, and for 42501 the role sentence, never
+ * the subscription one.
  *
  * Deliberately NOT behind closedRefusal. Before 0066 the function does not
- * exist (PGRST202 / 42883), and the payment is written as it always was.
+ * exist (PGRST202 / 42883), and the payment is written as it always was --
+ * which row-level security refuses on an ended trial or a Costing plan, so
+ * the web goes out after 0066, or with it (DEPLOY_0066.md).
  */
 async function markPaid(formData: FormData) {
   'use server'
@@ -292,20 +296,17 @@ async function markPaid(formData: FormData) {
   const here = `/sales/${id}`
   // Blank is deliberately "nothing paid yet" (tests/money-input.test.mts).
   const paid = Number(formData.get('amount_paid') || 0)
-  if (!Number.isFinite(paid) || paid < 0) {
-    redirect(withNotice(here, 'What they have paid so far is an amount in naira, and cannot be negative.'))
-  }
   const status = String(formData.get('payment_status') ?? 'unpaid')
-  if (!(PAYMENT_STATUSES as readonly string[]).includes(status)) {
-    redirect(withNotice(here, 'Choose whether the sale is not paid, part paid or paid in full.'))
-  }
+  const problem = paymentProblem(paid, status)
+  if (problem) redirect(withNotice(here, problem))
   const ctx = await currentContext()
   const { supabase } = ctx
   const { error } = await supabase.rpc('fn_record_order_payment', {
     p_order_id: id, p_amount_paid: paid, p_payment_status: status,
   })
   revalidatePath(here)
-  if (error && (error.code === 'PGRST202' || error.code === '42883')) {
+  const answer = paymentAnswer(error)
+  if (answer.kind === 'not_there') {
     const { data, error: uErr } = await supabase.from('orders')
       .update({ amount_paid: paid, payment_status: status }).eq('id', id).select('id')
     if (!uErr && (data ?? []).length === 0) {
@@ -313,7 +314,7 @@ async function markPaid(formData: FormData) {
     }
     redirect(withNotice(here, describeWriteError(uErr) ?? 'Payment updated.'))
   }
-  redirect(withNotice(here, describeWriteError(error) ?? 'Payment updated.'))
+  redirect(withNotice(here, answer.kind === 'refused' ? answer.notice : 'Payment updated.'))
 }
 
 /** Void, never edit. The original stays as evidence, with its frozen cost. */
@@ -638,7 +639,7 @@ export default async function SaleDetail({
           </Badge>
         </div>
       </header>
-      {notice && <Notice tone={/could not|cannot|can’t|do not|nothing was changed/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
       {paused && !notice && <Notice tone="warn">{paused}</Notice>}
 
       {voided && (
@@ -1034,8 +1035,10 @@ export default async function SaleDetail({
 
           {!removes ? (
             // fn_void_order admits only the owner and a manager; the form
-            // would only ever be refused, so say who to ask instead.
-            !removerRole && (
+            // would only ever be refused, so say who to ask instead -- while
+            // they could cancel it. After a trial or on a plan without Sales
+            // nobody can, and the paused line above already says why.
+            !removerRole && open !== false && salesPlan !== false && (
               <p className="text-sm" style={MUTED}>If something is wrong with this sale, ask the owner or a manager to cancel it.</p>
             )
           ) : (

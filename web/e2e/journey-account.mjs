@@ -239,6 +239,15 @@ try {
   await must(page, 'and says why', 'new purchases can’t be recorded')
   mark('Purchases has no New purchase button after the trial',
     (await page.locator('a.mm-btn[href="/purchases/new"]').count()) === 0)
+  // --- and a new sale is not typed in only to be refused at Confirm ----------
+  await go(page, '/sales/new')
+  mark('a new sale sends an ended trial back to Sales', path(page) === '/sales', page.url())
+  await must(page, 'and says why', 'new sales can’t be recorded')
+  mark('Sales has no New sale button after the trial',
+    (await page.locator('a.mm-btn[href="/sales/new"]').count()) === 0)
+  await go(page, '/dashboard')
+  mark('Home offers neither Record a sale nor Record a purchase after the trial',
+    (await page.locator('a.mm-btn[href="/sales/new"], a.mm-btn[href="/purchases/new"]').count()) === 0)
 
   const { rows: [after] } = await db.query(
     `select (select count(*)::int from cost_snapshots t ${OWN}) as snapshots,

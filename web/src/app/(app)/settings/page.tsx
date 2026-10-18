@@ -12,6 +12,7 @@ import { parentTab } from '@/lib/nav'
 import { canSeeCosts } from '@/lib/pricing'
 import { BUSINESS_TYPES, isBusinessType } from '@/lib/business-types'
 import { createClient } from '@/lib/supabase/server'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -351,7 +352,7 @@ export default async function SettingsPage({
           <Link href="/settings/people" className="mm-inline-tap">People on this account →</Link>
         </p>
       </div>
-      {notice && <Notice tone={/could not|cannot|must be|give |needs a name|choose|from 0|above zero|from 1/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice, /choose|from 0|above zero|from 1/i)}>{notice}</Notice>}
 
       {/* THE BUSINESS ----------------------------------------------- */}
       {business && (

@@ -6,9 +6,12 @@
  * not ask for the changed rows (.select(...)) cannot tell a refusal from a
  * save, and says "Saved." for nothing -- about twenty did, and some then
  * re-costed every dish. This reads the app's own source: every
- * supabase.from(...).update(...) or .delete() chain must carry .select(...),
- * except the few listed below, which are best-effort clean-ups of rows the
- * same action has just written, or follow a checked write of the same dish.
+ * supabase.from(...).update(...) or .delete() chain must carry .select(...)
+ * AND hand its rows to a `data` destructured from the result. A .select()
+ * whose rows are thrown away (({ error } = await ...select('id'))) checks
+ * nothing. The few listed below are the exceptions: best-effort clean-ups of
+ * rows the same action has just written, or writes that follow a checked
+ * write of the same dish.
  *
  * A new action that skips the check fails here, by file and table, rather
  * than in front of an owner whose trial has ended.
@@ -30,6 +33,8 @@ const SKIP = ['(app)/account', '(app)/subscribe', 'api/checkout', 'api/billing',
  *     after a later step failed; the user is told about that failure.
  *   scaleRecipe's lines and work: written after the dish's own batch update
  *     came back with its row, which is the check (recipes/[id]/actions.ts).
+ *   setup's dish lines: the same, after updateFirstDish's own recipes update
+ *     came back with its row ((setup)/start/page.tsx).
  */
 const ALLOWED: Record<string, number> = {
   '(app)/purchases/new/actions.ts purchases.delete': 1,
@@ -40,6 +45,8 @@ const ALLOWED: Record<string, number> = {
   '(setup)/start/page.tsx recipes.delete': 1,
   '(app)/recipes/[id]/actions.ts recipe_lines.update': 1,
   '(app)/recipes/[id]/actions.ts recipe_labour.update': 1,
+  '(setup)/start/page.tsx recipe_lines.update': 1,
+  '(setup)/start/page.tsx recipe_lines.delete': 1,
 }
 
 function sources(dir: string): string[] {
@@ -74,9 +81,14 @@ function closeOf(src: string, open: number): number {
   return i
 }
 
-type Chain = { table: string; text: string }
+type Chain = { table: string; text: string; lead: string }
 
-/** Every supabase.from('<table>') call chain: .from(...) and each .method(...) after it. */
+/**
+ * Every supabase.from('<table>') call chain: .from(...) and each .method(...)
+ * after it. `lead` is what its line says before the chain starts, which is
+ * where the result is (or is not) taken apart:
+ * "const { data, error } = await supabase".
+ */
 function chains(src: string): Chain[] {
   const out: Chain[] = []
   const re = /\.from\((['"])([a-z_]+)\1\)/g
@@ -87,10 +99,14 @@ function chains(src: string): Chain[] {
       if (!rest) break
       i = closeOf(src, i + rest[0].length - 1)
     }
-    out.push({ table: m[2], text: src.slice(m.index, i) })
+    const lineStart = src.lastIndexOf('\n', m.index) + 1
+    out.push({ table: m[2], text: src.slice(m.index, i), lead: src.slice(lineStart, m.index) })
   }
   return out
 }
+
+/** The result is taken apart with its rows in it: { data }, { data: saved, error }, { error, data }. */
+const readsRows = (c: Chain) => /\{[^{}]*\bdata\b[^{}]*\}\s*=\s*await\b/.test(c.lead)
 
 test('the scan finds the writes it is meant to (it is not passing on nothing)', () => {
   const all = sources(APP).flatMap((f) => chains(readFileSync(f, 'utf8')))
@@ -102,6 +118,15 @@ test('the scan finds the writes it is meant to (it is not passing on nothing)', 
   const [one] = chains(`await supabase.from('recipes').update({\n  name: f('x'),\n}).eq('id', id)\n  .select('id')\nnext()`)
   assert.equal(one.table, 'recipes')
   assert.match(one.text, /\.select\('id'\)$/)
+  // ...and tells rows that are read from rows that are thrown away.
+  const [kept] = chains(`  const { data: saved, error: rErr } = await supabase.from('recipes').update({ a: 1 }).eq('id', id).select('id')`)
+  assert.equal(readsRows(kept), true)
+  const [also] = chains(`  const { error, data } = await ctx.supabase.from('recipes').delete().eq('id', id).select('id')`)
+  assert.equal(readsRows(also), true)
+  const [dropped] = chains(`      ({ error } = await supabase.from('recipe_lines').delete().eq('id', x).select('id'))`)
+  assert.equal(readsRows(dropped), false)
+  const [bare] = chains(`  await supabase.from('recipe_lines').update({ q: 1 }).eq('id', x).select('id')`)
+  assert.equal(readsRows(bare), false)
 })
 
 test('every edit and remove asks for its rows back', () => {
@@ -111,11 +136,12 @@ test('every edit and remove asks for its rows back', () => {
     const rel = relative(APP, file).split(sep).join('/')
     for (const c of chains(readFileSync(file, 'utf8'))) {
       const op = /\.update\(/.test(c.text) ? 'update' : /\.delete\(/.test(c.text) ? 'delete' : null
-      if (!op || /\.select\(/.test(c.text)) continue
+      if (!op || (/\.select\(/.test(c.text) && readsRows(c))) continue
       const key = `${rel} ${c.table}.${op}`
       seen[key] = (seen[key] ?? 0) + 1
       if (seen[key] > (ALLOWED[key] ?? 0)) missing.push(`${key}: ${c.text.replace(/\s+/g, ' ').slice(0, 140)}`)
     }
   }
-  assert.deepEqual(missing, [], 'an update or delete with no .select() cannot tell a refusal from a save')
+  assert.deepEqual(missing, [],
+    'an update or delete that does not read its rows back (.select() into a destructured data) cannot tell a refusal from a save')
 })

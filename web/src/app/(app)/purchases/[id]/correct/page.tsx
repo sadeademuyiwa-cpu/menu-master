@@ -12,6 +12,7 @@ import { money, quantity, purchaseReference } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
 import { canRecordPurchases } from '../../buy-roles'
 import { inSentence, sumMoney } from '../../buy-figures'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -146,7 +147,7 @@ export default async function CorrectPurchase({
         title="Correct this purchase"
         sub={`Bought ${inSentence(formatDay(purchase.purchase_date))}${purchaseReference(purchase.reference) ? ` · ${purchaseReference(purchase.reference)}` : ''} · ${money(total)}`}
       />
-      {notice && <Notice tone={/could not|not available|nothing was changed|choose|enter|needs/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice, /not available|choose|enter/i)}>{notice}</Notice>}
 
       <Notice tone="info">
         Change what was wrong and save. The corrected purchase is recorded, the earlier one is

@@ -319,7 +319,10 @@ async function updateFirstDish(formData: FormData) {
 
   // The dish first: one row that is always there, so when it changes nothing
   // (refused quietly -- a trial that ended does that), nothing has changed and
-  // the dish is not re-costed. Its lines are written by the same roles.
+  // the dish is not re-costed. Its lines are written by the same roles under
+  // the same policy, so the dish row is the check; the line writes below are
+  // listed as such in tests/zero-row-writes.test.mts rather than asking for
+  // rows nobody reads.
   const { data: saved, error: rErr } = await supabase.from('recipes')
     .update({ name, batch_yield_qty: plates }).eq('id', recipeId).select('id')
   const refused = await writeRefusal(rErr, saved, role)
@@ -328,9 +331,9 @@ async function updateFirstDish(formData: FormData) {
   for (const c of changes) {
     let error = null
     if (c.lineId && c.qty === null) {
-      ({ error } = await supabase.from('recipe_lines').delete().eq('id', c.lineId).select('id'))
+      ({ error } = await supabase.from('recipe_lines').delete().eq('id', c.lineId))
     } else if (c.lineId && c.qty !== null) {
-      ({ error } = await supabase.from('recipe_lines').update({ qty: c.qty, unit_id: c.unitId }).eq('id', c.lineId).select('id'))
+      ({ error } = await supabase.from('recipe_lines').update({ qty: c.qty, unit_id: c.unitId }).eq('id', c.lineId))
     } else if (!c.lineId && c.qty !== null) {
       ({ error } = await supabase.from('recipe_lines')
         .insert({ account_id: accountId, recipe_id: recipeId, ingredient_id: c.ingredientId, qty: c.qty, unit_id: c.unitId }))

@@ -10,6 +10,7 @@ import { canSeeCosts } from '@/lib/pricing'
 import { canRecordPurchases } from './buy-roles'
 import { dayShort, groupByDay, lastWeeks, monthStart, nameList, spendByWeek, sumMoney } from './buy-figures'
 import './buy.css'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -110,7 +111,7 @@ export default async function PurchasesPage({
         title="Purchases"
         sub="What you actually paid. Every ingredient cost in Menu Master comes from here."
       />
-      {notice && <Notice tone={/could not|cannot|can’t|nothing was changed/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
 
       <nav aria-label="Buying" className="grid grid-cols-2 gap-2">
         <Link href="/ingredients" className="mm-buy-tile">

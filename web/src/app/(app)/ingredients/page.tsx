@@ -10,6 +10,7 @@ import { canSeeCosts } from '@/lib/pricing'
 import { canEditItems } from '../purchases/buy-roles'
 import { inSentence, perBuyingUnit } from '../purchases/buy-figures'
 import '../purchases/buy.css'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -241,7 +242,7 @@ export default async function IngredientsPage(props: {
       />
 
       {notice && (
-        <Notice tone={/already|could not|not allow/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>
+        <Notice tone={noticeTone(notice)}>{notice}</Notice>
       )}
 
       {canEdit && (

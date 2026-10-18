@@ -16,7 +16,10 @@
  *   changed elsewhere or the role does not allow it.
  *
  * Nothing here decides whether a write is allowed. The database decides; this
- * only puts its verdict into words a food-business owner can act on.
+ * only puts its verdict into words a food-business owner can act on. The
+ * same goes for the two decisions at the bottom: closedText (refuse before
+ * calling the database when it has already said the account is closed) and
+ * paymentAnswer (what Save payment says when fn_record_order_payment answers).
  */
 
 /** A PostgREST error as supabase-js hands it back. */
@@ -52,6 +55,13 @@ const STILL_HERE = 'Everything you entered is still here.'
  */
 const NO_ACCESS = 'MMENT'
 const NO_SALES = 'MMSAL'
+/**
+ * fn_record_order_payment's own refusals (0066, integration decision X5): a
+ * draft, a cancelled sale, a negative amount, a payment state that is not one
+ * of the three, a sale that is not there. Each is a plain sentence, shown as
+ * it is.
+ */
+const PAYMENT_REFUSED = 'MMPAY'
 
 /**
  * Turn a database refusal into something a food-business owner can act on.
@@ -77,6 +87,7 @@ export function describeWriteError(error: PgError): string | null {
     return message || 'Nothing was changed. Your plan does not include Sales. Choose Costing + Sales ' +
       'on Plans & billing to record sales.'
   }
+  if (code === PAYMENT_REFUSED) return message || PAYMENT_NOT_SAVED
 
   // Row-level security refused. During a live trial this is a role problem;
   // after the trial boundary it is the entitlement gate. Both are "you cannot
@@ -233,4 +244,110 @@ export async function refusalAfterWrite(
 ): Promise<string | null> {
   if (error) return describeWriteError(error)
   return changedRows(data) > 0 ? null : await refusal()
+}
+
+// ---------------------------------------------------------------------------
+// Before an action the trial gate would refuse
+// ---------------------------------------------------------------------------
+
+export type ClosedScope = {
+  /** The action is a Sales record (orders, order_lines, customers): a plan
+   *  without Sales is then also a reason. */
+  sales?: boolean
+}
+
+/**
+ * Whether the plan's Sales is worth asking about: only for a Sales record, and
+ * only while the account is not already closed (a closed account's reason is
+ * the trial or the payment, whatever the plan).
+ */
+export function asksAboutSales(verdict: AccessVerdict | null | undefined, scope: ClosedScope = {}): boolean {
+  return !!scope.sales && verdict?.entitled !== false
+}
+
+/**
+ * Before recording, cancelling or correcting a purchase, or confirming,
+ * cancelling or re-issuing a sale: the refusal when recording is explicitly
+ * closed -- or, for a Sales record, when the plan explicitly has no Sales --
+ * and null to go ahead. Not known (null) goes ahead, as today: the database
+ * still decides.
+ *
+ * `salesPlan` is fn_my_has_sales(): true, false, or null when not known.
+ */
+export function closedText(
+  verdict: AccessVerdict | null | undefined,
+  salesPlan: boolean | null | undefined,
+  role?: string | null,
+  scope: ClosedScope = {},
+): string | null {
+  if (verdict?.entitled === false) return refusalText(verdict, role)
+  if (asksAboutSales(verdict, scope) && salesPlan === false) return refusalText(verdict, role, { noSales: true })
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Money received on a confirmed sale (fn_record_order_payment, 0066)
+// ---------------------------------------------------------------------------
+
+export const PAYMENT_STATUSES = ['unpaid', 'part_paid', 'paid'] as const
+export type PaymentStatus = typeof PAYMENT_STATUSES[number]
+
+/** A role that takes no money (kitchen, accountant): fn_require_account_role's 42501. */
+export const PAYMENT_ROLE_REFUSED = 'Your role can’t record payments. Ask the owner or a manager.'
+
+/** The payment was refused and the database's words are not for an owner. */
+export const PAYMENT_NOT_SAVED =
+  'Menu Master could not record that payment. Nothing was changed. Reload the page and try again.'
+
+/**
+ * Text that is the database talking to us, not to the owner: a constraint
+ * name, a policy, a missing function, a dropped connection.
+ */
+const RAW_DATABASE = /violates|row-level security|constraint|relation "|column "|syntax|permission denied|duplicate key|null value|function .*\(|PGRST|JWT|TypeError|fetch failed/i
+
+/**
+ * markPaid's own check, before it asks the database: an amount of zero or
+ * more and one of the three states. Null when both are fine.
+ */
+export function paymentProblem(paid: number, status: string): string | null {
+  if (!Number.isFinite(paid) || paid < 0) {
+    return 'What they have paid so far is an amount in naira, and cannot be negative.'
+  }
+  if (!(PAYMENT_STATUSES as readonly string[]).includes(status)) {
+    return 'Choose whether the sale is not paid, part paid or paid in full.'
+  }
+  return null
+}
+
+export type PaymentAnswer =
+  | { kind: 'saved' }
+  /** fn_record_order_payment is not there yet (before 0066): write it the old way. */
+  | { kind: 'not_there' }
+  | { kind: 'refused'; notice: string }
+
+/**
+ * What fn_record_order_payment's answer means for the person who pressed
+ * Save payment.
+ *
+ *   no error              saved
+ *   PGRST202 / 42883      the function is not there yet (before 0066)
+ *   MMPAY                 its own refusal, a plain sentence: shown as it is
+ *   42501                 the role takes no money: PAYMENT_ROLE_REFUSED --
+ *                         never the subscription sentence, because the
+ *                         subscription never stops a payment (D2)
+ *   MMENT / MMSAL         the trial gate's own words, as everywhere
+ *   anything else         its message if it reads as English, else
+ *                         PAYMENT_NOT_SAVED
+ */
+export function paymentAnswer(error: PgError): PaymentAnswer {
+  if (!error) return { kind: 'saved' }
+  const code = error.code ?? ''
+  if (code === 'PGRST202' || code === '42883') return { kind: 'not_there' }
+  const message = (error.message ?? '').trim()
+  if (code === PAYMENT_REFUSED) return { kind: 'refused', notice: message || PAYMENT_NOT_SAVED }
+  if (code === '42501') return { kind: 'refused', notice: PAYMENT_ROLE_REFUSED }
+  if (code === NO_ACCESS || code === NO_SALES) {
+    return { kind: 'refused', notice: describeWriteError(error) ?? PAYMENT_NOT_SAVED }
+  }
+  return { kind: 'refused', notice: message && !RAW_DATABASE.test(message) ? message : PAYMENT_NOT_SAVED }
 }

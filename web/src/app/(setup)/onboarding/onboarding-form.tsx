@@ -6,24 +6,10 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/button'
 import { track } from '@/lib/analytics/client'
 import { BUSINESS_TYPES } from '@/lib/business-types'
-
-/**
- * The database's refusal, in words an owner can act on. The raw text goes to
- * the console for us, never to the screen.
- */
-function friendly(error: { code?: string; message?: string }): string {
-  const message = error.message ?? ''
-  if (/idempotency/i.test(message) && /different/i.test(message)) {
-    return 'Your business was already being set up with the details you entered first. Reload this page to carry on.'
-  }
-  if (error.code === '23505') {
-    return 'You already have a business with that name. Try a slightly different name.'
-  }
-  if (error.code === '42501' || /row-level security/i.test(message)) {
-    return 'We could not set up a business for this login. Sign out, sign back in and try once more.'
-  }
-  return 'We could not set up your business just now. Check your connection and press Continue again.'
-}
+// The database's refusal, in words an owner can act on (tested). The raw
+// text goes to the console for us, never to the screen -- except MMLGN and
+// MMENT, whose sentences the database wrote for the person.
+import { onboardingRefusal } from './onboarding-refusal'
 
 export function OnboardingForm() {
   const router = useRouter()
@@ -61,7 +47,7 @@ export function OnboardingForm() {
     if (error) {
       console.error('[onboarding] fn_create_account_and_business refused:', error)
       setBusy(false)
-      setError(friendly(error))
+      setError(onboardingRefusal(error))
       return
     }
     track('business_created')

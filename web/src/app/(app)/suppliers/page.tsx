@@ -5,6 +5,7 @@ import { PageHeader, Field, Submit, InlineSubmit, Notice, Empty, Disclosure, Bac
 import { parentTab } from '@/lib/nav'
 import { canEditSuppliers } from '../purchases/buy-roles'
 import '../purchases/buy.css'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -93,7 +94,7 @@ export default async function SuppliersPage({
       {tab && <BackLink href={tab.href}>{tab.label}</BackLink>}
       <PageHeader title="Suppliers and markets"
         sub="Who you buy from. Optional: you can record a purchase without one. A market name is fine; you do not need a formal supplier." />
-      {notice && <Notice tone={/could not|give the|nothing was changed/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
 
       {canEdit && (
         <Disclosure summary="Add a supplier or market" open={!suppliers?.length}>

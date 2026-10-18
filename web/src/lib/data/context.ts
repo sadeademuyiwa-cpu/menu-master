@@ -3,8 +3,8 @@ import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import { resolveContext, type ResolvedContext } from './resolve-context'
 import {
-  knownVerdict, pausedLine, refusalAfterWrite, refusalText,
-  type AccessVerdict, type PgError,
+  asksAboutSales, closedText, knownVerdict, pausedLine, refusalAfterWrite, refusalText,
+  type AccessVerdict, type ClosedScope, type PgError,
 } from './write-notice'
 
 export {
@@ -13,7 +13,8 @@ export {
 } from './resolve-context'
 export {
   describeWriteError, NOT_CHANGED, changedRows, wrote,
-  type AccessVerdict, type PgError,
+  paymentAnswer, paymentProblem, PAYMENT_STATUSES,
+  type AccessVerdict, type PgError, type PaymentAnswer,
 } from './write-notice'
 
 /**
@@ -141,16 +142,12 @@ export async function recordingOpen(): Promise<boolean | null> {
   return s ? s.entitled : null
 }
 
-type RefusalScope = {
-  /** The write was a Sales record (orders, order_lines, customers): a plan
-   *  without Sales is then also a reason. */
-  sales?: boolean
-}
+/** sales: the write was a Sales record, so a plan without Sales is also a reason. */
+type RefusalScope = ClosedScope
 
-/** Whether a plan without Sales is the reason, asked only when it could be. */
+/** Whether a plan without Sales is the reason, asked only when it could be (asksAboutSales). */
 async function salesMissing(verdict: AccessVerdict | null, scope: RefusalScope): Promise<boolean> {
-  if (!scope.sales || verdict?.entitled === false) return false
-  return (await hasSalesEntitlement()) === false
+  return asksAboutSales(verdict, scope) && (await hasSalesEntitlement()) === false
 }
 
 /**
@@ -192,9 +189,10 @@ export async function writeNotice(
  */
 export async function closedRefusal(role?: string | null, scope: RefusalScope = {}): Promise<string | null> {
   const verdict = await entitlementStatus()
-  if (verdict?.entitled === false) return refusalText(verdict, role)
-  if (await salesMissing(verdict, scope)) return refusalText(verdict, role, { noSales: true })
-  return null
+  // The decision itself is closedText (write-notice.ts, tested); Sales is
+  // looked up only when it could be the reason.
+  const salesPlan = asksAboutSales(verdict, scope) ? await hasSalesEntitlement() : null
+  return closedText(verdict, salesPlan, role, scope)
 }
 
 /**

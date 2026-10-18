@@ -13,6 +13,7 @@ import {
   type AttentionRow, type MenuPriceRow, type DishGroup,
 } from './_list/dish-figures'
 import './_list/lists.css'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -159,7 +160,7 @@ export default async function DishesPage(props: {
           </Link>
         )}
       </div>
-      {notice && <Notice tone={/could not|rename/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice, /rename/i)}>{notice}</Notice>}
 
       {/* Sizes and Prices belong to dishes; Prices shows nothing to kitchen. */}
       <div className={`grid gap-2 ${seesCosts || seesPrices ? 'grid-cols-2' : 'grid-cols-1'} sm:max-w-md`}>
