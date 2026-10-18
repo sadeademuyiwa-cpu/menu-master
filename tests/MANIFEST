@@ -51,3 +51,4 @@
 049_dish_photos.sql                   requires=0063
 050_sales_reads_prices.sql            requires=0064
 052_trial_gate.sql                    requires=0066
+053_billing_self_serve.sql            requires=0067

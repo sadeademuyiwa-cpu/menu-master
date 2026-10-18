@@ -33,3 +33,31 @@ supabase secrets set PAYSTACK_SECRET_KEY=<the sk_test_... value>
 Only `failed_transient` asks for a retry. `failed_permanent` returns 200 on
 purpose: retrying cannot fix it, and it belongs in the reconciliation queue for
 a human, not in a redelivery loop.
+
+## Switching off a replaced subscription (0067)
+
+When an owner changes plan, Paystack opens a new subscription; it has no
+plan-switch call. 0067 records the old subscription in `billing_superseded`.
+After every verified delivery (applied, ignored or a redelivery) the webhook
+claims up to three such rows with `fn_billing_claim_switch_offs`, which never
+hands out a code that is current on any account, and for each:
+
+1. `GET /subscription/:code` for its `status` and `email_token`;
+2. if Paystack already shows it `non-renewing`, `cancelled` or `complete`,
+   records `already_off`; otherwise `POST /subscription/disable` with
+   `{code, token}`;
+3. records the outcome with `fn_billing_record_switch_off`.
+
+This runs after the response through `EdgeRuntime.waitUntil`, so it never
+delays or changes what Paystack is told about the event. A failure is
+retried on a later delivery with backoff (2, 4 ... 256 minutes, at most 20
+tries); an hour on, `fn_admin_scan` raises `subscription_not_switched_off`.
+The old subscription's own `not_renew`, `disable` and failed-payment events
+are recorded as `ignored` (`superseded`) and change nothing. A cancel or failed
+payment for any OTHER subscription that is not the current one is held
+`failed_permanent` (`not_current_subscription`) for a person to review. Apply
+0067 before deploying this version.
+
+Retries only happen when a later notice arrives. On a quiet day that can be
+long, so `DEPLOY_0067.md` has a daily manual switch-off sweep for any row still
+pending.

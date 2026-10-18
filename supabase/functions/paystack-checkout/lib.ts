@@ -3,6 +3,10 @@
 // network or a real secret. index.ts imports from here; nothing is duplicated.
 // ============================================================================
 
+/** A parsed JSON body whose shape is checked field by field. */
+// deno-lint-ignore no-explicit-any
+type Loose = Record<string, any>;
+
 export type Quote = {
   account_id: string;
   plan_id: string;
@@ -31,16 +35,22 @@ export function initializeBody(
   q: Quote,
   email: string,
   callbackUrl: string,
+  replaces: string | null = null,
 ): Record<string, unknown> {
+  // fn_billing_apply reads BOTH of these. account_id is how a webhook is
+  // attributed to a customer at all; plan_id is the fallback when Paystack
+  // sends no plan code of its own.
+  const metadata: Record<string, string> = { account_id: q.account_id, plan_id: q.plan_id };
+  // 0067: the subscription this payment replaces (a plan change). The webhook
+  // switches it off once the new one is the one on file. Only ever the code
+  // we hold for this account, never anything from the request.
+  if (replaces) metadata.replaces = replaces;
   const body: Record<string, unknown> = {
     email,
     amount: String(q.price_kobo),
     currency: q.currency,
     callback_url: callbackUrl,
-    // fn_billing_apply reads BOTH of these. account_id is how a webhook is
-    // attributed to a customer at all; plan_id is the fallback when Paystack
-    // sends no plan code of its own.
-    metadata: { account_id: q.account_id, plan_id: q.plan_id },
+    metadata,
   };
   if (q.provider_plan_code) body.plan = q.provider_plan_code;
   return body;
@@ -134,4 +144,149 @@ export function resolveCallbackUrl(
     u.host.endsWith(".vercel.app");
 
   return allowed ? `${u.origin}/checkout/callback` : fallback;
+}
+
+// ============================================================================
+// 0067: SELF-SERVE PLAN CHANGES (owner decision D5, 18 Oct 2026)
+//
+// An account that already pays may move to the other plan by itself. The old
+// Paystack subscription is switched off by the webhook once the new one is on
+// file, so nobody pays for two. Before any quote or founder hold, checkout
+// refuses only:
+//   already_on_plan  409  the same tier, while ACTIVE. (Integration decision
+//                         X2: an overdue -- past_due -- account choosing its
+//                         own tier is let through as "Pay now": a REPLACEMENT
+//                         of the failed subscription, carrying
+//                         metadata.replaces exactly like a tier change, so the
+//                         webhook switches the failed one off once the new
+//                         payment lands. Paystack does not retry a failed
+//                         subscription charge, so "Update your card" alone
+//                         may never collect the month.)
+//   owner_only       403  the account already pays (active, past_due, or
+//                         cancelled but inside its paid period) and the caller
+//                         is not its owner. A trial's first payment is
+//                         unchanged: any member may still make it.
+//   switch_needs_support 409  the account pays (active or past_due) but we
+//                         hold no Paystack subscription code for it, so the
+//                         old subscription could not be switched off -- a
+//                         tier change and an overdue "Pay now" alike. Message
+//                         us instead. Also every such change while the kill
+//                         switch is off (BILLING_SELF_SERVE=off): the safe
+//                         state for a rollback of 0067.
+//   change_in_progress 409  (X3) an earlier plan change or Pay now is paid
+//                         and its old subscription -- the one this payment
+//                         would replace -- is still waiting to be switched
+//                         off. Checked only while the kill switch is on, so a
+//                         rolled-back 0067 (no billing_superseded) is never
+//                         read.
+// A plan cancelled but still inside its paid month (X8) may choose a tier
+// again, its own included: a new paid month starts the day they pay, and the
+// ending subscription simply ends (metadata.replaces still names it, so its
+// later events change nothing).
+// ============================================================================
+
+/** The caller's account, as pickAccount chooses it, and whether the caller
+ *  owns it. One login can hold several memberships (one per business) under
+ *  one account; it is the owner if any of them is the owner's. */
+export function pickAccountRole(
+  rows: unknown,
+): { accountId: string; isOwner: boolean } | { error: "no_account" | "ambiguous_account" } {
+  const picked = pickAccount(rows);
+  if ("error" in picked) return picked;
+  const list = Array.isArray(rows) ? rows : [];
+  const isOwner = list.some((r) => {
+    const m = r as Record<string, unknown>;
+    return m?.account_id === picked.accountId && m?.role === "owner";
+  });
+  return { accountId: picked.accountId, isOwner };
+}
+
+/** The facts about an account's subscription that checkout decides on. */
+export type SubState = {
+  status: string;
+  tier: string | null;
+  current_period_end: string | null;
+  provider_subscription_code: string | null;
+};
+
+/** The subscriptions row as PostgREST returns it with plans(tier) embedded.
+ *  No row (or an unreadable one) is null. */
+export function readSubState(rows: unknown): SubState | null {
+  const r = (Array.isArray(rows) ? rows[0] : null) as Loose | null;
+  if (!r || typeof r.status !== "string") return null;
+  const plan = Array.isArray(r.plans) ? r.plans[0] : r.plans;
+  return {
+    status: r.status,
+    tier: typeof plan?.tier === "string" ? plan.tier : null,
+    current_period_end: typeof r.current_period_end === "string" ? r.current_period_end : null,
+    provider_subscription_code:
+      typeof r.provider_subscription_code === "string" && r.provider_subscription_code
+        ? r.provider_subscription_code : null,
+  };
+}
+
+/** Already paying: active, past_due, or cancelled but still inside the period
+ *  they paid for (the plan stays on until then). */
+export function isPaying(sub: SubState | null, now: Date = new Date()): boolean {
+  if (!sub) return false;
+  if (sub.status === "active" || sub.status === "past_due") return true;
+  if (sub.status === "cancelled" && sub.current_period_end) {
+    const end = Date.parse(sub.current_period_end);
+    return Number.isFinite(end) && end > now.getTime();
+  }
+  return false;
+}
+
+export type Refusal = {
+  error: "already_on_plan" | "owner_only" | "switch_needs_support";
+  status: 403 | 409;
+};
+
+/** Whether checkout must refuse this request, decided before any quote. */
+export function checkoutRefusal(
+  sub: SubState | null,
+  tier: "costing" | "trading",
+  isOwner: boolean,
+  now: Date = new Date(),
+  selfServe = true,
+): Refusal | null {
+  if (!sub) return null;
+  const live = sub.status === "active" || sub.status === "past_due";
+  // X2: only an ACTIVE plan is "already on" its tier. past_due on the same
+  // tier is Pay now, a replacement, and goes on to the checks below.
+  if (sub.status === "active" && sub.tier === tier) return { error: "already_on_plan", status: 409 };
+  if (isPaying(sub, now) && !isOwner) return { error: "owner_only", status: 403 };
+  if (live && (!selfServe || !sub.provider_subscription_code)) {
+    return { error: "switch_needs_support", status: 409 };
+  }
+  return null;
+}
+
+/** The kill switch. Self-serve plan changes are on unless the secret
+ *  BILLING_SELF_SERVE is exactly "off". */
+export function selfServeOn(value: string | undefined): boolean {
+  return (value ?? "").trim().toLowerCase() !== "off";
+}
+
+/** Integration decision X3, applied at checkout as well as in paystack-manage:
+ *  billing_superseded rows (read with the service role, filtered to the code
+ *  this payment would replace and disabled_at is null) mean an earlier plan
+ *  change or Pay now is paid but its new subscription has not reached us.
+ *  A second checkout then would open ANOTHER subscription replacing the same
+ *  old one -- the customer pays twice -- so it is refused change_in_progress
+ *  (409). Only an empty list is clear: an unreadable answer is never taken as
+ *  clear. Kept identical to paystack-manage's changeInProgress; lib_test
+ *  checks the two agree. */
+export function changeInProgress(rows: unknown): boolean {
+  return !Array.isArray(rows) || rows.length > 0;
+}
+
+/** The Paystack subscription this payment replaces, for metadata.replaces.
+ *  Any account past its trial with a code on file -- a tier change, an
+ *  overdue Pay now on the same tier (X2), a cancelled plan choosing again
+ *  (X8): the webhook then switches it off (or finds it already off) and
+ *  ignores its later events. */
+export function replacesCode(sub: SubState | null): string | null {
+  if (!sub || sub.status === "trialing") return null;
+  return sub.provider_subscription_code;
 }
