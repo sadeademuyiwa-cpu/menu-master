@@ -28,17 +28,17 @@ with checks(n, check_name, ok, detail) as (
                           and proname in ('fn_billing_event_sub_code','fn_billing_find_account','fn_billing_claim_switch_offs',
                                           'fn_billing_record_switch_off','fn_billing_record_manage_request')), ''
   union all select 4, 'fn_billing_apply is the 0051 body 0067 replaces',
-         (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace and proname='fn_billing_apply')
+         (select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace and proname='fn_billing_apply')
            = '82a53c707c3597dd86b3c3b1b7d634a9',
-         coalesce((select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace and proname='fn_billing_apply'), 'missing')
+         coalesce((select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace and proname='fn_billing_apply'), 'missing')
   union all select 5, 'fn_apply_billing_side_effects is the 0050 body 0067 replaces',
-         (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace and proname='fn_apply_billing_side_effects')
+         (select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace and proname='fn_apply_billing_side_effects')
            = 'd7921e3bf95357d70b8062f85e1754b5',
-         coalesce((select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace and proname='fn_apply_billing_side_effects'), 'missing')
+         coalesce((select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace and proname='fn_apply_billing_side_effects'), 'missing')
   union all select 6, 'fn_admin_scan is the 0055 body 0067 replaces',
-         (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace and proname='fn_admin_scan')
+         (select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace and proname='fn_admin_scan')
            = '8d402ad907dcd23906a333f70217a1f9',
-         coalesce((select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace and proname='fn_admin_scan'), 'missing')
+         coalesce((select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace and proname='fn_admin_scan'), 'missing')
   union all select 7, 'the platform alert kinds are the six 0055 kinds',
          (select pg_get_constraintdef(oid) from pg_constraint where conname='ck_platform_alerts_kind')
            = 'CHECK ((kind = ANY (ARRAY[''billing_failed_permanent''::text, ''billing_stuck''::text, '

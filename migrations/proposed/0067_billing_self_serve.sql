@@ -126,17 +126,17 @@ select (select count(*) from pg_proc where pronamespace='public'::regnamespace a
 do $$
 declare v_fns int; v_pols int;
 begin
-  if (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace
+  if (select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace
        and proname='fn_billing_apply') is distinct from '82a53c707c3597dd86b3c3b1b7d634a9' then
     raise exception '0067 preflight FAILED: fn_billing_apply is not the 0051 body (md5 %). '
       'Something changed it since 0051; merge that change into 0067 first.',
-      (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace and proname='fn_billing_apply');
+      (select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace and proname='fn_billing_apply');
   end if;
-  if (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace
+  if (select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace
        and proname='fn_apply_billing_side_effects') is distinct from 'd7921e3bf95357d70b8062f85e1754b5' then
     raise exception '0067 preflight FAILED: fn_apply_billing_side_effects is not the 0050 body.';
   end if;
-  if (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace
+  if (select md5(replace(prosrc, chr(13), '')) from pg_proc where pronamespace='public'::regnamespace
        and proname='fn_admin_scan') is distinct from '8d402ad907dcd23906a333f70217a1f9' then
     raise exception '0067 preflight FAILED: fn_admin_scan is not the 0055 body.';
   end if;

@@ -67,7 +67,7 @@ begin
     raise exception '0066 rollback: fn_require_entitled, fn_trial_end or fn_record_order_payment is missing; 0066 is not applied.';
   end if;
 
-  for r in select sig, md5_0066, md5(pg_get_functiondef(to_regprocedure(sig))) as live
+  for r in select sig, md5_0066, md5(replace(pg_get_functiondef(to_regprocedure(sig)), chr(13), '')) as live
              from _mm0066_rb order by sig loop
     if r.live is distinct from r.md5_0066 then
       v_bad := v_bad || E'\n  ' || r.sig;
@@ -1081,7 +1081,7 @@ drop function fn_trial_end(timestamptz);
 do $$
 declare r record; v_bad text := ''; v_moved int;
 begin
-  for r in select sig, md5_0064, md5(pg_get_functiondef(to_regprocedure(sig))) as live
+  for r in select sig, md5_0064, md5(replace(pg_get_functiondef(to_regprocedure(sig)), chr(13), '')) as live
              from _mm0066_rb order by sig loop
     if r.live is distinct from r.md5_0064 then
       v_bad := v_bad || E'\n  ' || r.sig;

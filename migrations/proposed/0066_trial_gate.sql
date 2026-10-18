@@ -193,7 +193,9 @@ begin
 
   -- The bodies below are copies. A copy of anything but the definition
   -- production runs would quietly undo a change, so every one must match.
-  for r in select e.sig, e.md5_0064, md5(pg_get_functiondef(to_regprocedure(e.sig))) as live
+  -- Carriage returns are ignored: production holds some 0064 bodies with
+  -- CRLF line ends (applied from a Windows copy), the same text otherwise.
+  for r in select e.sig, e.md5_0064, md5(replace(pg_get_functiondef(to_regprocedure(e.sig)), chr(13), '')) as live
              from _mm0066_expected e order by e.sig loop
     if r.live is distinct from r.md5_0064 then
       v_bad := v_bad || format(E'\n  %s: expected %s, found %s', r.sig, r.md5_0064, coalesce(r.live, 'MISSING'));
@@ -1543,7 +1545,7 @@ begin
       end if;
       v_def := replace(v_def, r.removals[v_n], '');
     end loop;
-    if md5(v_def) <> r.md5_0064 then
+    if md5(replace(v_def, chr(13), '')) <> r.md5_0064 then
       v_bad := v_bad || E'\n  ' || r.sig || ': differs from 0064 by more than the 0066 line';
     end if;
   end loop;

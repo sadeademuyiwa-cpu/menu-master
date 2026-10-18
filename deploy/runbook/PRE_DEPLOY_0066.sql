@@ -31,7 +31,7 @@ with expected(sig, md5_0064) as (values
 ),
 md5s as (
   select row_number() over (order by sig) + 5 as n, sig, md5_0064,
-         md5(pg_get_functiondef(to_regprocedure(sig))) as live
+         md5(replace(pg_get_functiondef(to_regprocedure(sig)), chr(13), '')) as live
     from expected
 ),
 acct as (
