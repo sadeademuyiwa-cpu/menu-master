@@ -25,8 +25,10 @@ insert into platform_admins (user_id, reason) values
 -- ============================================ 1. shape
 do $$
 begin
-  insert into t43 values (1,'exactly the five settings exist',
-    case when (select string_agg(key, ',' order by key) from site_settings) = 'analytics,company,landing,privacy,signin'
+  -- 0065 adds a sixth, help; this suite runs before and after it.
+  insert into t43 values (1,'exactly the five settings exist (six from 0065)',
+    case when (select string_agg(key, ',' order by key) from site_settings) in
+              ('analytics,company,landing,privacy,signin', 'analytics,company,help,landing,privacy,signin')
          then 'PASS' else 'FAIL' end, (select string_agg(key, ',' order by key) from site_settings));
   insert into t43 values (2,'RLS is on, with one SELECT policy',
     case when (select relrowsecurity from pg_class where relname='site_settings')
@@ -48,7 +50,7 @@ end $$;
 
 -- ============================================ 2. reading, as a visitor
 do $$
-declare v_rows int; v_who text;
+declare v_rows int; v_who text; v_all int := (select count(*) from site_settings);
 begin
   perform set_config('request.jwt.claim.sub','', true);
   set local role anon;
@@ -57,14 +59,14 @@ begin
   begin perform updated_by from site_settings; v_who := 'SHOWN'; exception when others then v_who := sqlstate; end;
   reset role;
   insert into t43 values (6,'a logged-out visitor reads key, value and date',
-    case when v_rows = 5 then 'PASS' else 'FAIL' end, v_rows::text);
+    case when v_rows = v_all and v_rows >= 5 then 'PASS' else 'FAIL' end, v_rows::text);
   insert into t43 values (7,'but not who wrote it (42501)',
     case when v_who = '42501' then 'PASS' else 'FAIL' end, v_who);
 end $$;
 
 -- ============================================ 3. writing
 do $$
-declare v_res text; v_upd text; v_bad text; v_shape text;
+declare v_res text; v_upd text; v_bad text; v_shape text; v_all int := (select count(*) from site_settings);
 begin
   -- a signed-in customer
   perform set_config('request.jwt.claim.sub','00000043-0000-4000-8000-000000000002', true);
@@ -101,7 +103,7 @@ begin
           and (select updated_at from site_settings where key='analytics') > now() - interval '1 minute'
          then 'PASS' else 'FAIL' end, '');
   insert into t43 values (13,'an unknown setting is refused, not created (P0002)',
-    case when v_bad = 'P0002' and (select count(*) from site_settings) = 5 then 'PASS' else 'FAIL' end, v_bad);
+    case when v_bad = 'P0002' and (select count(*) from site_settings) = v_all then 'PASS' else 'FAIL' end, v_bad);
   insert into t43 values (14,'a value that is not an object is refused (22023)',
     case when v_shape = '22023' then 'PASS' else 'FAIL' end, v_shape);
 end $$;

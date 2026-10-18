@@ -6,6 +6,7 @@ import {
   parseAnalytics, parseLanding, parsePrivacy, parseCompany, parseSignIn, showGoogleButton,
   type AnalyticsSettings, type LandingSettings, type PrivacySettings, type CompanyDetails, type SignInSettings,
 } from '@/lib/site/settings'
+import { parseHelpVideos, type HelpVideos } from '@/lib/site/help-videos'
 
 export type SiteSettings = {
   analytics: AnalyticsSettings
@@ -13,6 +14,8 @@ export type SiteSettings = {
   privacy: PrivacySettings
   company: CompanyDetails
   signin: SignInSettings
+  /** Each screen's help video (0065); empty before 0065 or when none is set. */
+  help: HelpVideos
   /** False when 0057 is not applied yet (or the database was unreachable). */
   available: boolean
 }
@@ -63,6 +66,7 @@ export async function loadSiteSettings(): Promise<SiteSettings> {
     privacy: parsePrivacy(by('privacy')),
     company: parseCompany(by('company')),
     signin: parseSignIn(by('signin')),
+    help: parseHelpVideos(by('help')),
     available: rows !== null,
   }
 }

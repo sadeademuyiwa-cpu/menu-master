@@ -10,6 +10,7 @@ export const ADMIN_NAV = [
   { href: '/admin/subscriptions', label: 'Subscriptions' },
   { href: '/admin/signups', label: 'Signups' },
   { href: '/admin/site', label: 'Website' },
+  { href: '/admin/help', label: 'Help videos' },
 ] as const
 
 export function AdminNav() {

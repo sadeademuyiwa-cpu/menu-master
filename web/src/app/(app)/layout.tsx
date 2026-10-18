@@ -8,6 +8,8 @@ import { QuickAdd } from '@/components/quick-add'
 import { Toaster } from '@/components/toaster'
 import { AppIcon } from '@/components/icons'
 import { BrandMark } from '@/components/brand-mark'
+import { HelpVideoButton } from '@/components/help-video'
+import { loadSiteSettings } from '@/lib/data/site'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -18,9 +20,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // was shown on every page: it wrapped on a 360px phone, and it is the one
   // thing on the screen the owner did not need to be told. One small read,
   // the same the pages make; a login with no business yet sees the app's name.
-  const { data: business } = await supabase
-    .from('businesses').select('name').is('deleted_at', null)
-    .order('created_at').limit(1).maybeSingle<{ name: string }>()
+  const [{ data: business }, site] = await Promise.all([
+    supabase.from('businesses').select('name').is('deleted_at', null)
+      .order('created_at').limit(1).maybeSingle<{ name: string }>(),
+    loadSiteSettings(),
+  ])
   const businessName = business?.name?.trim() || null
 
   return (
@@ -54,14 +58,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
             <div className="mm-shell-header-nav"><PrimaryNav variant="header" /></div>
 
-            <Link
-              href="/account"
-              className="mm-account-chip lg:hidden"
-              title="Your account"
-              aria-label="Your account"
-            >
-              <AppIcon name="account" size={19} />
-            </Link>
+            <div className="flex shrink-0 items-center gap-2">
+              <HelpVideoButton videos={site.help} />
+              <Link
+                href="/account"
+                className="mm-account-chip lg:hidden"
+                title="Your account"
+                aria-label="Your account"
+              >
+                <AppIcon name="account" size={19} />
+              </Link>
+            </div>
           </div>
         </header>
 
