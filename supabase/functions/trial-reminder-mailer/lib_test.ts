@@ -3,7 +3,7 @@
 //   deno test supabase/functions/trial-reminder-mailer/lib_test.ts
 // ============================================================================
 import {
-  type Due, idempotencyKey, lagosDate, priceLine, reminderEmail, resendBody, sendable, toSend,
+  type Due, FOOTER, idempotencyKey, lagosDate, placesLeft, priceLine, reminderEmail, resendBody, sendable, toSend,
 } from "./lib.ts";
 
 function assert(cond: unknown, msg: string) {
@@ -86,4 +86,55 @@ Deno.test("reply-to only when it is a plain address", () => {
   const m = reminderEmail(due({}), "https://m.ng", null);
   assertEquals("reply_to" in resendBody("f@m.ng", "o@b.ng", m, "help@m.ng"), true);
   assertEquals("reply_to" in resendBody("f@m.ng", "o@b.ng", m, "not an email"), false);
+});
+
+// ---------------------------------------------------------------------------
+// EF2: the founding-place count. Unknown is not zero.
+// ---------------------------------------------------------------------------
+const PLANS = [
+  { price_tier: "trial", price_kobo: 0 },
+  { price_tier: "founding", price_kobo: 350000 }, { price_tier: "founding", price_kobo: 750000 },
+  { price_tier: "standard", price_kobo: 750000 }, { price_tier: "standard", price_kobo: 1500000 },
+];
+
+Deno.test("placesLeft reads the total PostgREST reports", () => {
+  assertEquals(placesLeft(true, "0-0/57"), 57);
+  assertEquals(placesLeft(true, "*/0"), 0, "none left is a real 0");
+  assertEquals(placesLeft(true, " 0-0/100 "), 100, "tolerates spaces");
+});
+
+Deno.test("placesLeft is null whenever the count is not known", () => {
+  assertEquals(placesLeft(true, null), null, "header missing");
+  assertEquals(placesLeft(true, undefined), null, "header missing");
+  assertEquals(placesLeft(true, ""), null, "empty header");
+  assertEquals(placesLeft(true, "0-0/*"), null, "total not counted");
+  assertEquals(placesLeft(true, "*/*"), null, "total not counted");
+  assertEquals(placesLeft(true, "0-0/5.5"), null, "not a whole number");
+  assertEquals(placesLeft(true, "0-0/-3"), null, "not a count");
+  assertEquals(placesLeft(true, "0-0/99999999999999999999"), null, "absurd total");
+  assertEquals(placesLeft(true, "garbage"), null);
+  assertEquals(placesLeft(false, "0-0/57"), null, "a failed read never counts, even with a header");
+});
+
+Deno.test("an unknown founding count leaves the price line out", () => {
+  assertEquals(priceLine(PLANS, null), null);
+  // plans read fine, the slot count came back 500: no price, never the standard one
+  assertEquals(priceLine(PLANS, placesLeft(false, null)), null);
+  const m = reminderEmail(due({}), "https://m.ng", priceLine(PLANS, placesLeft(false, null)));
+  assert(!m.text.includes("₦") && !m.html.includes("₦"), `no naira in the email: ${m.text}`);
+});
+
+Deno.test("a known count still picks founding or standard wording", () => {
+  assert((priceLine(PLANS, placesLeft(true, "0-0/57")) ?? "").startsWith("Founding prices start at ₦3,500"),
+    "places left: founding");
+  assertEquals(priceLine(PLANS, placesLeft(true, "*/0")), "Plans start at ₦7,500 a month.", "none left: standard");
+});
+
+Deno.test("the footer says the trial never charges, and that a plan can be cancelled", () => {
+  for (const kind of ["ends_in_3_days", "ends_tomorrow", "ended"] as const) {
+    const m = reminderEmail(due({ kind }), "https://m.ng", null);
+    assert(m.text.endsWith(FOOTER), `${kind}: text ends with the footer`);
+    assert(m.html.includes("The free trial never charges you."), `${kind}: html footer`);
+    assert(m.text.includes("you can cancel at any time"), `${kind}: cancel sentence kept`);
+  }
 });

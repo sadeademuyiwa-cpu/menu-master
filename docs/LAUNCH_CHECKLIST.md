@@ -23,6 +23,20 @@ rollback), then reverting the merge.
 Preview of this branch (built and checked 2 October 2026; Vercel login
 needed): `https://menu-master-git-launch-2026-10-02-menu-master.vercel.app`
 
+> **Status on 18 October 2026.** A ticked box below is one the repository
+> itself proves, and it names the commit or record. An unticked box is
+> **unconfirmed**, not necessarily undone: dashboards, DNS and settings
+> leave no trace in the repository. Proven so far:
+>
+> - The launch branch reached the production branch: this clone's push
+>   record for `origin/claude/menu-master-ng-migrations-3faerm` shows
+>   `f8d5022` pushed on 4 October 2026 and `2b1974a` on 17 October 2026.
+> - The database is at **0064**: 0057-0059 applied on 3 October
+>   (`f8d5022`), 0060-0062 on 12 October (`cc4367e`), 0063-0064 on
+>   17 October (`2b1974a`).
+>
+> Whether the trial reminder emails go out is **unknown**: see §6.
+
 ---
 
 ## 1. Before going live
@@ -40,9 +54,12 @@ The app works on a 0056 database: with 0057–0059 not yet applied, it shows
 no pixels, the bundled privacy policy, the landing page without pictures, and
 Admin → Website says the settings are not available yet.
 
-- [ ] On GitHub: open a pull request from `launch/2026-10-02` into
+- [x] On GitHub: open a pull request from `launch/2026-10-02` into
       `claude/menu-master-ng-migrations-3faerm`, read it, merge it. Wait
       for the Vercel **production** deployment to finish.
+      *Done as fast-forward pushes rather than a pull request: `f8d5022`
+      on 4 October 2026, latest `2b1974a` on 17 October 2026 (this clone's
+      push record). `STATUS.md` (17 October) records `6e64741` live.*
 - [ ] Open `https://menumasterng.com` signed out: the landing page shows.
       Signed in: it goes to the dashboard.
 
@@ -53,9 +70,20 @@ Admin → Website says the settings are not available yet.
 
 ## 4. Email that lands in the inbox (Resend)
 
+The full steps, with checks: `deploy/runbook/EMAIL_DELIVERABILITY.md`.
+Do them before the trial mailer is scheduled (§6).
+
 - [ ] Resend → Domains → add `menumasterng.com`; copy the SPF, DKIM and MX
       records it shows into your DNS **exactly**; wait for "Verified".
-- [ ] DNS: TXT record, host `_dmarc`, value `v=DMARC1; p=none;`
+- [ ] The alias `dmarc@menumasterng.com`, forwarded to your Gmail
+      (EMAIL_DELIVERABILITY step 3).
+- [ ] DNS: TXT record, host `_dmarc`, value
+      `v=DMARC1; p=none; rua=mailto:dmarc@menumasterng.com`
+- [ ] Gmail "Show original" on a password-reset email: SPF, DKIM and DMARC
+      all **PASS** (EMAIL_DELIVERABILITY step 6).
+- [ ] After 2 to 4 clean weeks of reports: change the `_dmarc` value to
+      `v=DMARC1; p=quarantine; rua=mailto:dmarc@menumasterng.com`
+      (EMAIL_DELIVERABILITY step 7).
 - [ ] Supabase → Project Settings → Authentication → SMTP: host
       `smtp.resend.com`, port `465`, username `resend`, password = a Resend
       API key, sender `hello@menumasterng.com`, sender name `Menu Master NG`.
@@ -75,25 +103,45 @@ Each has a runbook in `deploy/runbook/` with a read-only check before, the
 migration (psql over the Session Pooler, `--single-transaction`), a read-only
 check after, and a rollback.
 
-- [ ] `DEPLOY_0057.md` — website settings (pixels, landing content, privacy
+- [x] `DEPLOY_0057.md` — website settings (pixels, landing content, privacy
       policy). PRE 6/6 → migration → POST 8/8.
-- [ ] `DEPLOY_0058.md` — trial reminder emails. PRE 5/5 → migration → POST 6/6.
-- [ ] `DEPLOY_0059.md` — picture uploads (Storage bucket `site`). PRE 5/5 →
+      *Applied with psql on 3 October 2026 (`f8d5022`).*
+- [x] `DEPLOY_0058.md` — trial reminder emails. PRE 5/5 → migration → POST 6/6.
+      *Applied 3 October 2026; POST 6/6 (`f8d5022`).*
+- [x] `DEPLOY_0059.md` — picture uploads (Storage bucket `site`). PRE 5/5 →
       migration → POST 4/4.
-- [ ] After each POST passes, `git mv` the file from `migrations/proposed/`
-      to `migrations/`.
+      *Applied 3 October 2026; POST 4/4 (`f8d5022`).*
+- [x] After each POST passes, `git mv` the file from `migrations/proposed/`
+      to `migrations/`. *`f8d5022`, 3 October 2026.*
+- [x] Later migrations, the same way: 0060-0062 on 12 October 2026
+      (`cc4367e`), 0063-0064 on 17 October 2026 (`2b1974a`).
 
 ## 6. Trial reminder emails (edge function)
 
-- [ ] `supabase functions deploy trial-reminder-mailer --no-verify-jwt`
-- [ ] Secrets (Edge Function secret store only): `RESEND_API_KEY`,
-      `MAILER_TOKEN` (shared with the alert mailer, 16+ random characters),
-      `TRIAL_EMAIL_FROM` = `Menu Master NG <hello@menumasterng.com>`,
-      `SITE_URL` = `https://menumasterng.com`, optional `SUPPORT_EMAIL`.
-- [ ] Supabase → Integrations → Cron: hourly at `20 * * * *`,
-      `POST https://mgbrrrjxbufstsjrdoug.functions.supabase.co/trial-reminder-mailer`
-      with header `x-mailer-token: <MAILER_TOKEN>`.
-- [ ] `POST_VERIFY_0058.sql` row 5 says how many the first run sends.
+0058 is applied, but nothing in the repository records that the mailer was
+deployed or scheduled, so whether any trial email has ever gone out is
+unknown. Check first; set up only what is missing.
+
+- [ ] **Check (read only):** `deploy/runbook/CHECK_TRIAL_MAILER.sql` in the
+      SQL Editor plus the dashboard walk in `CHECK_TRIAL_MAILER.md`. Write
+      the answers in the "Mailer status" table in `DEPLOY_0058.md`.
+- [ ] If anything is missing, after §4: `deploy/runbook/SCHEDULE_TRIAL_MAILER.md`
+      — pg_cron and pg_net on;
+      `supabase functions deploy trial-reminder-mailer --no-verify-jwt`;
+      secrets `RESEND_API_KEY`, `MAILER_TOKEN` (shared with the alert
+      mailer, 16+ random characters), `TRIAL_EMAIL_FROM` =
+      `Menu Master NG <hello@menumasterng.com>`, `SITE_URL` =
+      `https://menumasterng.com`, optional `SUPPORT_EMAIL`; the same token in
+      Vault as `mm_mailer_token`.
+- [ ] Schedule hourly at `20 * * * *` with `SCHEDULE_TRIAL_MAILER.sql`
+      (the token is read from Vault; not the dashboard Cron form, which
+      stores it in plain text).
+- [ ] Watch one run at minute 20 (`SCHEDULE_TRIAL_MAILER.md` step 7).
+- [x] `POST_VERIFY_0058.sql` row 5 says how many the first run sends.
+      *3 October 2026: 6 owed (`f8d5022`). Today's figure:
+      `CHECK_TRIAL_MAILER.sql` row 5.*
+- [ ] Redeploy after the 18 October 2026 change (no guessed price when the
+      founding count cannot be read; "The free trial never charges you.").
 
 ## 7. Admin → Website (after 5)
 
@@ -154,3 +202,16 @@ Supabase has Google switched on.
 - [ ] Log out; "Forgot password?" works end to end.
 - [ ] Meta Pixel Helper (browser extension): nothing before Accept; events
       after.
+
+## 12. Answering billing messages
+
+Owners now cancel (More → Account → Cancel plan), change plan (More →
+Plans & billing) and update a failed card themselves. They still write to
+you for refunds, a copy of their records, or when something did not work.
+
+- [ ] Read `deploy/runbook/BILLING_SUPPORT.md` once: what to check and
+      what to reply for a cancellation, a plan change, a double charge, a
+      failed payment, a login on two accounts, and a copy of the records
+      (sent within one working day).
+- [ ] Run `deploy/runbook/BILLING_SUPPORT_CHECKS.sql` (read only, counts
+      only) once a week while plan changes and cancelling are new.
