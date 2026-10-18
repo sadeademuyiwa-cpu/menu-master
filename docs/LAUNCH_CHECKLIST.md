@@ -205,13 +205,24 @@ Supabase has Google switched on.
 
 ## 12. Answering billing messages
 
-Owners now cancel (More → Account → Cancel plan), change plan (More →
-Plans & billing) and update a failed card themselves. They still write to
-you for refunds, a copy of their records, or when something did not work.
+**Once the trial and billing release is live** (0066, 0067, the
+`paystack-webhook`, `paystack-manage` and `paystack-checkout` deploys and the
+web release, in the order of `deploy/runbook/DEPLOY_TRIAL_PHASE1.md`) **and
+`BILLING_SELF_SERVE` is `on` in Vercel**, owners cancel (More → Account →
+Cancel plan), change plan (More → Plans & billing), pay again after a failed
+payment (Pay now) and update a failed card themselves. Until then, and
+whenever that switch is off, they message you and you do it for them
+(`BILLING_SUPPORT.md` section 10). Either way they write to you for refunds,
+a copy of their records, or when something did not work.
 
-- [ ] Read `deploy/runbook/BILLING_SUPPORT.md` once: what to check and
-      what to reply for a cancellation, a plan change, a double charge, a
-      failed payment, a login on two accounts, and a copy of the records
-      (sent within one working day).
+- [ ] Read `deploy/runbook/BILLING_SUPPORT.md` once: the two switches, what
+      to check and what to reply for a cancellation, a plan change, a double
+      charge, a failed payment, a login on two accounts, and a copy of the
+      records (sent within one working day). Its rule 5: never cancel a
+      founder's subscription in Paystack by hand.
 - [ ] Run `deploy/runbook/BILLING_SUPPORT_CHECKS.sql` (read only, counts
-      only) once a week while plan changes and cancelling are new.
+      only) once a week while plan changes and cancelling are new. Row 4
+      (an old plan charged after moving) and row 6 (a possible double
+      charge) are refunds to check the same day.
+- [ ] Release done: `DEPLOY_TRIAL_PHASE1.md` steps 1-14 ticked, and
+      `BILLING_SELF_SERVE` = `on` in Vercel (Production) since: ______

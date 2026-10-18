@@ -39,7 +39,7 @@ to paste to the developer. Still look before you paste.
 | 13 other jobs | `mm-admin-scan` and the alert mailer, if you set them up | only for your picture: the alert mailer shares `MAILER_TOKEN` |
 | 14-15 last runs | about one `succeeded` an hour, the latest within the hour | "succeeded" only means the call was sent off; rows 16-17 show what the function answered |
 | 16 replies | `HTTP 200` only | `401`: the token does not match, or the function checks for a login (Part B, step 1). `404`: not deployed. `500`: a secret is missing (Part B, step 2) |
-| 17 latest reply | `{"sent":0}` (nothing owed) or `{"due":N,"sent":N,"failed":0}` | `"failed"` above 0: Resend refused some sends (Part C). `{"error":"unauthorised"}`: token. `{"error":"misconfigured"}`: a secret is missing |
+| 17 latest reply | `{"sent":0}` (nothing owed) or `{"due":N,"sent":N,"failed":0}` | `"failed"` above 0: Resend refused some sends (Part C). `{"error":"unauthorised"}`: token. `{"error":"misconfigured"}`: a secret is missing. `none kept` while row 16 has codes: the replies were not the mailer's own (a gateway refusal such as a 401 or 404); row 16's code says which. Only the mailers' exact reply shapes are ever printed, so no other service's text (which could hold an email address) reaches this answer |
 | 18 time zone | `UTC` is normal on Supabase | another value is fine: no trial end depends on it, and this script prints Lagos times |
 
 pg_net keeps replies for only about 6 hours, so rows 16-17 can be empty

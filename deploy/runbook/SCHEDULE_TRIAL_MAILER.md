@@ -72,11 +72,16 @@ supabase secrets set TRIAL_EMAIL_FROM="Menu Master NG <hello@menumasterng.com>" 
 **MAILER_TOKEN.** The dashboard cannot show an existing value. If the alert
 mailer already has one and you kept it (password manager), use that same
 value in step 4. Otherwise make a new one in PowerShell; it goes straight
-to the clipboard and is never printed:
+to the clipboard and is never printed. This line works in both Windows
+PowerShell 5.1 (the blue "Windows PowerShell" that comes with Windows) and
+PowerShell 7 (`pwsh`):
 
 ```powershell
-[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(24)) | Set-Clipboard
+$b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); (($b | ForEach-Object { $_.ToString('x2') }) -join '') | Set-Clipboard; Remove-Variable b
 ```
+
+It makes 48 random characters (0-9 and a-f). Nothing is printed: your next
+paste is the token.
 
 Paste it into the `MAILER_TOKEN` secret, then into Vault (step 4), then into
 your password manager. Clear the clipboard afterwards (`Set-Clipboard -Value ' '`).

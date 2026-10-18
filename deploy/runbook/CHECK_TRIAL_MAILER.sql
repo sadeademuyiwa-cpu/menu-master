@@ -10,7 +10,9 @@
 -- yes/no flags only. It never shows an owner's email, a business name, a
 -- token, or a cron job's command (a job made in the dashboard keeps its
 -- token in plain text inside the command, so the command is never selected).
--- Still glance at it before pasting it anywhere.
+-- The one reply body it prints (row 17) must match the mailers' own exact
+-- shapes ({"sent":N}, {"due":N,"sent":N,"failed":N}, {"error":"code"}) and
+-- hold no '@'. Still glance at the answer before pasting it anywhere.
 --
 -- Needs 0058 (applied 3 October 2026). Row 5 calls fn_trial_reminders_due(),
 -- which only the service context may call; the SQL Editor runs as postgres,
@@ -56,7 +58,9 @@ missed as (
 -- extension is there, so this one statement never fails on a missing schema.
 -- Each of those reads returns exactly one row (an empty answer cannot be
 -- parsed as XML), which is why they are all aggregates or scalar subqueries.
-cron as (
+-- query_to_xml escapes &, < and > in what it returns; cron and net below
+-- turn them back, so a job named 'a&b' reads 'a&b', not 'a&amp;b'.
+cron_x as (
   select
     case when (select cron_v from ext) is not null then
       (xpath('/row/v/text()', query_to_xml($q$
@@ -101,7 +105,7 @@ cron as (
           where j.command ilike '%trial-reminder-mailer%'
        $q$, false, true, '')))[1]::text end as last_run
 ),
-net as (
+net_x as (
   select
     case when (select net_v from ext) is not null then
       (xpath('/row/v/text()', query_to_xml($q$
@@ -113,16 +117,30 @@ net as (
                   where created > now() - interval '6 hours'
                   group by 1) x
        $q$, false, true, '')))[1]::text end as replies,
-    -- only replies shaped like the two mailers' own JSON ({"due":..}, {"sent":..},
-    -- {"error":..}) or the gateway's ({"code":..,"message":..}); nothing else
+    -- only replies in the two mailers' own exact shapes: {"sent":N},
+    -- {"due":N,"sent":N,"failed":N}, {"sent":N,"critical":N} or
+    -- {"error":"some_code"}. Numbers and lower-case codes only, and never an
+    -- '@', so no other service's reply (which could quote an email address)
+    -- is ever printed. A gateway refusal shows in row 16 as its HTTP code.
     case when (select net_v from ext) is not null then
       (xpath('/row/v/text()', query_to_xml($q$
          select (select content || '  (HTTP ' || coalesce(status_code::text, '?') || ', '
                         || to_char(created at time zone 'Africa/Lagos', 'Dy DD Mon HH24:MI') || ' Lagos)'
                    from net._http_response
-                  where content ~ '^\{"(due|sent|error|code|message|msg)":[^{}<>]{0,160}\}$'
+                  where content ~ '^\{"(due|sent|error)":("[a-z_]{1,40}"|[0-9]{1,6})(,"(sent|failed|critical)":[0-9]{1,6}){0,2}\}$'
+                    and content !~ '@'
                   order by created desc limit 1) as v
        $q$, false, true, '')))[1]::text end as last_body
+),
+cron as (
+  select replace(replace(replace(trial_jobs,  '&lt;', '<'), '&gt;', '>'), '&amp;', '&') as trial_jobs,
+         replace(replace(replace(trial_token, '&lt;', '<'), '&gt;', '>'), '&amp;', '&') as trial_token,
+         replace(replace(replace(other_jobs,  '&lt;', '<'), '&gt;', '>'), '&amp;', '&') as other_jobs,
+         runs_48h, last_run
+    from cron_x
+),
+net as (
+  select replies, last_body from net_x
 )
 select n, section, item, value, good from (
   select 1 as n, 'emails sent' as section, 'sent "ends in 3 days": how many, latest' as item,
@@ -211,7 +229,7 @@ select n, section, item, value, good from (
   select 17, 'last runs', 'latest mailer-shaped reply',
          case when (select net_v from ext) is null then 'pg_net is not installed'
               else coalesce((select last_body from net), 'none kept') end,
-         '{"sent":0} or {"due":N,"sent":N,"failed":0}'
+         '{"sent":0} or {"due":N,"sent":N,"failed":0}. "none kept" with HTTP codes in row 16: the reply was not the mailer''s (row 16 says which)'
   union all
   select 18, 'database', 'database time zone (show timezone)',
          current_setting('TimeZone'),

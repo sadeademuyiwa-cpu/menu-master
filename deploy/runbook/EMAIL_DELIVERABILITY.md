@@ -167,9 +167,28 @@ domain earns its reputation slowly. The trial emails travel the same way,
 so the same records cover them; check one trial email the same way when the
 first ones go out (`SCHEDULE_TRIAL_MAILER.md` step 7).
 
-An optional second opinion: mail-tester.com gives a one-off address; sign up
-for Menu Master with that address and open its report, which scores SPF,
-DKIM, DMARC and the content.
+An optional second opinion: mail-tester.com gives a one-off address and
+scores the email it receives (SPF, DKIM, DMARC and the content). Send it
+**one email through Resend** with the PowerShell lines below. **Never sign
+up for Menu Master with that address:** it would create a real account and
+a real trial, the trial mailer would email that address for two weeks after
+it has expired, and every bounce counts against the new domain, which is the
+thing this runbook is protecting. It would also add a fake trial to the
+counts.
+
+The lines work in Windows PowerShell 5.1 and in PowerShell 7. The API key is
+typed at the prompt (it is not kept in the history) and forgotten at the end;
+take it from your password manager or make a new **Sending access** key for
+`menumasterng.com` in Resend → API Keys (and delete that key afterwards).
+
+```powershell
+$k = Read-Host 'Resend API key' -AsSecureString
+$body = @{ from = 'Menu Master NG <hello@menumasterng.com>'; to = @('<the mail-tester address>'); subject = 'Your Menu Master free trial'; text = 'A one-off test of how Menu Master emails are signed. Nothing to do.' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri 'https://api.resend.com/emails' -ContentType 'application/json' -Headers @{ Authorization = 'Bearer ' + [Net.NetworkCredential]::new('', $k).Password } -Body $body
+Remove-Variable k, body
+```
+
+A good answer is one line with an `id`. Then open mail-tester's report.
 
 ## Step 7. After 2 to 4 clean weeks: p=quarantine
 
