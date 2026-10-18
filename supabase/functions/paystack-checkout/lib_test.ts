@@ -213,8 +213,10 @@ Deno.test("the resolved callback is what reaches Paystack", () => {
 // before the quote, so a refused request never takes a founder hold.
 // ============================================================================
 import {
-  checkoutRefusal, isPaying, pickAccountRole, readSubState, replacesCode, selfServeOn, type SubState,
+  changeInProgress, checkoutRefusal, isPaying, pickAccountRole, readSubState, replacesCode, selfServeOn,
+  type SubState,
 } from "./lib.ts";
+import { changeInProgress as manageChangeInProgress } from "../paystack-manage/lib.ts";
 
 function ok(cond: unknown, msg = "assertion failed") { assert(cond, msg); }
 function assertFalse(cond: unknown, msg = "expected false") { assert(!cond, msg); }
@@ -257,11 +259,29 @@ Deno.test("paying means active, past_due, or cancelled inside the paid period", 
   assertFalse(isPaying(null, NOW));
 });
 
-Deno.test("the same tier while active or past_due is already_on_plan (409)", () => {
+Deno.test("the same tier while ACTIVE is already_on_plan (409)", () => {
   assertEquals(checkoutRefusal(sub({ status: "active", tier: "costing" }), "costing", true, NOW),
     { error: "already_on_plan", status: 409 });
-  assertEquals(checkoutRefusal(sub({ status: "past_due", tier: "trading" }), "trading", true, NOW),
-    { error: "already_on_plan", status: 409 }, "overdue: Update your card, not a second subscription");
+  assertEquals(checkoutRefusal(sub({ status: "active", tier: "trading" }), "trading", false, NOW),
+    { error: "already_on_plan", status: 409 }, "for anyone, before the owner check");
+});
+
+Deno.test("X2: overdue on the same tier is Pay now, a replacement of the failed subscription", () => {
+  const overdue = sub({ status: "past_due", tier: "trading", current_period_end: "2026-10-10T12:00:00Z" });
+  assertEquals(checkoutRefusal(overdue, "trading", true, NOW), null, "the owner may pay again by itself");
+  assertEquals(replacesCode(overdue), "SUB_old", "and the payment names the failed subscription it replaces");
+  const md = initializeBody(quote, "a@b.test", "https://x.test/cb", replacesCode(overdue)).metadata as
+    Record<string, string>;
+  assertEquals(md.replaces, "SUB_old", "exactly like a tier change, so the webhook switches it off");
+});
+
+Deno.test("X2: Pay now is still owner only, still needs a code on file, and obeys the kill switch", () => {
+  const overdue = sub({ status: "past_due", tier: "trading" });
+  assertEquals(checkoutRefusal(overdue, "trading", false, NOW), { error: "owner_only", status: 403 });
+  assertEquals(checkoutRefusal(sub({ status: "past_due", tier: "trading", provider_subscription_code: null }),
+    "trading", true, NOW), { error: "switch_needs_support", status: 409 },
+    "with no code on file the failed subscription could not be switched off");
+  assertEquals(checkoutRefusal(overdue, "trading", true, NOW, false), { error: "switch_needs_support", status: 409 });
 });
 
 Deno.test("a different tier goes ahead for the owner: no refusal", () => {
@@ -271,8 +291,10 @@ Deno.test("a different tier goes ahead for the owner: no refusal", () => {
   assertEquals(checkoutRefusal(sub({ status: "past_due", tier: "costing" }), "trading", true, NOW), null);
 });
 
-Deno.test("a cancelled plan still inside its period may choose again, same tier included", () => {
+Deno.test("a cancelled plan still inside its period may choose again, same tier included (X8)", () => {
   assertEquals(checkoutRefusal(sub({ status: "cancelled", tier: "costing" }), "costing", true, NOW), null);
+  assertEquals(replacesCode(sub({ status: "cancelled", tier: "costing" })), "SUB_old",
+    "the ending subscription is named, so its own later events change nothing");
 });
 
 Deno.test("an account that already pays: only its owner may change, cancel or re-pay (owner_only 403)", () => {
@@ -334,6 +356,16 @@ Deno.test("metadata.replaces carries the code on file when an account past its t
   assertEquals(Object.keys(md).sort(), ["account_id", "plan_id", "replaces"]);
   assertEquals(md.replaces, "SUB_old");
   assertEquals(md.account_id, quote.account_id, "the account still comes from the quote, never the client");
+});
+
+Deno.test("X3 at checkout: a pending replaced subscription is change_in_progress; only an empty list is clear", () => {
+  assertFalse(changeInProgress([]));
+  ok(changeInProgress([{ id: "b1" }]), "an earlier change still finishing");
+  ok(changeInProgress(null), "an unreadable answer is never taken as clear");
+  ok(changeInProgress({ message: "error" }));
+  for (const rows of [[], [{ id: "b1" }], null, { message: "x" }, "[]"]) {
+    assertEquals(changeInProgress(rows), manageChangeInProgress(rows), "checkout and paystack-manage agree");
+  }
 });
 
 Deno.test("a first payment carries no replaces key at all", () => {

@@ -10,12 +10,16 @@
 //        Renewal is switched off at Paystack. The plan stays on until ends_on
 //        (the end of the period already paid, as a Lagos date); after that the
 //        account is read-only. There is no undo: they choose a plan again.
+//        An overdue (past_due) account may cancel too (X1): it has no paid
+//        days left, so ends_on is null and recording stops straight away.
 //   POST {"action":"card_link"}
 //     -> 200 {"ok":true,"action":"card_link","link":"https://...paystack..."}
 //
 //   Errors are {"error":"<code>"}: unauthorised 401, owner_only 403,
-//   nothing_to_cancel 409, no_subscription 409, not_configured 500,
-//   paystack_error 502, bad_request 400.
+//   nothing_to_cancel 409, no_subscription 409, change_in_progress 409 (a
+//   plan change is still finishing: the subscription on file is the one
+//   being replaced; X3), not_configured 500, paystack_error 502,
+//   bad_request 400.
 //
 // WHAT THIS NEVER DOES
 //   It never writes the subscription row. Paystack answers a disable with
@@ -33,11 +37,13 @@
 
 import {
   type Action,
+  cancelEndsOn,
   cardLink,
-  endsOn,
+  changeInProgress,
   ERRORS,
   type ErrorCode,
   errorBody,
+  isSubscriptionCode,
   manageRefusal,
   parseAction,
   paystackCaller,
@@ -99,9 +105,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return fail("paystack_error");
   }
   const sub = readSubState(await subRes.json().catch(() => null));
-  const refusal = manageRefusal(action, sub);
+  const now = new Date();
+  const refusal = manageRefusal(action, sub, now);
   if (refusal) return fail(refusal);
   const code = sub!.provider_subscription_code!;
+
+  // X3: IS A PLAN CHANGE STILL FINISHING? Between the new plan's payment and
+  // its subscription.create, the code on file is the OLD subscription, which
+  // is waiting in billing_superseded to be switched off. Cancelling it, or
+  // putting a card on it, then would act on the plan being left. service_role
+  // may read billing_superseded; a failed read refuses rather than guesses.
+  if (isSubscriptionCode(code)) {
+    const supRes = await fetch(
+      `${base}/rest/v1/billing_superseded?subscription_code=eq.${encodeURIComponent(code)}` +
+        `&disabled_at=is.null&select=id`,
+      { headers: serviceHeaders },
+    ).catch(() => null);
+    if (!supRes?.ok) {
+      console.error(`paystack-manage: replaced-subscription read failed with ${supRes?.status ?? "no response"}`);
+      return fail("paystack_error");
+    }
+    const pending = changeInProgress(await supRes.json().catch(() => null));
+    const again = manageRefusal(action, sub, now, pending);
+    if (again) return fail(again);
+  }
 
   const paystack = paystackCaller(secret);
 
@@ -131,7 +158,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return fail("paystack_error");
     }
     await record(r.outcome);
-    return json({ ok: true, action: "cancel", ends_on: endsOn(sub!.current_period_end) }, 200);
+    return json({ ok: true, action: "cancel", ends_on: cancelEndsOn(sub!, now) }, 200);
   }
 
   const r = await cardLink(code, paystack);

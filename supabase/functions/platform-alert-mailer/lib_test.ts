@@ -2,7 +2,7 @@
 // Unit tests for the pure mailer logic. No server, no network, no secret.
 //   deno test supabase/functions/platform-alert-mailer/lib_test.ts
 // ============================================================================
-import { digest, kindWords, resendBody, tokenMatches, toNotify, type Alert } from "./lib.ts";
+import { digest, KNOWN_KINDS, kindWords, resendBody, tokenMatches, toNotify, type Alert } from "./lib.ts";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
@@ -62,6 +62,34 @@ Deno.test("a single non-critical alert reads naturally", () => {
 
 Deno.test("unknown kinds still read as words", () => {
   assertEquals(kindWords("something_new"), "something new");
+});
+
+// The ten kinds of ck_platform_alerts_kind after 0067 (X7): each one has its
+// own words, never the underscore fallback.
+const KINDS_0067 = [
+  "billing_failed_permanent", "billing_stuck", "founder_slots_low", "founder_slots_exhausted",
+  "past_due_beyond_grace", "subscription_no_period",
+  "subscription_not_switched_off", "superseded_subscription_charged", "cancel_not_confirmed",
+  "possible_double_charge",
+];
+
+Deno.test("every alert kind 0067 allows has readable words of its own (X7)", () => {
+  for (const k of KINDS_0067) {
+    const w = kindWords(k);
+    assert(w !== k.replace(/_/g, " "), `${k} falls back to its raw name`);
+    assert(/^[A-Z]/.test(w), `${k} reads as a sentence: ${w}`);
+  }
+  assertEquals([...KNOWN_KINDS].sort(), [...KINDS_0067].sort(), "the mailer knows exactly the kinds the check allows");
+});
+
+Deno.test("the 0067 billing kinds read plainly in the digest", () => {
+  const m = digest([
+    row({ kind: "possible_double_charge", summary: "This account was charged twice within an hour.",
+      detail: { account_id: "a1", event_id: "e2" } }),
+    row({ kind: "superseded_subscription_charged", severity: "critical", summary: "Refund it.", detail: {} }),
+  ], "u", new Date("2026-10-18T12:00:00Z"));
+  assert(m.text.includes("WARN  Possible double charge"), "double charge line");
+  assert(m.text.includes("CRITICAL  Replaced subscription took a payment (refund it)"), "refund line");
 });
 
 Deno.test("the Resend body carries exactly from, to, subject, text", () => {

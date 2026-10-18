@@ -13,7 +13,16 @@
 --   D. arrival order: subscription.create before its own charge
 --   E. the service-only functions refuse clients
 --   F. the owner's cancel / card request record
---   G. the three new alerts
+--   G. the first three new alerts
+--   H. the wrong subscription: a cancel or failed payment for a code that is
+--      not the current one changes nothing and is held for review
+--   I. one reading of the subscription code, and a replaced code is never
+--      taken up again
+--   J. the left-plan guard, however the renewal was matched
+--   K. X2 (overdue Pay now on the same plan), X1 (overdue cancel), X8
+--      (a cancelled plan chosen again)
+--   L. cancel_not_confirmed covers already_off and past_due
+--   M. possible_double_charge, and event-based alerts stay resolved
 -- ============================================================================
 
 begin;
@@ -164,15 +173,20 @@ begin
     case when r->>'status' = 'failed_permanent' and r->>'reason' = 'bad_metadata' then 'PASS' else 'FAIL' end,
     coalesce(r->>'reason','?'));
 
-  -- 11. a non-payment event never replaces the code on file
+  -- 11. a non-payment event never replaces the code on file, and a failed
+  --     payment for another subscription does not make the account past_due
   b := pg_temp.paying('keep', 'costing', 'CUS_t53_keep', 'SUB_t53_keep');
+  select current_period_end into v_period from subscriptions where account_id = b;
   r := pg_temp.deliver('invoice.payment_failed', jsonb_build_object(
          'subscription', jsonb_build_object('subscription_code', 'SUB_t53_stranger'),
          'customer', jsonb_build_object('customer_code','CUS_t53_keep')));
-  insert into t53 values (11, 'a failed-payment event for another subscription does not overwrite the code on file',
-    case when (select provider_subscription_code from subscriptions where account_id = b) = 'SUB_t53_keep'
+  select * into s from subscriptions where account_id = b;
+  insert into t53 values (11, 'a failed payment for another subscription: code kept, status still active, period kept, not applied',
+    case when s.provider_subscription_code = 'SUB_t53_keep' and s.status = 'active'
+          and s.current_period_end = v_period
+          and r->>'status' = 'failed_permanent' and r->>'reason' = 'not_current_subscription'
          then 'PASS' else 'FAIL' end,
-    (select coalesce(provider_subscription_code,'NULL') from subscriptions where account_id = b));
+    coalesce(s.provider_subscription_code,'NULL')||' / '||s.status||' / '||coalesce(r->>'reason', r->>'status'));
 end $$;
 
 -- ============================================================================
@@ -549,6 +563,527 @@ begin
     insert into t53 values (84, 'the kind check still refuses an unknown kind', 'FAIL', 'accepted');
   exception when check_violation then
     insert into t53 values (84, 'the kind check still refuses an unknown kind', 'PASS', '');
+  end;
+end $$;
+
+-- ============================================================================
+-- H. THE WRONG SUBSCRIPTION
+--    A cancel or a failed payment found by customer code but naming a
+--    subscription that is neither the current one nor a replaced one changes
+--    nothing: failed_permanent for a person to review, raised as an alert.
+-- ============================================================================
+do $$
+declare a uuid; b uuid; c uuid; d uuid; q jsonb; r jsonb; r2 jsonb; r3 jsonb; s record; v_slot record;
+        v_period timestamptz;
+begin
+  -- 90-91. a founder on SUB_ws1; Paystack disables some OTHER subscription of
+  --        the same customer (a duplicate switched off by hand, an old one)
+  a := pg_temp.paying('wrongsub', 'costing', 'CUS_t53_ws', 'SUB_t53_ws1');
+  select current_period_end into v_period from subscriptions where account_id = a;
+  r := pg_temp.deliver('subscription.disable', jsonb_build_object(
+         'subscription_code', 'SUB_t53_ws_other', 'status', 'cancelled',
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_ws')));
+  select * into s from subscriptions where account_id = a;
+  select * into v_slot from founder_slots where account_id = a;
+  insert into t53 values (90, 'a disable for a subscription that is not the current one fails closed: not_current_subscription',
+    case when r->>'status' = 'failed_permanent' and r->>'reason' = 'not_current_subscription'
+          and (select last_error_code from billing_events where id = (r->>'event_id')::uuid) = 'not_current_subscription'
+          and (select account_id from billing_events where id = (r->>'event_id')::uuid) = a
+         then 'PASS' else 'FAIL' end, coalesce(r->>'reason', r->>'status'));
+  insert into t53 values (91, '... the founder keeps status, period, code, the founding price and the slot; still quoted founding',
+    case when s.status = 'active' and not s.cancel_at_period_end and s.current_period_end = v_period
+          and s.provider_subscription_code = 'SUB_t53_ws1'
+          and s.founding_price_active and v_slot.claimed_at is not null and v_slot.forfeited_at is null
+          and fn_checkout_quote(a, 'trading')->>'price_tier' = 'founding'
+         then 'PASS' else 'FAIL' end,
+    s.status||' / founding '||s.founding_price_active::text||' / forfeited '||coalesce(v_slot.forfeited_at::text,'no'));
+
+  -- 92. its not_renew and a failed payment on it change nothing either
+  r2 := pg_temp.deliver('subscription.not_renew', jsonb_build_object(
+          'subscription_code', 'SUB_t53_ws_other', 'status', 'non-renewing',
+          'customer', jsonb_build_object('customer_code', 'CUS_t53_ws')));
+  r3 := pg_temp.deliver('invoice.payment_failed', jsonb_build_object(
+          'subscription', jsonb_build_object('subscription_code', 'SUB_t53_ws_other'),
+          'customer', jsonb_build_object('customer_code', 'CUS_t53_ws')));
+  select * into s from subscriptions where account_id = a;
+  insert into t53 values (92, '... and so do its not_renew and its failed payment: still active, still renews',
+    case when r2->>'reason' = 'not_current_subscription' and r3->>'reason' = 'not_current_subscription'
+          and s.status = 'active' and not s.cancel_at_period_end and s.current_period_end = v_period
+         then 'PASS' else 'FAIL' end,
+    coalesce(r2->>'reason','?')||' / '||coalesce(r3->>'reason','?')||' / '||s.status);
+
+  -- 93. a person is told: the scan raises it as billing_failed_permanent
+  perform fn_admin_scan();
+  insert into t53 values (93, 'each one is raised as billing_failed_permanent (critical) naming the account',
+    case when (select count(*) from platform_alerts p
+                where p.kind = 'billing_failed_permanent' and p.resolved_at is null and p.severity = 'critical'
+                  and p.subject in (r->>'event_id', r2->>'event_id', r3->>'event_id')
+                  and p.detail->>'error_code' = 'not_current_subscription'
+                  and (p.detail->>'account_id')::uuid = a) = 3 then 'PASS' else 'FAIL' end, '');
+
+  -- 94. no subscription code on file at all (an account from before 0067
+  --     stored codes): a cancel naming a code fails closed for review
+  b := pg_temp.new_account('legacy');
+  q := fn_checkout_quote(b, 'costing');
+  perform pg_temp.deliver('charge.success', jsonb_build_object(
+    'paid_at', now()::text,
+    'metadata', jsonb_build_object('account_id', b::text, 'plan_id', q->>'plan_id'),
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_leg'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  r := pg_temp.deliver('subscription.disable', jsonb_build_object(
+         'subscription_code', 'SUB_t53_leg', 'status', 'cancelled',
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_leg')));
+  select * into s from subscriptions where account_id = b;
+  insert into t53 values (94, 'with no code on file, a disable naming a code fails closed (subscription_not_on_file); founder untouched',
+    case when r->>'reason' = 'subscription_not_on_file' and s.status = 'active' and s.founding_price_active
+          and s.provider_subscription_code is null
+          and (select forfeited_at from founder_slots where account_id = b) is null
+         then 'PASS' else 'FAIL' end, coalesce(r->>'reason', r->>'status')||' / '||s.status);
+
+  -- 95. the reviewed path (DEPLOY_0067): once the live code is on file, that
+  --     same event is re-applied by hand and now takes effect
+  update subscriptions set provider_subscription_code = 'SUB_t53_leg' where account_id = b;
+  update billing_events set status = 'processing'
+   where id = (r->>'event_id')::uuid and status = 'failed_permanent';
+  r2 := fn_billing_apply((r->>'event_id')::uuid);
+  select * into s from subscriptions where account_id = b;
+  insert into t53 values (95, '... after a person puts the live code on file, re-applying it takes effect',
+    case when r2->>'status' = 'applied' and s.status = 'cancelled' then 'PASS' else 'FAIL' end,
+    coalesce(r2->>'status','?')||' / '||s.status);
+
+  -- 96. a cancel naming no subscription at all, matched only by customer code
+  c := pg_temp.paying('nocode', 'costing', 'CUS_t53_nc', 'SUB_t53_nc');
+  r := pg_temp.deliver('subscription.not_renew', jsonb_build_object(
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_nc')));
+  select * into s from subscriptions where account_id = c;
+  insert into t53 values (96, 'a cancel naming no subscription, found only by customer code, fails closed (no_subscription_code)',
+    case when r->>'reason' = 'no_subscription_code' and s.status = 'active' and not s.cancel_at_period_end
+         then 'PASS' else 'FAIL' end, coalesce(r->>'reason', r->>'status')||' / '||s.status);
+
+  -- 97. ... while one carrying our own metadata still applies, as in 0051
+  r := pg_temp.deliver('subscription.not_renew', jsonb_build_object(
+         'metadata', jsonb_build_object('account_id', c::text)));
+  select * into s from subscriptions where account_id = c;
+  insert into t53 values (97, 'a cancel naming no subscription but carrying our metadata applies, as before 0067',
+    case when r->>'status' = 'applied' and s.status = 'cancelled' and s.cancel_at_period_end
+         then 'PASS' else 'FAIL' end, coalesce(r->>'status','?')||' / '||s.status);
+
+  -- 98. only a payment may move an account onto a code we do not hold
+  d := pg_temp.paying('newsub', 'costing', 'CUS_t53_ns', 'SUB_t53_nsA');
+  r := pg_temp.deliver('subscription.create', jsonb_build_object(
+         'subscription_code', 'SUB_t53_nsB', 'status', 'active',
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_ns'),
+         'plan', jsonb_build_object('plan_code', 'founding_costing'),
+         'next_payment_date', (now() + interval '1 month')::text));
+  insert into t53 values (98, 'a subscription.create for a new code still moves the account and queues the old one',
+    case when r->>'status' = 'applied' and r->>'replaced' = 'SUB_t53_nsA'
+          and (select provider_subscription_code from subscriptions where account_id = d) = 'SUB_t53_nsB'
+          and exists (select 1 from billing_superseded where subscription_code = 'SUB_t53_nsA' and account_id = d)
+         then 'PASS' else 'FAIL' end, coalesce(r->>'replaced', r->>'reason', '?'));
+end $$;
+
+-- ============================================================================
+-- I. ONE READING OF THE SUBSCRIPTION CODE
+-- ============================================================================
+do $$
+declare a uuid; b uuid; q jsonb; r jsonb; s record;
+begin
+  a := pg_temp.paying('plancode', 'costing', 'CUS_t53_pc', 'SUB_t53_pcA');
+  q := fn_checkout_quote(a, 'trading');
+  perform pg_temp.deliver('charge.success', jsonb_build_object(
+    'paid_at', now()::text,
+    'metadata', jsonb_build_object('account_id', a::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_pcA'),
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_pc'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_pcB', 'status', 'active',
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_pc'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+
+  -- 100. a charge naming the replaced SUB_A only under data.plan.subscription_code
+  r := pg_temp.deliver('charge.success', jsonb_build_object(
+         'paid_at', now()::text, 'customer', jsonb_build_object('customer_code', 'CUS_t53_pc'),
+         'plan', jsonb_build_object('plan_code', 'founding_costing', 'subscription_code', 'SUB_t53_pcA')));
+  select * into s from subscriptions where account_id = a;
+  insert into t53 values (100, 'a charge naming a replaced code under data.plan.subscription_code is superseded_charge; SUB_B stays',
+    case when r->>'status' = 'ignored'
+          and (select last_error_code from billing_events where id = (r->>'event_id')::uuid) = 'superseded_charge'
+          and s.provider_subscription_code = 'SUB_t53_pcB' and s.plan_id = 'founding_trading'
+         then 'PASS' else 'FAIL' end,
+    coalesce(r->>'reason', r->>'status')||' / '||s.provider_subscription_code||' / '||s.plan_id);
+
+  -- 101. attribution reads it the same way
+  insert into t53 values (101, 'attribution reads data.plan.subscription_code too (one reading everywhere)',
+    case when (fn_billing_find_account('{"data":{"plan":{"subscription_code":"SUB_t53_pcB"}}}'::jsonb)->>'account_id')::uuid = a
+          and fn_billing_find_account('{"data":{"plan":{"subscription_code":"SUB_t53_pcB"}}}'::jsonb)->>'via' = 'subscription_code'
+          and fn_billing_event_sub_code('{"data":{"subscription_code":"SUB_s","subscription":{"subscription_code":"SUB_i"},"plan":{"subscription_code":"SUB_p"}}}'::jsonb) = 'SUB_s'
+          and fn_billing_event_sub_code('{"data":{"subscription":{"subscription_code":"SUB_i"},"plan":{"subscription_code":"SUB_p"}}}'::jsonb) = 'SUB_i'
+         then 'PASS' else 'FAIL' end, '');
+
+  -- 102. the side effects never store a replaced code, even when handed one
+  perform fn_apply_billing_side_effects(a, 'founding_trading', 'active',
+            jsonb_build_object('event', 'charge.success',
+                               'data', jsonb_build_object('subscription_code', 'SUB_t53_pcA')));
+  insert into t53 values (102, 'the side effects never store a code that is in billing_superseded',
+    case when (select provider_subscription_code from subscriptions where account_id = a) = 'SUB_t53_pcB'
+         then 'PASS' else 'FAIL' end,
+    (select provider_subscription_code from subscriptions where account_id = a));
+
+  -- 103. a code replaced on another (here: a deleted) account is not taken up
+  insert into billing_superseded (account_id, subscription_code) values (null, 'SUB_t53_orphan');
+  b := pg_temp.paying('orphan', 'costing', 'CUS_t53_or', 'SUB_t53_or1');
+  r := pg_temp.deliver('charge.success', jsonb_build_object(
+         'paid_at', now()::text, 'subscription_code', 'SUB_t53_orphan',
+         'metadata', jsonb_build_object('account_id', b::text, 'plan_id', 'founding_costing'),
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_or'),
+         'plan', jsonb_build_object('plan_code', 'founding_costing')));
+  insert into t53 values (103, 'a payment naming a code replaced on another account is ignored; the current code is not queued',
+    case when r->>'status' = 'ignored'
+          and (select provider_subscription_code from subscriptions where account_id = b) = 'SUB_t53_or1'
+          and not exists (select 1 from billing_superseded where subscription_code = 'SUB_t53_or1')
+         then 'PASS' else 'FAIL' end, coalesce(r->>'reason', r->>'status'));
+end $$;
+
+-- ============================================================================
+-- J. THE LEFT-PLAN GUARD, HOWEVER THE RENEWAL WAS MATCHED
+-- ============================================================================
+do $$
+declare a uuid; q jsonb; r jsonb; s record;
+begin
+  a := pg_temp.paying('guard', 'costing', 'CUS_t53_gd', 'SUB_t53_gdA');
+  q := fn_checkout_quote(a, 'trading');
+  perform pg_temp.deliver('charge.success', jsonb_build_object(
+    'paid_at', now()::text,
+    'metadata', jsonb_build_object('account_id', a::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_gdA'),
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_gd'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_gdB', 'status', 'active',
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_gd'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+
+  -- 110. the old subscription renews, and Paystack copied the FIRST checkout's
+  --      metadata onto the charge: matched by metadata, not customer code
+  r := pg_temp.deliver('charge.success', jsonb_build_object(
+         'paid_at', now()::text,
+         'metadata', jsonb_build_object('account_id', a::text, 'plan_id', 'founding_costing'),
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_gd'),
+         'plan', jsonb_build_object('plan_code', 'founding_costing')));
+  select * into s from subscriptions where account_id = a;
+  insert into t53 values (110, 'a renewal on the plan left, matched by metadata, is superseded_charge; the plan does not flip back',
+    case when r->>'status' = 'ignored'
+          and (select last_error_code from billing_events where id = (r->>'event_id')::uuid) = 'superseded_charge'
+          and s.plan_id = 'founding_trading' and s.provider_subscription_code = 'SUB_t53_gdB'
+         then 'PASS' else 'FAIL' end, coalesce(r->>'reason', r->>'status')||' / '||s.plan_id);
+
+  -- 111. a genuine checkout back to Costing names the CURRENT code it replaces
+  q := fn_checkout_quote(a, 'costing');
+  r := pg_temp.deliver('charge.success', jsonb_build_object(
+         'paid_at', now()::text,
+         'metadata', jsonb_build_object('account_id', a::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_gdB'),
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_gd'),
+         'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  select * into s from subscriptions where account_id = a;
+  insert into t53 values (111, '... but a new checkout back to that plan (replaces = the current code) applies',
+    case when r->>'status' = 'applied' and s.plan_id = 'founding_costing' and r->>'replaced' = 'SUB_t53_gdB'
+         then 'PASS' else 'FAIL' end, coalesce(r->>'status','?')||' / '||s.plan_id);
+end $$;
+
+-- ============================================================================
+-- K. X2, X1 AND X8
+-- ============================================================================
+do $$
+declare a uuid; b uuid; c uuid; d uuid; q jsonb; r jsonb; s record; v_slot record;
+begin
+  -- 120-122. X2: an overdue founder pays again on the SAME plan ("Pay now")
+  a := pg_temp.paying('payagain', 'costing', 'CUS_t53_pa', 'SUB_t53_paA');
+  perform pg_temp.deliver('invoice.payment_failed', jsonb_build_object(
+    'subscription', jsonb_build_object('subscription_code', 'SUB_t53_paA'),
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_pa')));
+  update subscriptions set current_period_end = now() - interval '2 days' where account_id = a;
+  q := fn_checkout_quote(a, 'costing');
+  r := pg_temp.deliver('charge.success', jsonb_build_object(
+         'paid_at', now()::text,
+         'metadata', jsonb_build_object('account_id', a::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_paA'),
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_pa'),
+         'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  select * into s from subscriptions where account_id = a;
+  insert into t53 values (120, 'X2: an overdue founder''s Pay now on the same plan applies: active, a new paid month, founding kept',
+    case when r->>'status' = 'applied' and s.status = 'active' and s.current_period_end > now() + interval '27 days'
+          and s.plan_id = 'founding_costing' and s.founding_price_active
+          and r->>'replaced' = 'SUB_t53_paA'
+         then 'PASS' else 'FAIL' end, coalesce(r->>'status','?')||' / '||s.status||' / '||s.plan_id);
+  insert into t53 values (121, '... and until its subscription.create lands, the change is "in progress" (what paystack-manage reads)',
+    case when exists (select 1 from billing_superseded b join subscriptions x
+                        on x.provider_subscription_code = b.subscription_code
+                       where x.account_id = a and b.disabled_at is null) then 'PASS' else 'FAIL' end, '');
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_paB', 'status', 'active',
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_pa'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+  perform pg_temp.deliver('subscription.disable', jsonb_build_object(
+    'subscription_code', 'SUB_t53_paA', 'status', 'cancelled',
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_pa')));
+  select * into s from subscriptions where account_id = a;
+  insert into t53 values (122, '... then the failed subscription''s disable is ignored: active on SUB_paB, founding kept, no longer in progress',
+    case when s.status = 'active' and s.provider_subscription_code = 'SUB_t53_paB' and s.founding_price_active
+          and (select forfeited_at from founder_slots where account_id = a) is null
+          and not exists (select 1 from billing_superseded b join subscriptions x
+                            on x.provider_subscription_code = b.subscription_code
+                           where x.account_id = a and b.disabled_at is null)
+         then 'PASS' else 'FAIL' end, s.status||' / '||s.provider_subscription_code);
+
+  -- 123. X1: an overdue owner cancels; Paystack's disable ends it at once and
+  --      the founding price goes (the warning the screens give is true)
+  b := pg_temp.paying('odcancel', 'costing', 'CUS_t53_oc', 'SUB_t53_oc');
+  perform pg_temp.deliver('invoice.payment_failed', jsonb_build_object(
+    'subscription', jsonb_build_object('subscription_code', 'SUB_t53_oc'),
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_oc')));
+  update subscriptions set current_period_end = now() - interval '1 day' where account_id = b;
+  r := pg_temp.deliver('subscription.disable', jsonb_build_object(
+         'subscription_code', 'SUB_t53_oc', 'status', 'cancelled',
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_oc')));
+  select * into s from subscriptions where account_id = b;
+  select * into v_slot from founder_slots where account_id = b;
+  insert into t53 values (123, 'X1: an overdue plan cancelled at Paystack ends straight away and forfeits the founding price',
+    case when r->>'status' = 'applied' and s.status = 'cancelled' and not fn_account_is_entitled(b)
+          and not s.founding_price_active and v_slot.forfeited_at is not null
+         then 'PASS' else 'FAIL' end, coalesce(r->>'status','?')||' / '||s.status);
+
+  -- 124-125. X8: a cancelled plan still in its paid month chooses again
+  c := pg_temp.paying('again', 'costing', 'CUS_t53_ag', 'SUB_t53_agA');
+  perform pg_temp.deliver('subscription.not_renew', jsonb_build_object(
+    'subscription_code', 'SUB_t53_agA', 'status', 'non-renewing',
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_ag')));
+  q := fn_checkout_quote(c, 'costing');
+  r := pg_temp.deliver('charge.success', jsonb_build_object(
+         'paid_at', now()::text,
+         'metadata', jsonb_build_object('account_id', c::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_agA'),
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_ag'),
+         'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  select * into s from subscriptions where account_id = c;
+  insert into t53 values (124, 'X8: choosing a plan again inside the paid month starts it now; the ending one is recorded as replaced',
+    case when r->>'status' = 'applied' and s.status = 'active' and not s.cancel_at_period_end
+          and r->>'replaced' = 'SUB_t53_agA' then 'PASS' else 'FAIL' end,
+    coalesce(r->>'status','?')||' / '||s.status);
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_agB', 'status', 'active',
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_ag'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+  r := pg_temp.deliver('subscription.disable', jsonb_build_object(
+         'subscription_code', 'SUB_t53_agA', 'status', 'complete',
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_ag')));
+  select * into s from subscriptions where account_id = c;
+  insert into t53 values (125, '... and when the ending subscription finally disables, nothing changes; founding kept',
+    case when r->>'status' = 'ignored' and s.status = 'active' and s.provider_subscription_code = 'SUB_t53_agB'
+          and s.founding_price_active then 'PASS' else 'FAIL' end,
+    coalesce(r->>'reason', r->>'status')||' / '||s.status);
+
+  -- 126. X8 meets the left-plan guard: an account that moved Costing ->
+  --      Trading and then cancelled chooses Costing again. Our checkout names
+  --      the ending (current) subscription in metadata.replaces, so the new
+  --      payment is not taken for the old Costing subscription renewing.
+  d := pg_temp.paying('backagain', 'costing', 'CUS_t53_bk', 'SUB_t53_bkA');
+  q := fn_checkout_quote(d, 'trading');
+  perform pg_temp.deliver('charge.success', jsonb_build_object(
+    'paid_at', now()::text,
+    'metadata', jsonb_build_object('account_id', d::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_bkA'),
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_bk'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_bkB', 'status', 'active',
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_bk'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+  perform pg_temp.deliver('subscription.not_renew', jsonb_build_object(
+    'subscription_code', 'SUB_t53_bkB', 'status', 'non-renewing',
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_bk')));
+  q := fn_checkout_quote(d, 'costing');
+  r := pg_temp.deliver('charge.success', jsonb_build_object(
+         'paid_at', now()::text,
+         'metadata', jsonb_build_object('account_id', d::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_bkB'),
+         'customer', jsonb_build_object('customer_code', 'CUS_t53_bk'),
+         'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  select * into s from subscriptions where account_id = d;
+  insert into t53 values (126, 'X8: a cancelled plan choosing a plan it once left (replaces = the ending code) applies; the guard does not hold it',
+    case when r->>'status' = 'applied' and s.status = 'active' and not s.cancel_at_period_end
+          and s.plan_id = 'founding_costing' and r->>'replaced' = 'SUB_t53_bkB'
+         then 'PASS' else 'FAIL' end,
+    coalesce(r->>'status','?')||' / '||coalesce(r->>'reason','')||' / '||s.status||' / '||s.plan_id);
+end $$;
+
+-- ============================================================================
+-- L. cancel_not_confirmed COVERS already_off AND past_due
+-- ============================================================================
+do $$
+declare a uuid; b uuid; c uuid;
+begin
+  a := pg_temp.paying('cnc1', 'costing', 'CUS_t53_cn1', 'SUB_t53_cn1');
+  insert into subscription_changes (subscription_id, account_id, change_kind, previous_values, new_values,
+         change_source, authorised_by, reason, effective_at, created_at)
+  select s.id, s.account_id, 'cancel_requested', '{}'::jsonb,
+         jsonb_build_object('action','cancel','outcome','already_off','subscription_code','SUB_t53_cn1'),
+         'customer', pg_temp.owner_of(a)::text, 't53 backdated', now() - interval '2 hours', now() - interval '2 hours'
+    from subscriptions s where s.account_id = a;
+
+  b := pg_temp.paying('cnc2', 'costing', 'CUS_t53_cn2', 'SUB_t53_cn2');
+  perform pg_temp.deliver('invoice.payment_failed', jsonb_build_object(
+    'subscription', jsonb_build_object('subscription_code', 'SUB_t53_cn2'),
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_cn2')));
+  insert into subscription_changes (subscription_id, account_id, change_kind, previous_values, new_values,
+         change_source, authorised_by, reason, effective_at, created_at)
+  select s.id, s.account_id, 'cancel_requested', '{}'::jsonb,
+         jsonb_build_object('action','cancel','outcome','sent','subscription_code','SUB_t53_cn2'),
+         'customer', pg_temp.owner_of(b)::text, 't53 backdated', now() - interval '2 hours', now() - interval '2 hours'
+    from subscriptions s where s.account_id = b;
+
+  -- 132 (set up here). an owner who cancelled, then chose a plan again: for
+  --     the seconds until the new subscription lands, the old code is still on
+  --     file and the row says active. That is not an unconfirmed cancel.
+  c := pg_temp.paying('cnc3', 'costing', 'CUS_t53_cn3', 'SUB_t53_cn3');
+  insert into subscription_changes (subscription_id, account_id, change_kind, previous_values, new_values,
+         change_source, authorised_by, reason, effective_at, created_at)
+  select s.id, s.account_id, 'cancel_requested', '{}'::jsonb,
+         jsonb_build_object('action','cancel','outcome','sent','subscription_code','SUB_t53_cn3'),
+         'customer', pg_temp.owner_of(c)::text, 't53 backdated', now() - interval '2 hours', now() - interval '2 hours'
+    from subscriptions s where s.account_id = c;
+  insert into billing_superseded (account_id, subscription_code, plan_id) values (c, 'SUB_t53_cn3', 'founding_costing');
+
+  perform fn_admin_scan();
+  insert into t53 values (132, '... but not while a plan chosen again is still finishing (the old code is pending switch-off)',
+    case when not exists (select 1 from platform_alerts where kind = 'cancel_not_confirmed' and resolved_at is null
+                           and subject = c::text) then 'PASS' else 'FAIL' end, '');
+  insert into t53 values (130, 'Paystack said "already off" an hour ago but our row still renews: cancel_not_confirmed',
+    case when exists (select 1 from platform_alerts where kind = 'cancel_not_confirmed' and resolved_at is null
+                       and subject = a::text and detail->>'outcome' = 'already_off') then 'PASS' else 'FAIL' end, '');
+  insert into t53 values (131, 'an overdue plan cancelled an hour ago and still past_due: cancel_not_confirmed',
+    case when exists (select 1 from platform_alerts where kind = 'cancel_not_confirmed' and resolved_at is null
+                       and subject = b::text and detail->>'status' = 'past_due') then 'PASS' else 'FAIL' end, '');
+end $$;
+
+-- ============================================================================
+-- M. possible_double_charge, AND EVENT-BASED ALERTS STAY RESOLVED
+-- ============================================================================
+do $$
+declare a uuid; b uuid; c uuid; d uuid; q jsonb; r1 jsonb; r2 jsonb; v_subject text;
+begin
+  -- 140. a first payment made twice (a double click): two applied charges
+  --      within an hour
+  a := pg_temp.new_account('dbl1');
+  q := fn_checkout_quote(a, 'costing');
+  r1 := pg_temp.deliver('charge.success', jsonb_build_object(
+          'paid_at', now()::text, 'metadata', jsonb_build_object('account_id', a::text, 'plan_id', q->>'plan_id'),
+          'customer', jsonb_build_object('customer_code', 'CUS_t53_d1'),
+          'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  r2 := pg_temp.deliver('charge.success', jsonb_build_object(
+          'paid_at', now()::text, 'metadata', jsonb_build_object('account_id', a::text, 'plan_id', q->>'plan_id'),
+          'customer', jsonb_build_object('customer_code', 'CUS_t53_d1'),
+          'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  update billing_events set received_at = received_at - interval '1 minute' where id = (r1->>'event_id')::uuid;
+
+  -- 141. two plan checkouts opened before the first was paid, paid three
+  --      hours apart, both replacing SUB_d2A
+  b := pg_temp.paying('dbl2', 'costing', 'CUS_t53_d2', 'SUB_t53_d2A');
+  update billing_events set received_at = received_at - interval '1 day' where account_id = b;
+  q := fn_checkout_quote(b, 'trading');
+  r1 := pg_temp.deliver('charge.success', jsonb_build_object(
+          'paid_at', now()::text,
+          'metadata', jsonb_build_object('account_id', b::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_d2A'),
+          'customer', jsonb_build_object('customer_code', 'CUS_t53_d2'),
+          'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  update billing_events set received_at = now() - interval '3 hours' where id = (r1->>'event_id')::uuid;
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_d2B', 'customer', jsonb_build_object('customer_code', 'CUS_t53_d2'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+  update billing_events set received_at = now() - interval '3 hours'
+   where account_id = b and event_type = 'subscription.create'
+     and fn_billing_event_sub_code(payload) = 'SUB_t53_d2B';
+  r2 := pg_temp.deliver('charge.success', jsonb_build_object(
+          'paid_at', now()::text,
+          'metadata', jsonb_build_object('account_id', b::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_d2A'),
+          'customer', jsonb_build_object('customer_code', 'CUS_t53_d2'),
+          'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_d2C', 'customer', jsonb_build_object('customer_code', 'CUS_t53_d2'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+
+  -- 142. a subscription replaced within an hour of its first payment (its
+  --      start charge an hour and a half ago, its own create just now)
+  c := pg_temp.paying('dbl3', 'costing', 'CUS_t53_d3', 'SUB_t53_d3A');
+  update billing_events set received_at = received_at - interval '90 minutes'
+   where account_id = c and event_type = 'charge.success';
+  q := fn_checkout_quote(c, 'trading');
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_d3B', 'customer', jsonb_build_object('customer_code', 'CUS_t53_d3'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+
+  -- 145. a calm plan change: the old subscription started weeks ago
+  d := pg_temp.paying('calm', 'costing', 'CUS_t53_calm', 'SUB_t53_calmA');
+  update billing_events set received_at = received_at - interval '40 days' where account_id = d;
+  q := fn_checkout_quote(d, 'trading');
+  perform pg_temp.deliver('charge.success', jsonb_build_object(
+    'paid_at', now()::text,
+    'metadata', jsonb_build_object('account_id', d::text, 'plan_id', q->>'plan_id', 'replaces', 'SUB_t53_calmA'),
+    'customer', jsonb_build_object('customer_code', 'CUS_t53_calm'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id')));
+  perform pg_temp.deliver('subscription.create', jsonb_build_object(
+    'subscription_code', 'SUB_t53_calmB', 'customer', jsonb_build_object('customer_code', 'CUS_t53_calm'),
+    'plan', jsonb_build_object('plan_code', q->>'plan_id'),
+    'next_payment_date', (now() + interval '1 month')::text));
+
+  perform fn_admin_scan();
+
+  select subject into v_subject from platform_alerts
+   where kind = 'possible_double_charge' and resolved_at is null and (detail->>'account_id')::uuid = a;
+  insert into t53 values (140, 'two applied charges within an hour raise possible_double_charge, subject the second payment',
+    case when v_subject = (select id::text from billing_events where account_id = a and event_type = 'charge.success'
+                            order by received_at desc limit 1)
+          and (select count(*) from platform_alerts where kind = 'possible_double_charge' and resolved_at is null
+                and (detail->>'account_id')::uuid = a) = 1
+         then 'PASS' else 'FAIL' end, coalesce(v_subject,'none'));
+  insert into t53 values (141, 'two checkouts that both replaced the same subscription, three hours apart, raise it once',
+    case when exists (select 1 from platform_alerts where kind = 'possible_double_charge' and resolved_at is null
+                       and subject = r2->>'event_id' and detail->>'replaces' = 'SUB_t53_d2A')
+          and (select count(*) from platform_alerts where kind = 'possible_double_charge' and resolved_at is null
+                and (detail->>'account_id')::uuid = b) = 1
+         then 'PASS' else 'FAIL' end,
+    (select count(*)::text from platform_alerts where kind = 'possible_double_charge' and resolved_at is null
+       and (detail->>'account_id')::uuid = b)||' alert(s)');
+  insert into t53 values (142, 'a subscription replaced within an hour of its first payment raises it',
+    case when exists (select 1 from platform_alerts p join billing_superseded bs
+                        on bs.replaced_by_event::text = p.subject
+                       where p.kind = 'possible_double_charge' and p.resolved_at is null
+                         and bs.subscription_code = 'SUB_t53_d3A' and p.detail->>'subscription_code' = 'SUB_t53_d3A')
+         then 'PASS' else 'FAIL' end, '');
+  insert into t53 values (145, 'a plan change weeks after the old subscription started raises nothing',
+    case when not exists (select 1 from platform_alerts where kind = 'possible_double_charge'
+                           and (detail->>'account_id')::uuid = d) then 'PASS' else 'FAIL' end, '');
+
+  -- 143-144. once a person resolves an event-based alert, it stays resolved
+  update platform_alerts set resolved_at = now(), resolution = 't53: refunded'
+   where kind in ('possible_double_charge', 'superseded_subscription_charged') and resolved_at is null;
+  perform fn_admin_scan();
+  insert into t53 values (143, 'a resolved possible_double_charge is not opened again by the next scan',
+    case when not exists (select 1 from platform_alerts where kind = 'possible_double_charge' and resolved_at is null)
+         then 'PASS' else 'FAIL' end, '');
+  insert into t53 values (144, 'a resolved superseded_subscription_charged is not opened again either',
+    case when not exists (select 1 from platform_alerts where kind = 'superseded_subscription_charged' and resolved_at is null)
+          and exists (select 1 from platform_alerts where kind = 'superseded_subscription_charged' and resolved_at is not null)
+         then 'PASS' else 'FAIL' end, '');
+
+  -- 146. the new kind is accepted by the kind check
+  begin
+    insert into platform_alerts (kind, subject, severity, summary) values ('possible_double_charge', 't53-kind', 'warn', 'x');
+    insert into t53 values (146, 'the kind check accepts possible_double_charge', 'PASS', '');
+  exception when check_violation then
+    insert into t53 values (146, 'the kind check accepts possible_double_charge', 'FAIL', 'refused');
   end;
 end $$;
 

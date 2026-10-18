@@ -5,6 +5,8 @@
 -- passes before and after 0066 so the whole release can be audited up front;
 -- 0067 itself refuses to run until 0066 is in (row 1 says which).
 -- Rows 8-12 are live counts only: no email, no code, no token is shown.
+-- Row 10 reads the subscription code exactly as 0067's fn_billing_event_sub_code
+-- will (data.subscription_code, then data.subscription, then data.plan).
 -- Safe to paste into the Supabase SQL Editor: it is a single SELECT.
 -- EXPECTED: 12 rows, every one PASS.
 -- ============================================================================
@@ -13,17 +15,17 @@ with checks(n, check_name, ok, detail) as (
          true,
          case when to_regprocedure('public.fn_require_entitled(uuid, boolean)') is not null
               then '0066 applied: 0067 may run now'
-              else 'NOT YET: apply 0066 first; 0067 refuses to run without it' end
+              else 'NOT YET: apply 0066 first (0065 before it, if 0065 ships); 0067 refuses to run without 0066' end
   union all select 2, 'identity: 118 policies; 102 fn_* with 0066 (99 without it)',
          (select count(*) from pg_policies where schemaname='public') = 118
          and (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%')
              = case when to_regprocedure('public.fn_require_entitled(uuid, boolean)') is not null then 102 else 99 end,
          (select count(*)::text from pg_policies where schemaname='public') || ' policies, '
          || (select count(*)::text from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%') || ' fn_*'
-  union all select 3, 'not yet applied: no billing_superseded, none of the four 0067 functions',
+  union all select 3, 'not yet applied: no billing_superseded, none of the five 0067 functions',
          to_regclass('public.billing_superseded') is null
          and not exists (select 1 from pg_proc where pronamespace='public'::regnamespace
-                          and proname in ('fn_billing_find_account','fn_billing_claim_switch_offs',
+                          and proname in ('fn_billing_event_sub_code','fn_billing_find_account','fn_billing_claim_switch_offs',
                                           'fn_billing_record_switch_off','fn_billing_record_manage_request')), ''
   union all select 4, 'fn_billing_apply is the 0051 body 0067 replaces',
          (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace and proname='fn_billing_apply')
@@ -57,12 +59,16 @@ with checks(n, check_name, ok, detail) as (
          true,
          (select count(*) filter (where n_codes = 1)::text || ' recoverable, '
                  || count(*) filter (where n_codes > 1)::text || ' with two or more codes (review: possible double billing)'
-            from (select s.id, count(distinct be.payload #>> '{data,subscription_code}') n_codes
+            from (select s.id, count(distinct coalesce(nullif(be.payload #>> '{data,subscription_code}', ''),
+                                                       nullif(be.payload #>> '{data,subscription,subscription_code}', ''),
+                                                       nullif(be.payload #>> '{data,plan,subscription_code}', ''))) n_codes
                     from subscriptions s
                     join billing_events be
                       on be.event_type = 'subscription.create' and be.signature_valid
                      and be.payload #>> '{data,customer,customer_code}' = s.provider_customer_code
-                     and nullif(be.payload #>> '{data,subscription_code}','') is not null
+                     and coalesce(nullif(be.payload #>> '{data,subscription_code}', ''),
+                                  nullif(be.payload #>> '{data,subscription,subscription_code}', ''),
+                                  nullif(be.payload #>> '{data,plan,subscription_code}', '')) is not null
                    where s.provider_subscription_code is null and s.status <> 'trialing'
                      and s.provider_customer_code is not null
                      and (select count(*) from subscriptions s2

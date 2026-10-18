@@ -7,7 +7,10 @@
 -- Requires: 0001-0066 applied (0066_trial_gate: 118 policies, 102 fn_*).
 -- Authority: the owner's decisions D5 (plan changes are self-serve, no double
 -- charge) and D6 (a Cancel plan button), 18 Oct 2026; trial-plan billing
--- designs DB1 (event attribution), DB4 (supersede) and EF2 (cancel, card).
+-- designs DB1 (event attribution), DB4 (supersede) and EF2 (cancel, card);
+-- integration decisions X1 (an overdue owner may cancel), X2 (an overdue
+-- owner may pay again on the same plan, replacing the failed subscription),
+-- X7 and X8, 18 Oct 2026.
 --
 -- THE DEFECTS THIS CORRECTS
 --
@@ -27,10 +30,19 @@
 --      one IS switched off, its not_renew and disable events would cancel the
 --      account and forfeit the founding price.
 --
+--   3. THE WRONG SUBSCRIPTION. Once events are matched by customer code, a
+--      cancel or a failed payment for some OTHER subscription of the same
+--      customer (a duplicate being switched off by hand, an old one) would
+--      cancel the account, forfeit the founding price, or make it past_due.
+--
 -- WHAT THIS ADDS
 --   billing_superseded               the old Paystack subscription each time a
 --                                    new one replaces it, and whether it has
 --                                    been switched off at Paystack yet
+--   fn_billing_event_sub_code        the ONE place a subscription code is read
+--                                    from an event: data.subscription_code,
+--                                    data.subscription.subscription_code, then
+--                                    data.plan.subscription_code
 --   fn_billing_find_account          who an event belongs to: metadata, then
 --                                    the stored subscription code, then a
 --                                    replaced code, then a customer code held
@@ -47,18 +59,25 @@
 -- WHAT THIS CHANGES
 --   fn_billing_apply                 uses fn_billing_find_account; marks any
 --                                    event for a replaced subscription
---                                    'ignored' (it changes nothing); records
---                                    the replacement; catches up a
+--                                    'ignored' (it changes nothing); refuses
+--                                    a cancel or failed payment for any
+--                                    subscription that is not the current
+--                                    one (failed_permanent, for review);
+--                                    never lets a renewal on a plan the
+--                                    account left flip it back; records the
+--                                    replacement; catches up a
 --                                    subscription.create that arrived before
 --                                    its own charge.success (same customer
 --                                    code, within the hour, nothing older)
 --   fn_apply_billing_side_effects    only a payment may REPLACE the stored
 --                                    subscription or customer code; any other
---                                    event may only fill an empty one
---   fn_admin_scan + its kind check   three new alerts: an old subscription not
+--                                    event may only fill an empty one; a
+--                                    replaced code is never stored again
+--   fn_admin_scan + its kind check   four new alerts: an old subscription not
 --                                    switched off after an hour, a replaced
---                                    subscription that took a payment, and a
---                                    cancel Paystack never confirmed
+--                                    subscription that took a payment, a
+--                                    cancel Paystack never confirmed, and a
+--                                    possible double charge
 --   subscriptions                    a one-time, exact recovery of a missing
 --                                    provider_subscription_code from the
 --                                    account's own subscription.create events
@@ -125,8 +144,9 @@ begin
     raise exception '0067 preflight FAILED: billing_superseded already exists; 0067 is applied.';
   end if;
   if exists (select 1 from pg_proc where pronamespace='public'::regnamespace
-              and proname in ('fn_billing_find_account','fn_billing_claim_switch_offs',
-                              'fn_billing_record_switch_off','fn_billing_record_manage_request')) then
+              and proname in ('fn_billing_event_sub_code','fn_billing_find_account',
+                              'fn_billing_claim_switch_offs','fn_billing_record_switch_off',
+                              'fn_billing_record_manage_request')) then
     raise exception '0067 preflight FAILED: a 0067 function already exists.';
   end if;
   if to_regclass('public.subscription_changes') is null then
@@ -203,13 +223,39 @@ revoke all on billing_superseded from public, anon, authenticated, service_role;
 grant select on billing_superseded to service_role;
 
 -- ---------------------------------------------------------------------------
--- 3. WHO AN EVENT BELONGS TO
+-- 3a. THE SUBSCRIPTION CODE AN EVENT NAMES
+--
+-- One reading, used by attribution, by fn_billing_apply, by the side effects,
+-- by the recovery below and by the alerts, so no two of them can disagree
+-- about which subscription an event is for. Subscription events carry it at
+-- data.subscription_code, invoice events at data.subscription, and 0050 also
+-- read data.plan.subscription_code. A pure reading: no table, no state.
+-- ---------------------------------------------------------------------------
+create or replace function fn_billing_event_sub_code(p_payload jsonb)
+returns text
+language sql
+immutable
+set search_path to 'public'
+as $fn$
+  select coalesce(nullif(p_payload #>> '{data,subscription_code}', ''),
+                  nullif(p_payload #>> '{data,subscription,subscription_code}', ''),
+                  nullif(p_payload #>> '{data,plan,subscription_code}', ''))
+$fn$;
+
+revoke all on function fn_billing_event_sub_code(jsonb) from public, anon, authenticated;
+grant execute on function fn_billing_event_sub_code(jsonb) to service_role;
+
+comment on function fn_billing_event_sub_code(jsonb) is
+  'The Paystack subscription code a billing event names: data.subscription_code, '
+  'then data.subscription.subscription_code, then data.plan.subscription_code. '
+  'The only place 0067 reads it, so attribution, apply and side effects agree.';
+
+-- ---------------------------------------------------------------------------
+-- 3b. WHO AN EVENT BELONGS TO
 --
 -- Exact matches only, in this order, and the first that answers wins:
 --   1. data.metadata.account_id      our checkout put it there
---   2. the stored subscription code  data.subscription_code, or
---                                    data.subscription.subscription_code on
---                                    the invoice events
+--   2. the stored subscription code  fn_billing_event_sub_code (3a)
 --   3. a replaced subscription code  billing_superseded (the event is then
 --                                    ignored by fn_billing_apply)
 --   4. the customer code             data.customer.customer_code, only when
@@ -218,6 +264,10 @@ grant select on billing_superseded to service_role;
 -- or 'ambiguous_subscription', and the event stays failed_permanent for a
 -- person to look at. Wrongly attributing an event could cancel someone
 -- else's business.
+--
+-- Matching an ACCOUNT is not the same as matching its SUBSCRIPTION: an event
+-- found by customer code may name a subscription that is not the current
+-- one. fn_billing_apply decides what such an event may do (section 5).
 -- ---------------------------------------------------------------------------
 create or replace function fn_billing_find_account(p_payload jsonb)
 returns jsonb
@@ -246,8 +296,7 @@ begin
   end if;
 
   -- 2. the subscription code we hold
-  v_sub := coalesce(nullif(p_payload #>> '{data,subscription_code}',''),
-                    nullif(p_payload #>> '{data,subscription,subscription_code}',''));
+  v_sub := fn_billing_event_sub_code(p_payload);
   if v_sub is not null then
     select array_agg(s.account_id) into v_ids
       from subscriptions s where s.provider_subscription_code = v_sub;
@@ -294,12 +343,14 @@ comment on function fn_billing_find_account(jsonb) is
 -- ---------------------------------------------------------------------------
 -- 4. THE PAYMENT BOUNDARY, with the codes protected
 --
--- The 0050 body, with one change (marked): only a payment (status 'active')
+-- The 0050 body, with two changes (marked): only a payment (status 'active')
 -- may REPLACE the stored subscription or customer code. Any other event may
 -- only fill an empty one. Before, a past_due or cancelling event attributed
 -- by customer code could overwrite the current subscription code with some
 -- other subscription's, and the old one would never be switched off.
--- The invoice events carry the code under data.subscription, now read too.
+-- And a code that a newer subscription replaced (billing_superseded) is
+-- never stored again, however the event names it. The code is read with
+-- fn_billing_event_sub_code, as everywhere else in 0067.
 -- ---------------------------------------------------------------------------
 create or replace function fn_apply_billing_side_effects(
   p_account_id uuid, p_plan_id text, p_status text, p_payload jsonb)
@@ -320,9 +371,13 @@ begin
   select * into v_plan from plans where id = p_plan_id;
 
   v_cust := nullif(p_payload #>> '{data,customer,customer_code}','');
-  v_sub  := coalesce(nullif(p_payload #>> '{data,subscription_code}',''),
-                     nullif(p_payload #>> '{data,subscription,subscription_code}',''),
-                     nullif(p_payload #>> '{data,plan,subscription_code}',''));
+  v_sub  := fn_billing_event_sub_code(p_payload);
+  -- >>> 0067: a replaced subscription's code is never stored again
+  if v_sub is not null
+     and exists (select 1 from billing_superseded b where b.subscription_code = v_sub) then
+    v_sub := null;
+  end if;
+  -- <<<
 
   v_not_renew := (p_payload ->> 'event') = 'subscription.not_renew';
   v_paid      := p_status = 'active';
@@ -369,9 +424,29 @@ revoke all on function fn_apply_billing_side_effects(uuid, text, text, jsonb)
 -- 5. fn_billing_apply
 --
 -- The 0051 body, with the marked 0067 blocks: attribution, ignoring a
--- replaced subscription, recording a replacement, and the arrival-order
--- catch-up. Event mapping, plan resolution, the paid period and the
--- failed_transient / failed_permanent discipline are unchanged.
+-- replaced subscription, refusing a cancel or failed payment for a
+-- subscription that is not the current one, the left-plan guard, recording a
+-- replacement, and the arrival-order catch-up. Event mapping, plan
+-- resolution, the paid period and the failed_transient / failed_permanent
+-- discipline are unchanged.
+--
+-- WHICH EVENTS MAY DO WHAT, by the subscription they name:
+--   the current code          anything (as 0051)
+--   a replaced code           nothing: 'ignored' ('superseded'; a payment is
+--                             'superseded_charge' and raised for a refund)
+--   any other code            a payment (charge.success, subscription.create)
+--                             may move the account onto it, recording the
+--                             current one as replaced. A cancel or a failed
+--                             payment may NOT: failed_permanent,
+--                             'not_current_subscription' (or
+--                             'subscription_not_on_file' when we hold no code
+--                             at all), raised as billing_failed_permanent for
+--                             a person to review. It never cancels, forfeits
+--                             or makes anything past_due.
+--   no code at all            as 0051 when our metadata (or the event row)
+--                             names the account; a cancel or failed payment
+--                             found only by customer code fails closed
+--                             ('no_subscription_code').
 -- ---------------------------------------------------------------------------
 create or replace function fn_billing_apply(p_event_id uuid)
 returns jsonb
@@ -436,8 +511,7 @@ begin
     v_via := v_find->>'via';
   end if;
 
-  v_evsub := coalesce(nullif(e.payload #>> '{data,subscription_code}',''),
-                      nullif(e.payload #>> '{data,subscription,subscription_code}',''));
+  v_evsub := fn_billing_event_sub_code(e.payload);
   v_replaces := nullif(e.payload #>> '{data,metadata,replaces}','');
 
   select s.plan_id, s.provider_subscription_code, s.provider_customer_code
@@ -449,18 +523,56 @@ begin
   -- problem any more. Status, period, plan and the founding price stay as
   -- they are. A payment on it means someone was charged twice: it is kept as
   -- 'superseded_charge' and fn_admin_scan raises it for a refund.
+  -- Any replaced code counts, whichever account replaced it (or none, if that
+  -- account was deleted): a replaced code never becomes anyone's current one.
   if v_evsub is not null and v_evsub is distinct from v_cur_sub
-     and exists (select 1 from billing_superseded b
-                  where b.subscription_code = v_evsub and b.account_id = v_account) then
+     and exists (select 1 from billing_superseded b where b.subscription_code = v_evsub) then
     update billing_events
        set status='ignored', applied_at=now(), account_id=v_account,
            last_error_code = case when e.event_type = 'charge.success'
                                   then 'superseded_charge' else 'superseded' end,
-           last_error = 'subscription '||v_evsub||' was replaced by a newer one on this '
-                        'account; this event changes nothing'
+           last_error = 'subscription '||v_evsub||' was replaced by a newer one; '
+                        'this event changes nothing'
      where id=e.id;
     return jsonb_build_object('status','ignored','reason','superseded',
                               'account_id', v_account, 'subscription_code', v_evsub);
+  end if;
+
+  -- A CANCEL OR FAILED PAYMENT FOR ANY OTHER SUBSCRIPTION CHANGES NOTHING
+  -- EITHER, but it is not ours to ignore: a person looks at it. It is most
+  -- likely a duplicate subscription being switched off by hand, or an old one
+  -- from before codes were stored. Applying it would cancel the account,
+  -- forfeit the founding price or make a paying account past_due on the word
+  -- of a subscription that is not the one it pays with. Only a payment may
+  -- move an account onto a code we do not hold (below).
+  if v_status in ('past_due','cancelled') then
+    if v_evsub is not null and v_evsub is distinct from v_cur_sub then
+      update billing_events
+         set status='failed_permanent', account_id=v_account,
+             last_error_code = case when v_cur_sub is null then 'subscription_not_on_file'
+                                    else 'not_current_subscription' end,
+             last_error = case when v_cur_sub is null
+               then 'this '||e.event_type||' is for subscription '||v_evsub||', but this account has '
+                    'no subscription code on file; check the Paystack dashboard and put the live '
+                    'code on file before re-applying it (DEPLOY_0067)'
+               else 'this '||e.event_type||' is for subscription '||v_evsub||', not the current one ('
+                    ||v_cur_sub||'); it changes nothing until a person has looked (DEPLOY_0067)' end
+       where id=e.id;
+      return jsonb_build_object('status','failed_permanent',
+               'reason', case when v_cur_sub is null then 'subscription_not_on_file'
+                              else 'not_current_subscription' end,
+               'account_id', v_account, 'subscription_code', v_evsub);
+    end if;
+    if v_evsub is null and v_via = 'customer_code' then
+      update billing_events
+         set status='failed_permanent', account_id=v_account,
+             last_error_code = 'no_subscription_code',
+             last_error = 'this '||e.event_type||' names no subscription and was matched only by its '
+                          'customer code; it changes nothing until a person has looked (DEPLOY_0067)'
+       where id=e.id;
+      return jsonb_build_object('status','failed_permanent','reason','no_subscription_code',
+                                'account_id', v_account);
+    end if;
   end if;
   -- <<<
 
@@ -489,13 +601,19 @@ begin
     end if;
   end if;
 
-  -- >>> 0067: A RENEWAL OF A REPLACED SUBSCRIPTION THAT NAMES NO SUBSCRIPTION
-  -- A renewal charge carries the customer and the plan but no subscription
-  -- code. If it is for a plan this account has left (a replaced subscription
-  -- on that plan exists) it is the old subscription charging, not a plan
-  -- change back: ignore it and raise it, never flip the plan.
-  if e.event_type = 'charge.success' and v_via = 'customer_code'
+  -- >>> 0067: A RENEWAL ON A PLAN THE ACCOUNT HAS LEFT
+  -- A renewal charge may carry the customer and the plan but no subscription
+  -- code, and Paystack may copy the first checkout's metadata onto it (to be
+  -- confirmed in test mode, T9). If it is for a plan this account has left
+  -- (a replaced subscription on that plan exists) it is the old subscription
+  -- charging, not a plan change back: ignore it and raise it, never flip the
+  -- plan. This holds however the event was matched. The one exception is a
+  -- genuine new checkout back to that plan: our checkout then says it
+  -- replaces the CURRENT subscription (metadata.replaces = the code on file).
+  if e.event_type = 'charge.success'
      and v_plan is distinct from v_cur_plan
+     and (v_evsub is null or v_evsub is distinct from v_cur_sub)
+     and (v_replaces is null or v_replaces is distinct from v_cur_sub)
      and exists (select 1 from billing_superseded b
                   where b.account_id = v_account and b.plan_id = v_plan) then
     update billing_events
@@ -832,7 +950,7 @@ grant execute on function fn_billing_record_manage_request(uuid, uuid, text, tex
 -- 8. THE ALERTS
 --
 -- The 0055 scan, unchanged except for the marked block, and its kind check
--- with three kinds added:
+-- with four kinds added:
 --   subscription_not_switched_off   critical. A replaced subscription is still
 --                                   live at Paystack an hour on: either the
 --                                   switch-off keeps failing, or the new
@@ -842,14 +960,33 @@ grant execute on function fn_billing_record_manage_request(uuid, uuid, text, tex
 --   superseded_subscription_charged critical. A replaced subscription took a
 --                                   payment (last 14 days). Refund it.
 --   cancel_not_confirmed            warn. An owner stopped renewing at
---                                   Paystack an hour ago and our row still
---                                   says it renews.
+--                                   Paystack an hour ago (or Paystack said it
+--                                   was already off) and our row still says
+--                                   it renews, or is still past_due.
+--   possible_double_charge          warn. Two payments that look like one
+--                                   decision (last 14 days): two applied
+--                                   charges on one account within an hour;
+--                                   two applied charges that both replace the
+--                                   same subscription (two checkouts opened
+--                                   before the first was paid); or a
+--                                   subscription replaced within an hour of
+--                                   its first charge. Check Paystack and
+--                                   refund if it was not meant.
+-- The two event-based kinds (a payment that already happened) stay resolved
+-- once a person resolves them; the condition-based kinds re-open, as in 0055,
+-- for as long as the condition holds.
+--
+-- A cancel or failed payment for a subscription that is not the current one
+-- needs no kind of its own: it is failed_permanent ('not_current_subscription',
+-- 'subscription_not_on_file' or 'no_subscription_code') and so is raised as
+-- billing_failed_permanent (critical) until a person has dealt with it.
 -- ---------------------------------------------------------------------------
 alter table platform_alerts drop constraint ck_platform_alerts_kind;
 alter table platform_alerts add constraint ck_platform_alerts_kind check (kind in (
   'billing_failed_permanent','billing_stuck','founder_slots_low',
   'founder_slots_exhausted','past_due_beyond_grace','subscription_no_period',
-  'subscription_not_switched_off','superseded_subscription_charged','cancel_not_confirmed'));
+  'subscription_not_switched_off','superseded_subscription_charged','cancel_not_confirmed',
+  'possible_double_charge'));
 
 create or replace function fn_admin_scan()
 returns jsonb
@@ -931,6 +1068,7 @@ begin
     from billing_superseded b
    where b.disabled_at is null and b.recorded_at < now() - interval '1 hour';
 
+  -- event-based: once a person resolves it, it stays resolved
   insert into _seen
   select 'superseded_subscription_charged', e.id::text, 'critical',
          'A replaced Paystack subscription took a payment. The customer was charged twice: refund it.',
@@ -938,22 +1076,115 @@ begin
                             'error', e.last_error, 'received_at', e.received_at)
     from billing_events e
    where e.status = 'ignored' and e.last_error_code = 'superseded_charge'
-     and e.received_at > now() - interval '14 days';
+     and e.received_at > now() - interval '14 days'
+     and not exists (select 1 from platform_alerts p
+                      where p.kind = 'superseded_subscription_charged' and p.subject = e.id::text
+                        and p.resolved_at is not null);
 
+  -- condition-based: Paystack has been asked (or said it was already off),
+  -- an hour has passed, and our row still renews or is still past_due
   insert into _seen
   select distinct on (sc.account_id)
          'cancel_not_confirmed', sc.account_id::text, 'warn',
-         'An owner stopped renewing at Paystack an hour ago, but Paystack''s confirmation has not reached us.',
+         case when sc.new_values->>'outcome' = 'already_off'
+              then 'An owner pressed Cancel plan and Paystack said the subscription was already off, '
+                   'but our record still says it '||case when s.status = 'past_due' then 'is overdue' else 'renews' end
+                   ||'. Check the Paystack dashboard and the billing events for this account.'
+              else 'An owner stopped renewing at Paystack an hour ago, but Paystack''s confirmation has not reached us.' end,
          jsonb_build_object('account_id', sc.account_id, 'requested_at', sc.created_at,
+                            'outcome', sc.new_values->>'outcome', 'status', s.status,
                             'subscription_code', sc.new_values->>'subscription_code')
     from subscription_changes sc
     join subscriptions s on s.account_id = sc.account_id
-   where sc.change_kind = 'cancel_requested' and sc.new_values->>'outcome' = 'sent'
+   where sc.change_kind = 'cancel_requested'
+     and sc.new_values->>'outcome' in ('sent','already_off')
      and sc.created_at < now() - interval '1 hour'
      and sc.created_at > now() - interval '35 days'
-     and s.status = 'active' and not s.cancel_at_period_end
+     and ((s.status = 'active' and not s.cancel_at_period_end) or s.status = 'past_due')
      and s.provider_subscription_code is not distinct from sc.new_values->>'subscription_code'
+     -- not while the owner is choosing a plan again: the old code stays on
+     -- file for the seconds until the event of the new subscription lands
+     and not exists (select 1 from billing_superseded b
+                      where b.subscription_code = s.provider_subscription_code and b.disabled_at is null)
    order by sc.account_id, sc.created_at desc;
+
+  -- event-based: two payments that look like one decision. The subject is
+  -- the event of the SECOND payment, so one incident seen two ways raises one
+  -- alert; (c) is left out when (a) or (b) already caught that account within
+  -- the hour. Once a person resolves it, it stays resolved.
+  insert into _seen
+  with pay as (
+    -- (a) two applied charges on one account within an hour
+    select e2.id::text as subject, 1 as pri, e2.account_id, e2.received_at,
+           'This account was charged twice within an hour. Check the Paystack dashboard: if the '
+           'customer did not mean to pay twice, refund one charge.' as summary,
+           jsonb_build_object('account_id', e2.account_id, 'event_id', e2.id, 'reference', e2.reference,
+                              'received_at', e2.received_at, 'earlier_event_id', e1.id,
+                              'earlier_reference', e1.reference, 'earlier_received_at', e1.received_at) as detail
+      from billing_events e2
+      join lateral (select e.id, e.reference, e.received_at from billing_events e
+                     where e.account_id = e2.account_id and e.event_type = 'charge.success'
+                       and e.status = 'applied' and e.id <> e2.id
+                       and e.reference is distinct from e2.reference
+                       and e.received_at > e2.received_at - interval '1 hour'
+                       and (e.received_at < e2.received_at
+                            or (e.received_at = e2.received_at and e.id < e2.id))
+                     order by e.received_at desc limit 1) e1 on true
+     where e2.event_type = 'charge.success' and e2.status = 'applied'
+       and e2.account_id is not null
+       and e2.received_at > now() - interval '14 days'
+    union all
+    -- (b) two applied charges that both replace the same subscription: two
+    --     plan checkouts opened before the first was paid, however far apart
+    select e2.id::text, 2, e2.account_id, e2.received_at,
+           'Two payments on this account both replaced subscription '||(e2.payload #>> '{data,metadata,replaces}')||
+           ': two plan checkouts were paid. Check the Paystack dashboard and refund the one not meant.',
+           jsonb_build_object('account_id', e2.account_id, 'event_id', e2.id, 'reference', e2.reference,
+                              'received_at', e2.received_at,
+                              'replaces', e2.payload #>> '{data,metadata,replaces}',
+                              'earlier_event_id', e1.id, 'earlier_reference', e1.reference)
+      from billing_events e2
+      join lateral (select e.id, e.reference from billing_events e
+                     where e.account_id = e2.account_id and e.event_type = 'charge.success'
+                       and e.status = 'applied' and e.id <> e2.id
+                       and e.reference is distinct from e2.reference
+                       and e.payload #>> '{data,metadata,replaces}' = e2.payload #>> '{data,metadata,replaces}'
+                       and (e.received_at < e2.received_at
+                            or (e.received_at = e2.received_at and e.id < e2.id))
+                     order by e.received_at desc limit 1) e1 on true
+     where e2.event_type = 'charge.success' and e2.status = 'applied'
+       and e2.account_id is not null
+       and nullif(e2.payload #>> '{data,metadata,replaces}', '') is not null
+       and e2.received_at > now() - interval '14 days'
+  ), early as (
+    -- (c) a subscription replaced within an hour of its first payment
+    select b.replaced_by_event::text as subject, 3 as pri, b.account_id, b.recorded_at as received_at,
+           'Subscription '||b.subscription_code||' was replaced within an hour of its first payment. '
+           'Check the Paystack dashboard: if the customer did not mean to pay twice, refund that payment.' as summary,
+           jsonb_build_object('account_id', b.account_id, 'subscription_code', b.subscription_code,
+                              'replaced_by', b.replaced_by_code, 'first_paid_at', f.first_at,
+                              'replaced_at', b.recorded_at, 'event_id', b.replaced_by_event) as detail
+      from billing_superseded b
+      join lateral (select min(e.received_at) as first_at from billing_events e
+                     where e.account_id = b.account_id and e.status = 'applied'
+                       and e.event_type in ('charge.success','subscription.create')
+                       and fn_billing_event_sub_code(e.payload) = b.subscription_code) f
+        on f.first_at is not null
+     where b.replaced_by_event is not null and b.account_id is not null
+       and b.recorded_at > now() - interval '14 days'
+       and b.recorded_at < f.first_at + interval '1 hour'
+       and not exists (select 1 from pay
+                        where pay.account_id = b.account_id
+                          and pay.received_at between b.recorded_at - interval '1 hour'
+                                                  and b.recorded_at + interval '1 hour')
+  )
+  select distinct on (x.subject)
+         'possible_double_charge', x.subject, 'warn', x.summary, x.detail
+    from (select * from pay union all select * from early) x
+   where not exists (select 1 from platform_alerts p
+                      where p.kind = 'possible_double_charge' and p.subject = x.subject
+                        and p.resolved_at is not null)
+   order by x.subject, x.pri;
   -- <<<
 
   -- refresh what is still true
@@ -1010,12 +1241,12 @@ declare r record; v_done int := 0; v_multi int := 0;
 begin
   for r in
     select s.id, s.account_id, s.provider_customer_code,
-           array_agg(distinct be.payload #>> '{data,subscription_code}') as codes
+           array_agg(distinct fn_billing_event_sub_code(be.payload)) as codes
       from subscriptions s
       join billing_events be
         on be.event_type = 'subscription.create' and be.signature_valid
        and be.payload #>> '{data,customer,customer_code}' = s.provider_customer_code
-       and nullif(be.payload #>> '{data,subscription_code}','') is not null
+       and fn_billing_event_sub_code(be.payload) is not null
      where s.provider_subscription_code is null
        and s.status <> 'trialing'
        and s.provider_customer_code is not null
@@ -1058,12 +1289,12 @@ begin
   if v_pols <> b.pols then
     raise exception '0067 self-check FAILED: policy count moved from % to %; 0067 adds none.', b.pols, v_pols;
   end if;
-  if v_fns <> b.fns + 4 then
-    raise exception '0067 self-check FAILED: fn_* went from % to %, expected +4.', b.fns, v_fns;
+  if v_fns <> b.fns + 5 then
+    raise exception '0067 self-check FAILED: fn_* went from % to %, expected +5.', b.fns, v_fns;
   end if;
   if coalesce(current_setting('mm.fresh_install', true), '') <> 'on'
-     and (v_fns <> 106 or v_pols <> 118) then
-    raise exception '0067 self-check FAILED: expected 106 fn_* and 118 policies, found % and %.', v_fns, v_pols;
+     and (v_fns <> 107 or v_pols <> 118) then
+    raise exception '0067 self-check FAILED: expected 107 fn_* and 118 policies, found % and %.', v_fns, v_pols;
   end if;
 
   if not (select relrowsecurity from pg_class where oid = 'public.billing_superseded'::regclass) then
@@ -1084,7 +1315,8 @@ begin
   end if;
 
   if (select count(*) from pg_proc p where p.pronamespace='public'::regnamespace
-       and p.proname in ('fn_billing_find_account','fn_billing_claim_switch_offs',
+       and p.proname in ('fn_billing_event_sub_code','fn_billing_find_account',
+                         'fn_billing_claim_switch_offs',
                          'fn_billing_record_switch_off','fn_billing_record_manage_request',
                          'fn_billing_apply','fn_apply_billing_side_effects','fn_admin_scan')
        and (has_function_privilege('anon', p.oid, 'EXECUTE')
@@ -1097,13 +1329,29 @@ begin
        and p.prosecdef and 'search_path=public' = any(p.proconfig)) <> 4 then
     raise exception '0067 self-check FAILED: the four new functions are not all SECURITY DEFINER with search_path pinned.';
   end if;
+  if not exists (select 1 from pg_proc p where p.oid = 'public.fn_billing_event_sub_code(jsonb)'::regprocedure
+                  and p.provolatile = 'i' and not p.prosecdef
+                  and 'search_path=public' = any(p.proconfig)) then
+    raise exception '0067 self-check FAILED: fn_billing_event_sub_code is not an immutable, invoker, pinned reading.';
+  end if;
+  if fn_billing_event_sub_code('{"data":{"plan":{"subscription_code":"SUB_p"}}}'::jsonb) is distinct from 'SUB_p'
+     or fn_billing_event_sub_code('{"data":{"subscription":{"subscription_code":"SUB_i"},"plan":{"subscription_code":"SUB_p"}}}'::jsonb) is distinct from 'SUB_i'
+     or fn_billing_event_sub_code('{"data":{"subscription_code":"SUB_s","subscription":{"subscription_code":"SUB_i"}}}'::jsonb) is distinct from 'SUB_s'
+     or fn_billing_event_sub_code('{"data":{"subscription_code":""}}'::jsonb) is not null then
+    raise exception '0067 self-check FAILED: fn_billing_event_sub_code reads the code in the wrong order.';
+  end if;
+  if (select count(*) from pg_proc p where p.pronamespace='public'::regnamespace
+       and p.proname in ('fn_billing_find_account','fn_billing_apply','fn_apply_billing_side_effects','fn_admin_scan')
+       and p.prosrc like '%fn_billing_event_sub_code%') <> 4 then
+    raise exception '0067 self-check FAILED: a billing function reads the subscription code without fn_billing_event_sub_code.';
+  end if;
 
   if (select prosrc from pg_proc where pronamespace='public'::regnamespace and proname='fn_billing_apply')
        not like '%fn_billing_find_account%billing_superseded%' then
     raise exception '0067 self-check FAILED: fn_billing_apply does not attribute and supersede.';
   end if;
   if (select pg_get_constraintdef(oid) from pg_constraint where conname='ck_platform_alerts_kind')
-       not like '%subscription_not_switched_off%' then
+       not like '%subscription_not_switched_off%possible_double_charge%' then
     raise exception '0067 self-check FAILED: the alert kinds were not extended.';
   end if;
   if (select count(*) from founder_slots) <> 100 then
@@ -1112,6 +1360,6 @@ begin
 
   raise notice '0067 OK: events are attributed by subscription or customer code, a replaced '
                'subscription is switched off and its events ignored, owner requests are '
-               'recorded; % fn_* (+4), % policies (unchanged).', v_fns, v_pols;
+               'recorded; % fn_* (+5), % policies (unchanged).', v_fns, v_pols;
 end
 $$;

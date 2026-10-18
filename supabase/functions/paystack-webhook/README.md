@@ -53,5 +53,11 @@ delays or changes what Paystack is told about the event. A failure is
 retried on a later delivery with backoff (2, 4 ... 256 minutes, at most 20
 tries); an hour on, `fn_admin_scan` raises `subscription_not_switched_off`.
 The old subscription's own `not_renew`, `disable` and failed-payment events
-are recorded as `ignored` (`superseded`) and change nothing. Apply 0067 before
-deploying this version.
+are recorded as `ignored` (`superseded`) and change nothing. A cancel or failed
+payment for any OTHER subscription that is not the current one is held
+`failed_permanent` (`not_current_subscription`) for a person to review. Apply
+0067 before deploying this version.
+
+Retries only happen when a later notice arrives. On a quiet day that can be
+long, so `DEPLOY_0067.md` has a daily manual switch-off sweep for any row still
+pending.

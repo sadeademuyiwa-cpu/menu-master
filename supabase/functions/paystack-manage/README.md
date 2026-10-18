@@ -1,7 +1,8 @@
 # paystack-manage
 
 The owner's **Cancel plan** and **Update your card**, for an account that
-already pays (owner decision D6, 18 Oct 2026). Called only by
+already pays (owner decision D6, 18 Oct 2026), including an overdue
+(`past_due`) one (integration decision X1). Called only by
 `web/src/app/api/billing` with the signed-in user's own token.
 
 ## Deploy
@@ -23,7 +24,7 @@ request through `fn_billing_record_manage_request`.
 
 | Request | 200 response |
 |---|---|
-| `{"action":"cancel"}` | `{"ok":true,"action":"cancel","ends_on":"YYYY-MM-DD"}` (the paid period end as a Lagos date, or `null`) |
+| `{"action":"cancel"}` | `{"ok":true,"action":"cancel","ends_on":"YYYY-MM-DD"}`: the paid period end as a Lagos date for an active plan; `null` for an overdue plan (no paid days are left, so recording stops straight away) or when there is no period end |
 | `{"action":"card_link"}` | `{"ok":true,"action":"card_link","link":"https://paystack.com/..."}` |
 
 | Error | Status | When |
@@ -32,9 +33,10 @@ request through `fn_billing_record_manage_request`.
 | `owner_only` | 403 | the caller is not the account's owner (or has no account, or is on two) |
 | `nothing_to_cancel` | 409 | on trial, or the plan already stops at the period end, or has ended |
 | `no_subscription` | 409 | no Paystack subscription code on file (or the plan has ended, for a card link) |
+| `change_in_progress` | 409 | a plan change is still finishing: the code on file is the old subscription, waiting in `billing_superseded` to be switched off (X3). Wording: "Your plan change is still finishing. Try again in a minute." |
 | `bad_request` | 400 | not a POST, or an unknown action |
 | `not_configured` | 500 | a secret is missing |
-| `paystack_error` | 502 | Paystack refused or could not be reached; also when our subscription row cannot be read |
+| `paystack_error` | 502 | Paystack refused or could not be reached; also when our subscription row, or the replaced-subscription check, cannot be read |
 
 ## What it never does
 

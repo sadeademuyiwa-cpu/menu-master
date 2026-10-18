@@ -4,8 +4,9 @@
 //   deno test supabase/functions/paystack-manage/lib_test.ts
 // ============================================================================
 import {
-  cardLink, endsOn, ERRORS, errorBody, manageRefusal, parseAction, paystackCaller,
-  type PaystackCall, pickAccountRole, readSubState, safeManageLink, stopRenewal, type SubState,
+  cancelEndsOn, cardLink, changeInProgress, endsOn, ERRORS, errorBody, manageRefusal, parseAction,
+  paystackCaller, type PaystackCall, pickAccountRole, readSubState, safeManageLink, stopRenewal,
+  type SubState,
 } from "./lib.ts";
 import { pickAccountRole as checkoutPick } from "../paystack-checkout/lib.ts";
 
@@ -46,12 +47,13 @@ const fetched = (status: string, token: string | null = "tok_email") => ({
 });
 
 // ---------------------------------------------------------------- the contract
-Deno.test("the error codes and statuses are exactly the K3 contract", () => {
+Deno.test("the error codes and statuses are exactly the K3 contract plus X3's change_in_progress", () => {
   assertEquals(ERRORS, {
     unauthorised: 401, owner_only: 403, nothing_to_cancel: 409, no_subscription: 409,
-    not_configured: 500, paystack_error: 502, bad_request: 400,
+    change_in_progress: 409, not_configured: 500, paystack_error: 502, bad_request: 400,
   });
   assertEquals(errorBody("owner_only"), { error: "owner_only" });
+  assertEquals(errorBody("change_in_progress"), { error: "change_in_progress" });
 });
 
 Deno.test("only cancel and card_link are accepted", () => {
@@ -132,6 +134,44 @@ Deno.test("ends_on is the paid period end as a Lagos date", () => {
   assertEquals(endsOn("2026-11-18T22:59:59Z"), "2026-11-18");
   assertEquals(endsOn(null), null);
   assertEquals(endsOn("not a date"), null);
+});
+
+Deno.test("X3: while a plan change is finishing, cancel and card_link are change_in_progress", () => {
+  assertEquals(manageRefusal("cancel", sub(), NOW, true), "change_in_progress");
+  assertEquals(manageRefusal("cancel", sub({ status: "past_due" }), NOW, true), "change_in_progress");
+  assertEquals(manageRefusal("card_link", sub(), NOW, true), "change_in_progress");
+  assertEquals(manageRefusal("card_link", sub({ status: "past_due" }), NOW, true), "change_in_progress");
+  // nothing pending: as before
+  assertEquals(manageRefusal("cancel", sub(), NOW, false), null);
+  assertEquals(manageRefusal("card_link", sub(), NOW, false), null);
+});
+
+Deno.test("X3: the earlier, plainer refusals still come first", () => {
+  assertEquals(manageRefusal("cancel", sub({ status: "trialing", provider_subscription_code: null }), NOW, true),
+    "nothing_to_cancel");
+  assertEquals(manageRefusal("cancel", sub({ cancel_at_period_end: true }), NOW, true), "nothing_to_cancel");
+  assertEquals(manageRefusal("cancel", sub({ provider_subscription_code: null }), NOW, true), "no_subscription");
+  assertEquals(manageRefusal("card_link", sub({ status: "trialing" }), NOW, true), "no_subscription");
+  assertEquals(manageRefusal("cancel", null, NOW, true), "no_subscription");
+});
+
+Deno.test("X3: billing_superseded rows naming the code on file mean pending; only an empty list is clear", () => {
+  assertEquals(changeInProgress([]), false);
+  assertEquals(changeInProgress([{ id: "b1" }]), true);
+  assertEquals(changeInProgress(null), true, "an unreadable answer is never taken as clear");
+  assertEquals(changeInProgress({ message: "error" }), true);
+});
+
+Deno.test("X1: a cancel reply's ends_on is the Lagos period end for an active plan, null when overdue", () => {
+  assertEquals(cancelEndsOn(sub(), NOW), "2026-11-18");
+  assertEquals(cancelEndsOn(sub({ current_period_end: "2026-11-18T23:30:00Z" }), NOW), "2026-11-19");
+  assertEquals(cancelEndsOn(sub({ status: "past_due", current_period_end: "2026-10-10T09:00:00Z" }), NOW), null,
+    "overdue: the paid period is over, recording stops straight away");
+  assertEquals(cancelEndsOn(sub({ status: "past_due", current_period_end: "2026-11-18T09:00:00Z" }), NOW), null,
+    "overdue is null even with a period end still ahead");
+  assertEquals(cancelEndsOn(sub({ current_period_end: "2026-10-01T00:00:00Z" }), NOW), null, "a period already past");
+  assertEquals(cancelEndsOn(sub({ current_period_end: null }), NOW), null);
+  assertEquals(cancelEndsOn(sub({ current_period_end: "nonsense" }), NOW), null);
 });
 
 // ---------------------------------------------------------------- Paystack, mocked

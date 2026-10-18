@@ -3,7 +3,7 @@
 --
 -- Restores fn_billing_apply (0051 body), fn_apply_billing_side_effects (0050
 -- body), fn_admin_scan and its kind check (0055), and drops billing_superseded
--- and the four 0067 functions. The bodies below are copied from those
+-- and the five 0067 functions. The bodies below are copied from those
 -- migrations unchanged, and their md5 is checked at the end.
 --
 -- ROLL THE EDGE FUNCTIONS BACK FIRST: redeploy the previous paystack-webhook
@@ -16,9 +16,12 @@
 --     events since: 0050 could have stored them too, and removing them would
 --     lose what Paystack told us.
 --   * every subscription_changes row 0067 wrote: the log is append-only.
---   * billing_events rows marked 'ignored' / 'superseded': they stay as the
---     record of what arrived.
---   * platform_alerts rows of the three 0067 kinds, if any were raised. The
+--   * billing_events rows marked 'ignored' / 'superseded', and those held
+--     failed_permanent as 'not_current_subscription', 'subscription_not_on_file'
+--     or 'no_subscription_code': they stay as the record of what arrived, and
+--     the last three stay failed_permanent in the review queue. Do not
+--     re-apply one after the rollback: 0051 has none of the checks that held it.
+--   * platform_alerts rows of the four 0067 kinds, if any were raised. The
 --     kind check is then re-added NOT VALID, so it binds new rows and leaves
 --     those as evidence.
 --
@@ -71,6 +74,7 @@ drop function if exists fn_billing_claim_switch_offs(integer);
 drop function if exists fn_billing_record_switch_off(text, text, text);
 drop function if exists fn_billing_record_manage_request(uuid, uuid, text, text, text);
 drop table billing_superseded;
+drop function if exists fn_billing_event_sub_code(jsonb);
 
 -- ---------------------------------------------------------------------------
 -- fn_billing_apply, exactly as 0051 left it
@@ -286,7 +290,7 @@ do $$
 begin
   if exists (select 1 from platform_alerts
               where kind in ('subscription_not_switched_off','superseded_subscription_charged',
-                             'cancel_not_confirmed')) then
+                             'cancel_not_confirmed','possible_double_charge')) then
     alter table platform_alerts add constraint ck_platform_alerts_kind check (kind in (
       'billing_failed_permanent','billing_stuck','founder_slots_low',
       'founder_slots_exhausted','past_due_beyond_grace','subscription_no_period')) not valid;
@@ -409,8 +413,8 @@ begin
   if v_pols <> b.pols then
     raise exception '0067 rollback FAILED: policy count moved from % to %.', b.pols, v_pols;
   end if;
-  if v_fns <> b.fns - 4 then
-    raise exception '0067 rollback FAILED: fn_* went from % to %, expected -4.', b.fns, v_fns;
+  if v_fns <> b.fns - 5 then
+    raise exception '0067 rollback FAILED: fn_* went from % to %, expected -5.', b.fns, v_fns;
   end if;
   if (select md5(prosrc) from pg_proc where pronamespace='public'::regnamespace
        and proname='fn_billing_apply') <> '82a53c707c3597dd86b3c3b1b7d634a9'

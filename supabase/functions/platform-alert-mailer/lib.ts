@@ -47,7 +47,16 @@ const KIND_WORDS: Record<string, string> = {
   founder_slots_exhausted: "Founding slots exhausted",
   past_due_beyond_grace: "Subscription past due beyond grace",
   subscription_no_period: "Subscription without a period end",
+  // 0067 (self-serve billing)
+  subscription_not_switched_off: "Old Paystack subscription not switched off",
+  superseded_subscription_charged: "Replaced subscription took a payment (refund it)",
+  cancel_not_confirmed: "Cancel not confirmed by Paystack",
+  possible_double_charge: "Possible double charge",
 };
+
+/** Every kind 0067's alert check allows (ck_platform_alerts_kind), so a test
+ *  can prove each has words of its own. */
+export const KNOWN_KINDS = Object.keys(KIND_WORDS);
 
 export function kindWords(kind: string): string {
   return KIND_WORDS[kind] ?? kind.replace(/_/g, " ");

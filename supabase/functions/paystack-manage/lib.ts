@@ -6,6 +6,13 @@
 // stops renewal at Paystack; the plan stays on until the end of the period
 // already paid; after that the account is read-only. Changing plan,
 // cancelling and updating the card on a paying account are OWNER ONLY.
+// Integration decision X1: an OVERDUE (past_due) owner may cancel too. Their
+// paid period is already over, so recording stops straight away and they are
+// not charged again; the reply's ends_on is then null.
+// X3: while a plan change is still finishing (the old subscription is still
+// the one on file and is waiting to be switched off), cancel and card_link
+// answer change_in_progress, so neither acts on the subscription being
+// replaced.
 //
 // Paystack endpoints used, confirmed against Paystack's public OpenAPI
 // description (github.com/PaystackOSS/openapi, paths subscription_{code},
@@ -21,12 +28,14 @@ type Loose = Record<string, any>;
 
 export type Action = "cancel" | "card_link";
 
-/** The error codes of the paystack-manage contract (K3), with their status. */
+/** The error codes of the paystack-manage contract (K3, plus X3's
+ *  change_in_progress), with their status. */
 export const ERRORS = {
   unauthorised: 401,
   owner_only: 403,
   nothing_to_cancel: 409,
   no_subscription: 409,
+  change_in_progress: 409,
   not_configured: 500,
   paystack_error: 502,
   bad_request: 400,
@@ -92,19 +101,25 @@ export function isSubscriptionCode(code: unknown): code is string {
 
 /** Whether the request can go to Paystack at all.
  *   cancel:    a trial, or a plan already stopped, has nothing to cancel.
- *              A paying plan with no Paystack code on file cannot be reached.
- *   card_link: needs a live Paystack subscription on file. */
+ *              Active and past_due (X1) may cancel. A paying plan with no
+ *              Paystack code on file cannot be reached.
+ *   card_link: needs a live Paystack subscription on file.
+ *   both:      while a plan change is still finishing (changePending: a
+ *              replaced-subscription row not yet switched off names the code
+ *              on file), change_in_progress. Acting then would cancel, or
+ *              take a card for, the subscription being replaced. */
 export function manageRefusal(
   action: Action,
   sub: SubState | null,
   now: Date = new Date(),
+  changePending = false,
 ): ErrorCode | null {
   if (!sub) return "no_subscription";
   if (action === "cancel") {
     if (sub.status === "trialing") return "nothing_to_cancel";
     if (sub.status === "cancelled" || sub.cancel_at_period_end) return "nothing_to_cancel";
     if (!isSubscriptionCode(sub.provider_subscription_code)) return "no_subscription";
-    return null;
+    return changePending ? "change_in_progress" : null;
   }
   if (sub.status === "trialing") return "no_subscription";
   if (!isSubscriptionCode(sub.provider_subscription_code)) return "no_subscription";
@@ -112,7 +127,26 @@ export function manageRefusal(
     const end = sub.current_period_end ? Date.parse(sub.current_period_end) : NaN;
     if (!Number.isFinite(end) || end <= now.getTime()) return "no_subscription";
   }
-  return null;
+  return changePending ? "change_in_progress" : null;
+}
+
+/** billing_superseded rows (read with the service role, filtered to the code
+ *  on file and disabled_at is null) mean a plan change is still finishing.
+ *  Anything but an empty list -- an unreadable answer included -- counts as
+ *  pending, so a doubt never lets a cancel through. */
+export function changeInProgress(rows: unknown): boolean {
+  return !Array.isArray(rows) || rows.length > 0;
+}
+
+/** What a cancel reply says about the end date. An active plan stays on to
+ *  the end of the period already paid: that day, in Lagos. An overdue one
+ *  (X1) has no paid days left -- recording stops straight away -- so null,
+ *  as for a period end that is missing or already past. */
+export function cancelEndsOn(sub: SubState, now: Date = new Date()): string | null {
+  if (sub.status !== "active" || !sub.current_period_end) return null;
+  const t = Date.parse(sub.current_period_end);
+  if (!Number.isFinite(t) || t <= now.getTime()) return null;
+  return endsOn(sub.current_period_end);
 }
 
 /** The last day of the paid period, as a date in Lagos (YYYY-MM-DD), or null
