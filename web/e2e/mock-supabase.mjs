@@ -165,6 +165,37 @@ createServer((req, res) => {
         allocated_order_discount: '0.00', net_revenue: '2000.00',
       }])
     }
+  if (url.pathname === '/rest/v1/rpc/fn_record_order_payment') {
+    // Money received on a confirmed sale (0066). Shaped like the real one: a
+    // confirmed, not cancelled sale only; an amount of zero or more; one of
+    // the three states. Its refusals are SQLSTATE MMPAY with a plain sentence,
+    // which PostgREST answers with 400; it returns void, answered with 204.
+    // Every other RPC's 8000 would read as a payment that went through.
+    let raw = ''
+    req.on('data', (c) => { raw += c })
+    req.on('end', () => {
+      let body = {}
+      try { body = JSON.parse(raw || '{}') } catch { /* an empty body is refused below */ }
+      const refuse = (message) => send({ code: 'MMPAY', message, details: null, hint: null }, 400)
+      const order = table('orders').find((o) => o.id === body.p_order_id)
+      if (!order) return refuse('This sale could not be found. It may have been removed.')
+      if (order.voided_at) return refuse('This sale was cancelled, so no payment can be recorded on it.')
+      if (!order.finalised_at) return refuse('This sale is still a draft. A payment can be recorded once it is confirmed.')
+      const amount = Number(body.p_amount_paid)
+      if (body.p_amount_paid == null || !Number.isFinite(amount) || amount < 0) {
+        return refuse('The amount paid must be zero or more.')
+      }
+      if (Math.round(amount * 100) / 100 >= 1e12) { // orders.amount_paid is numeric(14,2)
+        return refuse('That amount is too large to record. Check the figure and try again.')
+      }
+      if (!['unpaid', 'part_paid', 'paid'].includes(body.p_payment_status)) {
+        return refuse('Say whether the sale is not paid, part paid or paid in full.')
+      }
+      res.writeHead(204, cors)
+      res.end()
+    })
+    return
+  }
   if (url.pathname.startsWith('/rest/v1/rpc/')) return send(8000)
     // AMBIGUOUS EMBEDS. This mock returns pre-shaped objects and does not
     // implement embedding, so it used to accept `recipe:recipes(name)` on

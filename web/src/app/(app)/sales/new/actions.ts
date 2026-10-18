@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError } from '@/lib/data/context'
+import { currentContext, closedRefusal, describeWriteError } from '@/lib/data/context'
 import { localToday } from '@/lib/dates'
 import { queueEvent } from '@/lib/analytics/queue'
 
@@ -98,6 +98,10 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
   const ctx = await currentContext()
   const { supabase, accountId, businessId } = ctx
   if (!accountId || !businessId) return { error: 'Your session has ended. Sign in again, then record the sale.' }
+  // Closed after a trial and on a plan without Sales (D3): said plainly
+  // before anything is written, not as a refusal halfway through.
+  const closed = await closedRefusal(ctx.role, { sales: true })
+  if (closed) return { error: closed }
 
   let createdCustomer: string | null = null
   let customerId = p.customerId || null
@@ -146,10 +150,13 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
   }
 
   if (discount > 0) {
-    const { error } = await supabase.from('orders').update({ order_discount: discount }).eq('id', order.id)
-    if (error) {
+    // .select(): a refused update is no error and no rows, and the sale would
+    // then be confirmed at the full price as if the discount were saved.
+    const { data: discounted, error } = await supabase.from('orders')
+      .update({ order_discount: discount }).eq('id', order.id).select('id')
+    if (error || !discounted?.length) {
       await undo(order.id)
-      return { error: describeWriteError(error) ?? 'We could not save that discount.' }
+      return { error: describeWriteError(error) ?? 'We could not save that discount, so the sale was not recorded.' }
     }
   }
 

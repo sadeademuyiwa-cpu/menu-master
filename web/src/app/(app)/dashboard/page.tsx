@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { currentContext, contextRedirect, hasSalesEntitlement } from '@/lib/data/context'
+import { currentContext, contextRedirect, hasSalesEntitlement, recordingOpen } from '@/lib/data/context'
 import { Badge, Empty } from '@/components/ui'
 import { AppIcon, type IconName } from '@/components/icons'
 import { DishTile } from '@/components/dish-tile'
@@ -64,7 +64,7 @@ async function HomeBody() {
 
   const today = localToday()
 
-  const [setupRes, productsRes, dishesRes, menuRes, checkRes, tradingRes, salesPlan, daysRes, bestRes] = await Promise.all([
+  const [setupRes, productsRes, dishesRes, menuRes, checkRes, tradingRes, salesPlan, daysRes, bestRes, open] = await Promise.all([
     setsUp
       ? supabase.from('v_onboarding_status').select('prices_entered,recipes,complete_costings,selling_prices_set')
           .limit(1).returns<Setup[]>()
@@ -99,10 +99,16 @@ async function HomeBody() {
           .order('units_sold', { ascending: false }).limit(60)
           .returns<{ recipe_id: string | null; units_sold: string | null }[]>()
       : skip<{ recipe_id: string | null; units_sold: string | null }[]>(),
+    recordingOpen(),
   ])
 
   const tradingDays = tradingRes.count ?? 0
   const sells = canRecordSales(role, salesPlan)
+  // After a trial (an explicit false) Record a sale and Record a purchase
+  // would only send the owner back with the reason (D3); the access bar at
+  // the top already says what happened and what to do.
+  const sellsNow = sells && open !== false
+  const buysNow = buys && open !== false
 
   // --- first day ------------------------------------------------------------
   // The few things that make Menu Master useful, in the order they unlock each
@@ -239,15 +245,15 @@ async function HomeBody() {
           </section>
         )}
 
-        {(sells || buys) && (
+        {(sellsNow || buysNow) && (
           <div className="grid gap-2 sm:grid-cols-2">
-            {sells && (
+            {sellsNow && (
               <Link href="/sales/new" className="mm-btn mm-btn-primary w-full">
                 <AppIcon name="sales" size={19} /> Record a sale
               </Link>
             )}
-            {buys && (
-              <Link href="/purchases/new" className={`mm-btn ${sells ? 'mm-btn-secondary' : 'mm-btn-primary'} w-full`}>
+            {buysNow && (
+              <Link href="/purchases/new" className={`mm-btn ${sellsNow ? 'mm-btn-secondary' : 'mm-btn-primary'} w-full`}>
                 <AppIcon name="purchases" size={19} /> Record a purchase
               </Link>
             )}

@@ -73,13 +73,21 @@ async function shrink(
   return null
 }
 
-/** Storage's own words never reach the page. */
-function uploadProblem(err: { message?: string; statusCode?: string | number; status?: number } | null): string {
+/**
+ * Storage's own words never reach the page. A refusal (403) says `refusal`,
+ * which the page worked out from the person's role and the account's state
+ * (photoRefusal in lib/dish-photo.ts), so an owner whose trial ended is told
+ * to choose a plan, not to "ask the owner".
+ */
+function uploadProblem(
+  err: { message?: string; statusCode?: string | number; status?: number } | null,
+  refusal?: string,
+): string {
   const code = String(err?.statusCode ?? err?.status ?? '')
   const msg = (err?.message ?? '').toLowerCase()
   if (code === '404' || msg.includes('bucket not found')) return 'Dish photos are not switched on for this business yet.'
   if (code === '403' || msg.includes('row-level security') || msg.includes('unauthorized')) {
-    return 'Your role or your plan does not allow adding photos at the moment. Ask the owner.'
+    return refusal ?? 'Your role or your plan does not allow adding photos at the moment.'
   }
   if (code === '413' || msg.includes('exceeded') || msg.includes('too large')) return 'That photo is still too large after shrinking. Try another.'
   return 'The photo did not finish sending. Check your connection and try again.'
@@ -99,6 +107,9 @@ function uploadProblem(err: { message?: string; statusCode?: string | number; st
  * Show it only to owner, manager and kitchen: canAddDishPhotos(ctx.role) in
  * lib/dish-photo.ts. Storage refuses everyone else anyway.
  *
+ * REFUSAL: pass photoRefusal(ctx.role, await entitlementStatus()) so a refused
+ * upload names the real reason for this person.
+ *
  * THE ACTION you pass (a server action, written beside the dish page) gets
  *   recipe_id   the dish
  *   photo_path  the new photo's name, or '' to remove the photo
@@ -109,7 +120,7 @@ function uploadProblem(err: { message?: string; statusCode?: string | number; st
  * changed photo is a new name, so no phone keeps showing the old one.
  */
 export function DishPhotoUpload({
-  businessId, recipeId, photoPath, action, returnTo,
+  businessId, recipeId, photoPath, action, returnTo, refusal,
 }: {
   businessId: string
   recipeId: string
@@ -119,6 +130,8 @@ export function DishPhotoUpload({
   action: (formData: FormData) => Promise<void>
   /** Where to land afterwards. Default: the page this is on. */
   returnTo?: string
+  /** What a refused upload says, for this person (photoRefusal). */
+  refusal?: string
 }) {
   const pathname = usePathname() ?? ''
   const picker = useRef<HTMLInputElement>(null)
@@ -160,12 +173,12 @@ export function DishPhotoUpload({
     // multipart form instead, which the local gateway refuses (415) and which
     // would leave the stored type to the server's guess.
     const sentThumb = await bucket.upload(names.thumb, await thumb.blob.arrayBuffer(), opts(thumb.type))
-    if (sentThumb.error) return setProblem(uploadProblem(sentThumb.error as never))
+    if (sentThumb.error) return setProblem(uploadProblem(sentThumb.error as never, refusal))
     const sentFull = await bucket.upload(names.full, await full.blob.arrayBuffer(), opts(full.type))
     if (sentFull.error) {
       // Leave no thumbnail without its photo.
       await bucket.remove([names.thumb]).catch(() => undefined)
-      return setProblem(uploadProblem(sentFull.error as never))
+      return setProblem(uploadProblem(sentFull.error as never, refusal))
     }
 
     const save = new FormData()

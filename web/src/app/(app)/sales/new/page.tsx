@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { currentContext, contextRedirect, hasSalesEntitlement } from '@/lib/data/context'
+import { currentContext, contextRedirect, hasSalesEntitlement, closedLine, withNotice } from '@/lib/data/context'
 import { isSalesLocked } from '@/lib/sales-gate'
 import { loadMenu } from '@/lib/data/menu'
 import { localToday } from '@/lib/dates'
@@ -48,6 +48,12 @@ export default async function NewSalePage({
       </div>
     )
   }
+
+  // After a trial ends a sale cannot be recorded (D3). Rather than a whole
+  // order typed in and then refused at Confirm, back to Sales with why -- as
+  // New purchase does. Only an explicit "closed" does this.
+  const paused = await closedLine(ctx.role, 'new sales can’t be recorded')
+  if (paused) redirect(withNotice('/sales', paused))
 
   const showCosts = canSeeCosts(ctx.role)
   const [menu, { data: customers }, costs, extras] = await Promise.all([

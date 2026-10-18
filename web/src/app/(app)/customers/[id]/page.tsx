@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import { currentContext, contextRedirect, describeWriteError, withNotice, refusalNotice } from '@/lib/data/context'
 import {
   Card, Field, Submit, InlineSubmit, Notice, Empty, SectionHeading, BackLink, Badge, Disclosure,
 } from '@/components/ui'
@@ -10,6 +10,7 @@ import { money, percent, saleLabel } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
 import { canSeeCosts, canSeeSellingPrices } from '@/lib/pricing'
 import { SALE_ROLES } from '@/app/(app)/dashboard/roles'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,12 +29,15 @@ type Line = {
 }
 
 /**
- * An update RLS refuses (customers: owner, manager and sales, 0015) comes
- * back with no error and no rows. Said in words, never reported as done.
+ * An update RLS refuses (customers: owner, manager and sales, 0015, and a
+ * plan with Sales, 0049) comes back with no error and no rows. Said in words,
+ * never reported as done: the role, when it is the role; otherwise the real
+ * reason -- the trial ended, a payment failed, the plan has no Sales
+ * (refusalNotice) -- instead of "reload and try again", which never helps.
  */
-function notChanged(role: string | null | undefined, action: string): string {
+async function notChanged(role: string | null | undefined, action: string): Promise<string> {
   return (SALE_ROLES as readonly string[]).includes(role ?? '')
-    ? 'That could not be saved. Reload and try again.'
+    ? await refusalNotice(role, { sales: true })
     : `Your role cannot ${action}. Ask the owner, a manager or sales staff.`
 }
 
@@ -54,7 +58,7 @@ async function saveCustomer(formData: FormData) {
     notes: String(formData.get('notes') ?? '').trim() || null,
   }).eq('id', id).select('id')
   revalidatePath(here)
-  if (!error && (data ?? []).length === 0) redirect(withNotice(here, notChanged(ctx.role, 'change a customer')))
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, await notChanged(ctx.role, 'change a customer')))
   redirect(withNotice(here, describeWriteError(error) ?? 'Saved.'))
 }
 
@@ -71,7 +75,7 @@ async function archiveCustomer(formData: FormData) {
       ? 'Putting a customer away is not available on this account yet.'
       : describeWriteError(error)))
   }
-  if ((data ?? []).length === 0) redirect(withNotice(`/customers/${id}`, notChanged(ctx.role, 'put a customer away')))
+  if ((data ?? []).length === 0) redirect(withNotice(`/customers/${id}`, await notChanged(ctx.role, 'put a customer away')))
   revalidatePath('/customers')
   redirect(withNotice('/customers', 'Customer put away. Their sales are kept; find them under “Put away” to bring them back.'))
 }
@@ -170,7 +174,7 @@ export default async function CustomerDetail({
           </p>
         )}
       </header>
-      {notice && <Notice tone={/could not|cannot|needs/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
 
       <section className="mm-card space-y-3" aria-label="What they have bought">
         <div className="flex items-end justify-between gap-3">

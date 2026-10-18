@@ -3,9 +3,13 @@ import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { requiredAmount } from '@/lib/money-input'
 import { ProductAndPriceFields } from '@/components/product-price-field'
-import { currentContext, contextRedirect, describeWriteError, withNotice, hasSalesEntitlement } from '@/lib/data/context'
+import {
+  currentContext, contextRedirect, describeWriteError, withNotice, hasSalesEntitlement,
+  closedLine, closedRefusal, recordingOpen, refusalNotice, paymentAnswer, paymentProblem,
+} from '@/lib/data/context'
+import { noticeTone } from '@/lib/ui/notice-tone'
 import { loadMenuPrices } from '@/lib/data/menu'
-import { canRecordSales, SALE_ROLES } from '@/app/(app)/dashboard/roles'
+import { canRecordPayments, canRecordSales, SALE_ROLES } from '@/app/(app)/dashboard/roles'
 import {
   Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Stat, StatRow, Badge, Disclosure,
@@ -75,11 +79,14 @@ type Allocation = {
  * An update or delete that RLS refuses comes back with no error and no rows,
  * so "Item updated." would be a lie. Each write below asks for the changed
  * rows (.select('id')) and, when there are none, says so in words: who may
- * make the change (0015), or for a role that may, that nothing was saved.
+ * make the change (0015), or for a role that may, the real reason -- the
+ * trial ended, a payment failed, the plan has no Sales (refusalNotice).
  */
-function notChanged(role: string | null | undefined, allowed: readonly string[], action: string, askWho: string): string {
+async function notChanged(
+  role: string | null | undefined, allowed: readonly string[], action: string, askWho: string,
+): Promise<string> {
   return allowed.includes(role ?? '')
-    ? 'That could not be saved. Reload the sale and try again.'
+    ? await refusalNotice(role, { sales: true })
     : `Your role cannot ${action}. Ask ${askWho}.`
 }
 const SALE_WRITERS = 'the owner, a manager or sales staff'
@@ -157,7 +164,7 @@ async function removeLine(formData: FormData) {
   const { data, error } = await supabase.from('order_lines')
     .delete().eq('id', String(formData.get('line_id') ?? '')).select('id')
   revalidatePath(here)
-  if (!error && (data ?? []).length === 0) redirect(withNotice(here, editRefused(ctx.role)))
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, await editRefused(ctx.role)))
   redirect(withNotice(here, describeWriteError(error) ?? 'Removed.'))
 }
 
@@ -194,7 +201,7 @@ async function updateLine(formData: FormData) {
   const { data, error } = await supabase.from('order_lines')
     .update(patch).eq('id', String(formData.get('line_id') ?? '')).select('id')
   revalidatePath(here)
-  if (!error && (data ?? []).length === 0) redirect(withNotice(here, editRefused(ctx.role)))
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, await editRefused(ctx.role)))
   redirect(withNotice(here, error
     ? (/extra_unit_cost/.test(error.message)
         ? 'What it costs you cannot be saved on this account yet; the rest was not changed.'
@@ -216,7 +223,7 @@ async function updateHeader(formData: FormData) {
     customer_id: String(formData.get('customer_id') ?? '') || null,
   }).eq('id', id).select('id')
   revalidatePath(here)
-  if (!error && (data ?? []).length === 0) redirect(withNotice(here, editRefused(ctx.role)))
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, await editRefused(ctx.role)))
   redirect(withNotice(here, describeWriteError(error) ?? 'Saved.'))
 }
 
@@ -233,7 +240,7 @@ async function setOrderDiscount(formData: FormData) {
   const { data, error } = await supabase.from('orders')
     .update({ order_discount: amount }).eq('id', id).select('id')
   revalidatePath(here)
-  if (!error && (data ?? []).length === 0) redirect(withNotice(here, editRefused(ctx.role)))
+  if (!error && (data ?? []).length === 0) redirect(withNotice(here, await editRefused(ctx.role)))
   redirect(withNotice(here, describeWriteError(error) ?? 'Discount saved.'))
 }
 
@@ -242,6 +249,10 @@ async function setOrderDiscount(formData: FormData) {
  * order, a discount that exceeds the order -- and it freezes every line's cost
  * from one instant in a single statement. It reports what it froze, so the
  * result is read rather than assumed.
+ *
+ * Confirming, cancelling and re-issuing are closed after a trial and on a
+ * plan without Sales (D3): the buttons are gone, and a form posted anyway is
+ * refused here (closedRefusal) before the database refuses it too (0066).
  */
 async function confirm(formData: FormData) {
   'use server'
@@ -249,6 +260,8 @@ async function confirm(formData: FormData) {
   const here = `/sales/${id}`
   const ctx = await currentContext()
   const { supabase } = ctx
+  const closed = await closedRefusal(ctx.role, { sales: true })
+  if (closed) redirect(withNotice(here, closed))
 
   const { data, error } = await supabase.rpc('fn_confirm_order', { p_order_id: id })
   if (error) redirect(withNotice(here, describeWriteError(error) ?? 'Could not confirm that sale.'))
@@ -261,23 +274,47 @@ async function confirm(formData: FormData) {
     : 'Confirmed. What this sale cost you is now locked in.'))
 }
 
+/**
+ * Money received on a sale. Through fn_record_order_payment (0066), which
+ * changes ONLY amount_paid and payment_status, and only on a confirmed sale
+ * that was not cancelled -- and does so whatever the plan or the trial: a
+ * caterer's balance paid after the trial ended is money for work already
+ * done, and the receipt must stop saying it is owed (D2). It refuses kitchen
+ * and accountant (42501), and a draft, a cancelled sale or a negative amount
+ * (MMPAY) itself; what each refusal says is paymentAnswer's (write-notice.ts,
+ * tested): MMPAY's sentence as it is, and for 42501 the role sentence, never
+ * the subscription one.
+ *
+ * Deliberately NOT behind closedRefusal. Before 0066 the function does not
+ * exist (PGRST202 / 42883), and the payment is written as it always was --
+ * which row-level security refuses on an ended trial or a Costing plan, so
+ * the web goes out after 0066, or with it (DEPLOY_0066.md).
+ */
 async function markPaid(formData: FormData) {
   'use server'
   const id = String(formData.get('order_id') ?? '')
   const here = `/sales/${id}`
+  // Blank is deliberately "nothing paid yet" (tests/money-input.test.mts).
   const paid = Number(formData.get('amount_paid') || 0)
+  const status = String(formData.get('payment_status') ?? 'unpaid')
+  const problem = paymentProblem(paid, status)
+  if (problem) redirect(withNotice(here, problem))
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { data, error } = await supabase.from('orders')
-    .update({
-      amount_paid: paid,
-      payment_status: String(formData.get('payment_status') ?? 'unpaid'),
-    }).eq('id', id).select('id')
+  const { error } = await supabase.rpc('fn_record_order_payment', {
+    p_order_id: id, p_amount_paid: paid, p_payment_status: status,
+  })
   revalidatePath(here)
-  if (!error && (data ?? []).length === 0) {
-    redirect(withNotice(here, notChanged(ctx.role, SALE_ROLES, 'record a payment', SALE_WRITERS)))
+  const answer = paymentAnswer(error)
+  if (answer.kind === 'not_there') {
+    const { data, error: uErr } = await supabase.from('orders')
+      .update({ amount_paid: paid, payment_status: status }).eq('id', id).select('id')
+    if (!uErr && (data ?? []).length === 0) {
+      redirect(withNotice(here, await notChanged(ctx.role, SALE_ROLES, 'record a payment', SALE_WRITERS)))
+    }
+    redirect(withNotice(here, describeWriteError(uErr) ?? 'Payment updated.'))
   }
-  redirect(withNotice(here, describeWriteError(error) ?? 'Payment updated.'))
+  redirect(withNotice(here, answer.kind === 'refused' ? answer.notice : 'Payment updated.'))
 }
 
 /** Void, never edit. The original stays as evidence, with its frozen cost. */
@@ -289,6 +326,8 @@ async function voidSale(formData: FormData) {
   if (!reason) redirect(withNotice(here, 'Tell us why you are cancelling this sale.'))
   const ctx = await currentContext()
   const { supabase } = ctx
+  const closed = await closedRefusal(ctx.role, { sales: true })
+  if (closed) redirect(withNotice(here, closed))
   const { error } = await supabase.rpc('fn_void_order', { p_order_id: id, p_reason: reason })
   if (error) redirect(withNotice(here, describeWriteError(error) ?? 'Could not cancel that sale.'))
   revalidatePath(here)
@@ -300,6 +339,8 @@ async function reissue(formData: FormData) {
   const id = String(formData.get('order_id') ?? '')
   const ctx = await currentContext()
   const { supabase } = ctx
+  const closed = await closedRefusal(ctx.role, { sales: true })
+  if (closed) redirect(withNotice(`/sales/${id}`, closed))
   const { data, error } = await supabase.rpc('fn_reissue_order', { p_voided_order_id: id })
   if (error || !data?.new_order_id) {
     redirect(withNotice(`/sales/${id}`, describeWriteError(error) ?? 'Could not start a replacement.'))
@@ -320,7 +361,7 @@ async function deleteDraft(formData: FormData) {
   // RLS lets only the owner or a manager delete an order; for anyone else the
   // delete quietly removes nothing, and "Draft discarded." would be untrue.
   if ((data ?? []).length === 0) {
-    redirect(withNotice(`/sales/${id}`, notChanged(ctx.role, SALE_REMOVERS, 'discard a draft', 'the owner or a manager')))
+    redirect(withNotice(`/sales/${id}`, await notChanged(ctx.role, SALE_REMOVERS, 'discard a draft', 'the owner or a manager')))
   }
   revalidatePath('/sales')
   redirect(withNotice('/sales', 'Draft discarded.'))
@@ -372,20 +413,26 @@ export default async function SaleDetail({
   // money column at all, not even to be hidden.
   const takings = canSeeSellingPrices(ctx.role)
 
-  const [{ data: order }, salesPlan] = await Promise.all([
+  const [{ data: order }, salesPlan, open] = await Promise.all([
     supabase.from('orders')
       .select('id,order_no,order_date,status,payment_status,' + (takings ? 'amount_paid,order_discount,' : '') +
               'customer_id,finalised_at,voided_at,void_reason,replaces')
       .eq('id', id).maybeSingle<Order>(),
     hasSalesEntitlement(),
+    recordingOpen(),
   ])
   if (!order) notFound()
   // Every form here is offered only to the roles the database lets use it
-  // (0015, fn_void_order): changing a sale and its payment for owner, manager
-  // and sales; discarding a draft and cancelling a sale for owner and manager.
-  const records = canRecordSales(ctx.role, salesPlan)
+  // (0015, fn_void_order): changing a sale for owner, manager and sales;
+  // discarding a draft and cancelling a sale for owner and manager. After a
+  // trial ends (or on a plan without Sales) none of that is offered (D3) --
+  // only an explicit false closes it.
+  const records = canRecordSales(ctx.role, salesPlan) && open !== false
   const removerRole = (SALE_REMOVERS as readonly string[]).includes(ctx.role ?? '')
   const removes = records && removerRole
+  // Money received on a confirmed sale is recorded whatever the plan or the
+  // trial (D2, fn_record_order_payment): owner, manager and sales.
+  const paysIn = canRecordPayments(ctx.role)
 
   const [{ data: lines }, { data: recipes }, { data: variants }, { data: customers }, priceOf] =
     await Promise.all([
@@ -454,6 +501,17 @@ export default async function SaleDetail({
           .maybeSingle<{ id: string; order_no: string | null }>(),
       ])
     : [{ data: null }, { data: null }, { data: null }]
+
+  // Why the sale's own buttons are gone, said once to the people who would
+  // have had them. A sale already replaced needs nothing more.
+  const paused = (SALE_ROLES as readonly string[]).includes(ctx.role ?? '') && open === false &&
+    !(voided && replacement)
+    ? await closedLine(ctx.role, !confirmed && !voided
+        ? 'this draft can’t be changed or confirmed'
+        : !voided
+          ? 'this sale can’t be cancelled, though money you receive for it can still be recorded below'
+          : 'a corrected sale can’t be put through')
+    : null
 
   // Array.isArray, not `?? []`: the page must still show the preserved lines
   // even if the allocation call answers with something unexpected. Losing the
@@ -581,7 +639,8 @@ export default async function SaleDetail({
           </Badge>
         </div>
       </header>
-      {notice && <Notice tone={/could not|cannot|do not/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
+      {paused && !notice && <Notice tone="warn">{paused}</Notice>}
 
       {voided && (
         <Notice>
@@ -955,14 +1014,15 @@ export default async function SaleDetail({
       {confirmed && !voided && takings && (
         <>
           <Card>
-            <SectionHeading sub={records ? 'Money can still come in after the sale. Recording it changes nothing about what was sold.' : undefined}>
+            <SectionHeading sub={paysIn ? 'Money can still come in after the sale. Recording it changes nothing about what was sold.' : undefined}>
               Payment
             </SectionHeading>
             <p className="mt-1 text-sm">
               <span className="font-semibold">{paymentWords(order.payment_status, amountPaid, net)}</span>
             </p>
-            {/* A sale paid in full needs no form, only the fact. */}
-            {!records ? null : order.payment_status === 'paid' ? (
+            {/* A sale paid in full needs no form, only the fact. Shown to the
+                roles that take money whatever the plan or the trial (D2). */}
+            {!paysIn ? null : order.payment_status === 'paid' ? (
               <div className="mt-3">
                 <Disclosure summary="Change the payment">
                   <PaymentForm id={id} order={order} />
@@ -975,8 +1035,10 @@ export default async function SaleDetail({
 
           {!removes ? (
             // fn_void_order admits only the owner and a manager; the form
-            // would only ever be refused, so say who to ask instead.
-            !removerRole && (
+            // would only ever be refused, so say who to ask instead -- while
+            // they could cancel it. After a trial or on a plan without Sales
+            // nobody can, and the paused line above already says why.
+            !removerRole && open !== false && salesPlan !== false && (
               <p className="text-sm" style={MUTED}>If something is wrong with this sale, ask the owner or a manager to cancel it.</p>
             )
           ) : (
