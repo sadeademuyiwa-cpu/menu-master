@@ -2,8 +2,12 @@
 -- MENU MASTER NG
 -- 0066: once a trial has ended, nothing new is saved -- except money received
 --
--- Requires: 0001-0064 applied. 0065 (help videos) may or may not be in: it
--- touches no function and no policy, so 0066 does not depend on it.
+-- Requires: 0001-0064 applied. 0065 (help videos) is optional, but if it is to
+-- ship at all it must be applied BEFORE 0066: 0065's preflight, its
+-- self-check and its suite (tests/051 check 12) expect exactly 99 fn_*, and
+-- 0066 makes it 102. 0066 itself does not need 0065 (0065 adds no function and
+-- no policy). If 0066 is already in, 0065 and 051 must first have their fn_*
+-- count changed from 99 to 102.
 --
 -- WHY
 --   The row policies have refused writes on an ended account since 0028, but
@@ -68,7 +72,11 @@
 --   fn_record_order_payment      NEW. Owner, manager or sales; a confirmed,
 --                                not cancelled sale only; amount zero or more;
 --                                only amount_paid and payment_status change.
---                                It asks for no plan and no trial (D2).
+--                                It asks for no plan and no trial (D2). Its
+--                                own refusals (sale not found, cancelled,
+--                                draft, amount below zero or too large, no
+--                                status) are SQLSTATE MMPAY with a plain
+--                                sentence; a role refusal stays 42501.
 --   fn_create_account_and_business
 --                                REPLACED. For anyone but the operator: a trial
 --                                other than 14 days is refused (22023), a login
@@ -98,6 +106,18 @@
 --   their own people. Reads are never gated. The operator and the Paystack
 --   webhook run in service context and are not affected. No new table.
 --   Policies 118 -> 118. fn_* 99 -> 102.
+--
+-- KNOWN EXCEPTIONS (left as they were before 0066)
+--   Two history tables still take a row from a signed-in member after a trial,
+--   through row policies that have never asked about access: p_sfc_insert on
+--   serving_format_changes (any member) and p_costing_method_changes_insert
+--   on costing_method_changes (the owner). Such a row only describes a
+--   change; the change itself (to a serving format, or to a business's
+--   costing method in business_settings) is still refused, because the write
+--   policies on serving_formats and business_settings ask for access. The
+--   self-check's catalogue rule covers functions only, so it does not report
+--   them. Gating them is a later migration (which must then move tests/018
+--   check 13 and tests/022 check 24 off 70).
 --
 -- PREFLIGHT
 --   Refuses to run unless each of the 16 functions it replaces is exactly the
@@ -1020,6 +1040,11 @@ $function$;
 -- A narrow function instead of loosening p_orders_update: that policy governs
 -- the whole row. This changes two columns, on confirmed sales only -- the same
 -- two fn_guard_finalised_order already lets move on a confirmed sale.
+--
+-- Its own refusals carry SQLSTATE MMPAY and a sentence written for the person,
+-- which the app shows as it is. The role refusal is fn_require_account_role's
+-- 42501, unchanged, which the app words itself ("Your role can't record
+-- payments ...").
 create function fn_record_order_payment(p_order_id uuid, p_amount_paid numeric,
                                         p_payment_status payment_status)
 returns void
@@ -1030,7 +1055,10 @@ as $fn$
 declare v_o orders%rowtype;
 begin
   select * into v_o from orders where id = p_order_id for update;
-  if not found then raise exception 'Sale % not found', p_order_id; end if;
+  if not found then
+    raise exception 'This sale could not be found. It may have been removed.'
+      using errcode = 'MMPAY';
+  end if;
 
   perform fn_require_account_role(v_o.account_id,
     array['owner','manager','sales']::member_role[], 'recording payments');
@@ -1039,19 +1067,23 @@ begin
   -- and confirmed, and it is recorded whatever the plan or the trial.
   if v_o.voided_at is not null then
     raise exception 'This sale was cancelled, so no payment can be recorded on it.'
-      using errcode = 'check_violation';
+      using errcode = 'MMPAY';
   end if;
   if v_o.finalised_at is null then
     raise exception 'This sale is still a draft. A payment can be recorded once it is confirmed.'
-      using errcode = 'check_violation';
+      using errcode = 'MMPAY';
   end if;
   if p_amount_paid is null or p_amount_paid < 0 then
     raise exception 'The amount paid must be zero or more.'
-      using errcode = 'check_violation';
+      using errcode = 'MMPAY';
+  end if;
+  if round(p_amount_paid, 2) >= 1000000000000 then  -- orders.amount_paid is numeric(14,2)
+    raise exception 'That amount is too large to record. Check the figure and try again.'
+      using errcode = 'MMPAY';
   end if;
   if p_payment_status is null then
     raise exception 'Say whether the sale is not paid, part paid or paid in full.'
-      using errcode = 'check_violation';
+      using errcode = 'MMPAY';
   end if;
 
   update orders
@@ -1063,7 +1095,8 @@ $fn$;
 comment on function fn_record_order_payment(uuid, numeric, payment_status) is
   'Records money received on a confirmed, not cancelled sale: amount_paid and '
   'payment_status only. Owner, manager or sales. Works after a trial and on '
-  'the Costing plan (owner decision D2, 0066); drafts are refused.';
+  'the Costing plan (owner decision D2, 0066); drafts are refused. Its own '
+  'refusals are SQLSTATE MMPAY with a plain sentence; a role refusal is 42501.';
 
 revoke all on function fn_record_order_payment(uuid, numeric, payment_status) from public, anon;
 grant execute on function fn_record_order_payment(uuid, numeric, payment_status) to authenticated, service_role;
@@ -1486,6 +1519,9 @@ begin
   end if;
   if not has_function_privilege('authenticated', v_rp, 'execute') then
     raise exception '0066 self-check FAILED: a signed-in user cannot call fn_record_order_payment.';
+  end if;
+  if (select position('MMPAY' in prosrc) = 0 or prosrc ~ 'check_violation' from pg_proc where oid = v_rp) then
+    raise exception '0066 self-check FAILED: fn_record_order_payment must raise its own refusals as MMPAY.';
   end if;
 
   -- D1: 23:59:59 Lagos on the 14th Lagos day, wherever in the day it starts

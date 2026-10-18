@@ -4,7 +4,8 @@
 -- database without 0066 the script stops with "function fn_trial_end(...)
 -- does not exist": that is a FAIL.
 -- Counts only: no email, name, token or provider code is printed.
--- EXPECTED: 17 rows, every one PASS.
+-- EXPECTED: 17 rows, every one PASS. Rows 16 and 17 are information only and
+-- always PASS. Row 15's count must equal the trial count PRE row 32 printed.
 -- ============================================================================
 with checks(n, check_name, ok, detail) as (
   select 1, 'fn_trial_end(timestamptz): STABLE, runs as the caller, search_path public; signed-in users may call it, not anon or PUBLIC',
@@ -20,9 +21,10 @@ with checks(n, check_name, ok, detail) as (
          and not coalesce(has_function_privilege('authenticated', to_regprocedure('public.fn_require_entitled(uuid,boolean)'), 'execute'), true)
          and not coalesce(has_function_privilege('anon', to_regprocedure('public.fn_require_entitled(uuid,boolean)'), 'execute'), true)
          and not coalesce(has_function_privilege('service_role', to_regprocedure('public.fn_require_entitled(uuid,boolean)'), 'execute'), true), ''
-  union all select 3, 'fn_record_order_payment(uuid, numeric, payment_status): SECURITY DEFINER, search_path public; signed-in users only',
+  union all select 3, 'fn_record_order_payment(uuid, numeric, payment_status): SECURITY DEFINER, search_path public; signed-in users only; its own refusals are MMPAY',
          exists (select 1 from pg_proc p where p.oid = to_regprocedure('public.fn_record_order_payment(uuid,numeric,payment_status)')
-                   and p.prosecdef and p.provolatile = 'v' and 'search_path=public' = any(p.proconfig))
+                   and p.prosecdef and p.provolatile = 'v' and 'search_path=public' = any(p.proconfig)
+                   and position('MMPAY' in p.prosrc) > 0 and p.prosrc !~ 'check_violation')
          and coalesce(has_function_privilege('authenticated', to_regprocedure('public.fn_record_order_payment(uuid,numeric,payment_status)'), 'execute'), false)
          and not coalesce(has_function_privilege('anon', to_regprocedure('public.fn_record_order_payment(uuid,numeric,payment_status)'), 'execute'), true)
          and not exists (select 1 from pg_proc p, unnest(p.proacl) a
@@ -109,14 +111,14 @@ with checks(n, check_name, ok, detail) as (
                         and to_char(current_period_end at time zone 'Africa/Lagos', 'HH24:MI:SS') <> '23:59:59'),
          (select count(*)::text || ' live trial(s)' from subscriptions
            where status = 'trialing' and current_period_end > now())
-  union all select 15, 'each trial 0066 moved has exactly one history row',
+  union all select 15, 'no trial has more than one 0066 history row (the count here must equal PRE row 32; 0066 refused to commit unless every trial it moved got its row)',
          not exists (select 1 from subscription_changes where reason like '0066:%'
                       group by subscription_id having count(*) > 1),
-         (select count(*)::text || ' trial(s) moved later' from subscription_changes where reason like '0066:%')
+         (select count(*)::text || ' trial(s) moved later: compare with PRE row 32' from subscription_changes where reason like '0066:%')
   union all select 16, 'information: trials whose trial_ends_at still differs from current_period_end',
          true, (select count(*)::text from subscriptions
                  where status = 'trialing' and trial_ends_at is distinct from current_period_end)
-  union all select 17, 'the paying customers are untouched',
+  union all select 17, 'information only: the paid subscriptions as plan:status:period end (0066 changes only live trials)',
          true, coalesce((select string_agg(plan_id||':'||status||':'||current_period_end::date, ', ')
                            from subscriptions s join plans p on p.id=s.plan_id where p.price_tier<>'trial'), 'no paid subscriptions')
 )

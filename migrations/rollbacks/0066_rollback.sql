@@ -22,8 +22,10 @@
 --   * if the fn_* count is not 102 or the policy count is not 118;
 --   * if any table, view, fn_* function, trigger or policy in public was
 --     created after 0066's own objects (catalogue oids only grow).
---   Roll the later migration back first. 0067 does not exist yet, so these
---   are the checks that will hold whatever it adds.
+--   Roll the later migration back first. These checks hold whatever a later
+--   migration adds; with 0067 (billing self-serve) in, the count check
+--   refuses.
+--   0065 (help videos), if it shipped, went in before 0066 and stays in.
 -- ============================================================================
 drop table if exists _tx_probe;
 create temp table _tx_probe as select pg_current_xact_id() as x;

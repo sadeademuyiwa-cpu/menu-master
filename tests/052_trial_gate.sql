@@ -16,8 +16,11 @@
 --   E  ended: its trial's current_period_end moved one minute into the past
 --   L  live:  the positive control, a trial in progress
 --   C  paid Costing: entitled, without Sales
--- Every probe that would change something runs inside pg_temp.try, which
--- rolls the change back, so every role meets the same state.
+-- Every probe that would change something runs inside pg_temp.try (or
+-- try_msg, try_gate), which rolls the change back, so every role meets the
+-- same state. A trial or plan refusal must come from the function's OWN gate
+-- (try_gate reads the error context), not from a gated function it calls.
+-- Recording a payment refuses with SQLSTATE MMPAY and a plain sentence (X5).
 -- Behaviour only: global fn_* and policy totals belong to POST_VERIFY_0066.
 -- ============================================================================
 
@@ -68,6 +71,40 @@ begin
     get stacked diagnostics v = returned_sqlstate, h = pg_exception_hint, m = message_text;
   end;
   return v || '|' || coalesce(h, '') || '|' || m;
+end $$;
+
+-- Like try, but a trial or plan refusal also names the function that called
+-- the gate DIRECTLY: 'MMENT@fn_void_order'. The SQLSTATE alone would not prove
+-- that a function has its own gate line: a purchase writes ingredient_prices,
+-- whose trigger re-costs through the gated fn_recompute_recipes_for_ingredient,
+-- and the re-costing functions call the gated snapshot functions, so a
+-- function without its line would still be refused, by the one it calls.
+create or replace function pg_temp.try_gate(p_user uuid, p_sql text) returns text language plpgsql as $$
+declare v text; c text; l text[]; caller text;
+begin
+  begin
+    perform set_config('request.jwt.claim.sub', coalesce(p_user::text, ''), true);
+    if p_user is not null then perform set_config('role', 'authenticated', true); end if;
+    execute p_sql;
+    raise exception 'probe rolled back' using errcode = 'MM000';
+  exception when others then
+    get stacked diagnostics v = returned_sqlstate, c = pg_exception_context;
+  end;
+  if v = 'MM000' then return 'ok'; end if;
+  if v not in ('MMENT', 'MMSAL') then return v; end if;
+  -- the context lists the frames innermost first; the first PL/pgSQL frame
+  -- after the gate's own is the function that called it
+  l := regexp_split_to_array(coalesce(c, ''), E'\n');
+  for i in 1 .. coalesce(array_length(l, 1), 0) loop
+    if l[i] ~ '^PL/pgSQL function (\w+\.)?fn_require_entitled\(' then
+      for j in i + 1 .. array_length(l, 1) loop
+        caller := substring(l[j] from '^PL/pgSQL function (?:\w+\.)?(\w+)\(');
+        exit when caller is not null;
+      end loop;
+      exit;
+    end if;
+  end loop;
+  return v || '@' || coalesce(caller, '?');
 end $$;
 
 -- ============================================ 0. fixture
@@ -270,18 +307,19 @@ begin
     for a in select * from fx_acct order by ord loop
       v_ok := true; v_detail := '';
       for m in select * from fx_member where acct = a.acct order by ord loop
-        v := pg_temp.try(m.uid, pg_temp.call_sql(f.fn, a.acct));
+        v := pg_temp.try_gate(m.uid, pg_temp.call_sql(f.fn, a.acct));
         v_exp := case when not (m.role = any(f.allowed)) then '42501'
-                      when a.k = 'E' then 'MMENT'
-                      when a.k = 'C' and f.needs_sales then 'MMSAL'
+                      when a.k = 'E' then 'MMENT@' || f.fn
+                      when a.k = 'C' and f.needs_sales then 'MMSAL@' || f.fn
                       else 'ok' end;
         if v is distinct from v_exp then v_ok := false; end if;
-        v_detail := v_detail || m.role || '=' || coalesce(v, '?') || ' ';
+        v_detail := v_detail || m.role || '='
+                 || coalesce(case when v = v_exp then split_part(v, '@', 1) else v end, '?') || ' ';
       end loop;
       insert into t52 values (k,
         format('%s, %s account: %s', f.fn, a.label,
-          case when a.k = 'E' then 'refused with MMENT for ' || array_to_string(f.allowed, '/')
-               when a.k = 'C' and f.needs_sales then 'refused with MMSAL for ' || array_to_string(f.allowed, '/')
+          case when a.k = 'E' then 'its own gate refuses with MMENT for ' || array_to_string(f.allowed, '/')
+               when a.k = 'C' and f.needs_sales then 'its own gate refuses with MMSAL for ' || array_to_string(f.allowed, '/')
                else 'works for ' || array_to_string(f.allowed, '/') end
           || '; other roles 42501 as before'),
         case when v_ok then 'PASS' else 'FAIL' end, v_detail);
@@ -386,6 +424,7 @@ declare
   b jsonb; a jsonb; v_out_before numeric; v_out_after numeric;
   v_own text; v_man text; v_sal text; v_kit text; v_acc text; v_str text;
   v_draft text; v_void text; v_neg text; v_null text; v_c text; v_l text; v_svc text; v_cpay record;
+  v_nullamt text; v_big text; v_gone text; v_role text;
 begin
   select acct into e from fx_acct where k = 'E';
   select acct into c from fx_acct where k = 'C';
@@ -432,14 +471,41 @@ begin
     case when v_kit = '42501' and v_acc = '42501' and v_str = '42501' then 'PASS' else 'FAIL' end,
     v_kit || ' ' || v_acc || ' ' || v_str);
 
-  v_draft := pg_temp.try(pg_temp.u(1), format('select fn_record_order_payment(%L, 1000, %L)', o.draft_order, 'part_paid'));
-  v_void  := pg_temp.try(pg_temp.u(1), format('select fn_record_order_payment(%L, 1000, %L)', o.voided_order, 'part_paid'));
-  v_neg   := pg_temp.try(pg_temp.u(1), format('select fn_record_order_payment(%L, -1, %L)', o.confirmed_order, 'part_paid'));
-  v_null  := pg_temp.try(pg_temp.u(1), format('select fn_record_order_payment(%L, 1000, null)', o.confirmed_order));
-  insert into t52 values (62, 'a draft, a cancelled sale, a negative amount and no status are refused',
-    case when v_draft = '23514' and v_void = '23514' and v_neg = '23514' and v_null = '23514'
+  -- its own refusals (X5): SQLSTATE MMPAY, no hint, a sentence shown as it is
+  v_draft   := pg_temp.try_msg(pg_temp.u(1), format('select fn_record_order_payment(%L, 1000, %L)', o.draft_order, 'part_paid'));
+  v_void    := pg_temp.try_msg(pg_temp.u(4), format('select fn_record_order_payment(%L, 1000, %L)', o.voided_order, 'part_paid'));
+  v_neg     := pg_temp.try_msg(pg_temp.u(1), format('select fn_record_order_payment(%L, -1, %L)', o.confirmed_order, 'part_paid'));
+  v_nullamt := pg_temp.try_msg(pg_temp.u(2), format('select fn_record_order_payment(%L, null, %L)', o.confirmed_order, 'paid'));
+  v_null    := pg_temp.try_msg(pg_temp.u(1), format('select fn_record_order_payment(%L, 1000, null)', o.confirmed_order));
+  v_big     := pg_temp.try_msg(pg_temp.u(1), format('select fn_record_order_payment(%L, 999999999999.995, %L)', o.confirmed_order, 'paid'));
+  v_gone    := pg_temp.try_msg(pg_temp.u(1), format('select fn_record_order_payment(%L, 1000, %L)', gen_random_uuid(), 'paid'));
+  v_role    := pg_temp.try_msg(pg_temp.u(3), format('select fn_record_order_payment(%L, 1, %L)', o.confirmed_order, 'paid'));
+  insert into t52 values (62, 'a draft, a cancelled sale, a negative or missing amount and no status are refused with MMPAY',
+    case when split_part(v_draft, '|', 1) = 'MMPAY' and split_part(v_void, '|', 1) = 'MMPAY'
+          and split_part(v_neg, '|', 1) = 'MMPAY' and split_part(v_nullamt, '|', 1) = 'MMPAY'
+          and split_part(v_null, '|', 1) = 'MMPAY'
           and (select amount_paid = 0 from orders where id = o.draft_order)
-         then 'PASS' else 'FAIL' end, v_draft || ' ' || v_void || ' ' || v_neg || ' ' || v_null);
+         then 'PASS' else 'FAIL' end,
+    split_part(v_draft, '|', 1) || ' ' || split_part(v_void, '|', 1) || ' ' || split_part(v_neg, '|', 1) || ' '
+      || split_part(v_nullamt, '|', 1) || ' ' || split_part(v_null, '|', 1));
+  insert into t52 values (84, 'MMPAY messages: draft, cancelled, amount and status, each a plain sentence as written',
+    case when v_draft   = 'MMPAY||This sale is still a draft. A payment can be recorded once it is confirmed.'
+          and v_void    = 'MMPAY||This sale was cancelled, so no payment can be recorded on it.'
+          and v_neg     = 'MMPAY||The amount paid must be zero or more.'
+          and v_nullamt = 'MMPAY||The amount paid must be zero or more.'
+          and v_null    = 'MMPAY||Say whether the sale is not paid, part paid or paid in full.'
+         then 'PASS' else 'FAIL' end, v_draft);
+  insert into t52 values (85, 'a sale that does not exist, and an amount too large to store, are MMPAY too',
+    case when v_gone = 'MMPAY||This sale could not be found. It may have been removed.'
+          and v_big  = 'MMPAY||That amount is too large to record. Check the figure and try again.'
+          and (select amount_paid = 50000 from orders where id = o.confirmed_order)
+         then 'PASS' else 'FAIL' end, v_gone || ' / ' || v_big);
+  insert into t52 values (86, 'the role refusal stays 42501 from fn_require_account_role (the app words it)',
+    case when v_role = '42501||Your role does not permit recording payments' then 'PASS' else 'FAIL' end, v_role);
+  insert into t52 values (87, 'no payment refusal names an amount of money or a database word',
+    case when (v_draft || v_void || v_neg || v_nullamt || v_null || v_big || v_gone)
+              !~* (chr(8358) || '|[0-9]|sqlstate|exception|violat|constraint|null|uuid')
+         then 'PASS' else 'FAIL' end, '');
 
   -- the Costing account settles a sale it confirmed during its trial; L and the operator too
   perform pg_temp.as_user(pg_temp.u(24)); set local role authenticated;

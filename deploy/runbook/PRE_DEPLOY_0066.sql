@@ -1,9 +1,10 @@
 -- ============================================================================
 -- 0066 -- PRE-DEPLOY AUDIT            READ ONLY. Changes nothing.
--- Proves production is at 0064 (with or without 0065), that 0066 is not
--- applied, and that each of the 16 functions 0066 replaces is exactly the
--- definition 0066 was written against: the md5 values below are the ones
--- baked into 0066's preflight, from a fresh repository build through 0064.
+-- Proves production is at 0064 (with or without 0065; if 0065 ships, it must
+-- be applied before 0066, see row 4), that 0066 is not applied, and that
+-- each of the 16 functions 0066 replaces is exactly the definition 0066 was
+-- written against: the md5 values below are the ones baked into 0066's
+-- preflight, from a fresh repository build through 0064.
 -- Then the facts 0066's design depends on (the plan's DB0 item), as COUNTS
 -- ONLY: no email, no name, no token, no provider code is ever printed.
 -- Safe to paste into the Supabase SQL Editor: it is a single SELECT.
@@ -51,10 +52,12 @@ checks(n, check_name, ok, detail) as (
          and (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%') = 99,
          (select count(*)::text from pg_policies where schemaname='public') || ' policies, '
          || (select count(*)::text from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%') || ' fn_*'
-  union all select 4, 'order: 0065 (help videos) is independent of 0066; apply it first if it is ready',
+  union all select 4, 'order: if 0065 (help videos) ships at all, it goes in BEFORE 0066 (its checks expect 99 fn_*)',
          true,
          case when exists (select 1 from site_settings where key = 'help')
-              then '0065 applied' else '0065 not applied (0066 does not need it)' end
+              then '0065 applied'
+              else '0065 not applied: apply it now, before 0066, if it is to ship. After 0066 its '
+                   'preflight refuses (102 fn_*) until 0065 and suite 051 expect 102' end
   union all select 5, 'units: p_units_write is the 0018 policy 0066 replaces',
          exists (select 1 from pg_policies
                   where schemaname='public' and tablename='units' and policyname='p_units_write'
@@ -79,7 +82,7 @@ checks(n, check_name, ok, detail) as (
                 'fn_clone_starter_catalog','fn_confirm_order','fn_finalise_order',
                 'fn_reissue_order','fn_void_order','fn_void_sales_entry',
                 'fn_invite_member','fn_accept_invitations','fn_set_member_role',
-                'fn_remove_member','fn_revoke_invitation',
+                'fn_remove_member','fn_revoke_invitation','fn_record_order_payment',
                 'fn_admin_resolve_alert','fn_admin_set_site_setting','fn_admin_scan',
                 'fn_create_account_and_business')),
          coalesce((select string_agg(p.proname, ', ') from pg_proc p
@@ -93,7 +96,7 @@ checks(n, check_name, ok, detail) as (
                         'fn_clone_starter_catalog','fn_confirm_order','fn_finalise_order',
                         'fn_reissue_order','fn_void_order','fn_void_sales_entry',
                         'fn_invite_member','fn_accept_invitations','fn_set_member_role',
-                        'fn_remove_member','fn_revoke_invitation',
+                        'fn_remove_member','fn_revoke_invitation','fn_record_order_payment',
                         'fn_admin_resolve_alert','fn_admin_set_site_setting','fn_admin_scan',
                         'fn_create_account_and_business')), 'none outside the list')
 
