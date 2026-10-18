@@ -11,7 +11,7 @@ export const LEGAL = {
   website: 'menumasterng.com',
   governingLaw: 'the Federal Republic of Nigeria',
   /** When the terms and refund policy last changed. Update on every edit. */
-  lastUpdated: '10 September 2026',
+  lastUpdated: '18 October 2026',
   /** Days a customer has to report a billing error and receive a refund. */
   billingDisputeDays: 14,
 } as const
