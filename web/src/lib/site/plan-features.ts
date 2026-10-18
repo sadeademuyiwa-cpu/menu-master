@@ -1,3 +1,5 @@
+import { billingSelfServe, planFaq } from './billing-words'
+
 /**
  * What each plan includes, in the owner's words. One list, so the landing
  * page and /subscribe can never promise different things.
@@ -17,15 +19,11 @@ export const TRADING_FEATURES = [
   'Daily takings, profit and reports',
 ]
 
-export const PLAN_FAQ: [string, string][] = [
-  ['What happens when my free trial ends?',
-   'Nothing is deleted. You can still open and read everything you entered. To record new purchases, dishes or sales, choose a plan.'],
-  ['Can I cancel?',
-   'Yes, whenever you like. Your plan runs to the end of the month you paid for, and your records stay yours.'],
-  ['Can I change plan later?',
-   'Yes. Moving up to Costing + Sales takes effect straight away, and everything you have entered stays as it is.'],
-  ['Is paying safe?',
-   'Payment is handled by Paystack. Menu Master NG never sees or stores your card details.'],
-  ['What is the founding price?',
-   'The first 100 businesses to subscribe keep the lower founding price for as long as their subscription stays active.'],
-]
+/**
+ * The plans FAQ, as the landing page and /subscribe show it. Its billing
+ * answers follow the web's safety switch (BILLING_SELF_SERVE, read on the
+ * server): self-serve wording when it is "on", "message us" otherwise. The
+ * words, both ways, are in billing-words.ts and tested there
+ * (tests/public-promises.test.mts). Server components only.
+ */
+export const PLAN_FAQ: [string, string][] = planFaq(billingSelfServe())

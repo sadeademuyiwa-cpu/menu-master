@@ -41,14 +41,33 @@ export function lagosDate(iso: string): string {
 const naira = (n: number) => `₦${n.toLocaleString("en-NG", { maximumFractionDigits: 0 })}`;
 
 /**
+ * How many founding places are left, from the founder-slot count's reply.
+ * With Prefer: count=exact, PostgREST puts the total after the slash of
+ * Content-Range: "0-0/57" when 57 are left, a star and "/0" when none are.
+ * A number only when the read worked and the total is a whole number;
+ * otherwise null, meaning "not known". An unknown count must never be read
+ * as 0: that would quote the standard price while cheaper founding places are
+ * still on sale.
+ */
+export function placesLeft(ok: boolean, contentRange: string | null | undefined): number | null {
+  if (!ok || typeof contentRange !== "string") return null;
+  const m = /^\s*(?:\*|\d+-\d+)\/(\d+)\s*$/.exec(contentRange);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
  * "Plans start at ₦X a month." From the plans table, founding price while
  * founding places remain -- the same rule /subscribe sells by. Null when no
- * price is known: the email then simply does not quote one.
+ * price is known, or when the number of founding places left is not known
+ * (null): the email then simply does not quote a price rather than guess one.
  */
 export function priceLine(
   plans: { price_tier: string; price_kobo: number }[],
-  foundingPlacesLeft: number,
+  foundingPlacesLeft: number | null,
 ): string | null {
+  if (foundingPlacesLeft === null) return null;
   const tier = foundingPlacesLeft > 0 && plans.some((p) => p.price_tier === "founding") ? "founding" : "standard";
   const prices = plans.filter((p) => p.price_tier === tier && p.price_kobo > 0).map((p) => p.price_kobo / 100);
   if (prices.length === 0) return null;
@@ -57,6 +76,14 @@ export function priceLine(
     ? `Founding prices start at ${from} a month while founding places last, and stay at that price for as long as you remain subscribed.`
     : `Plans start at ${from} a month.`;
 }
+
+/**
+ * The small print under every email. Each sentence must stay true: the free
+ * trial takes no card, and the owner can cancel a paid plan from the Account
+ * page whenever they like (paystack-manage).
+ */
+export const FOOTER = "You are getting this because you created a Menu Master account with this email address. " +
+  "The free trial never charges you. Payment is handled by Paystack; you can cancel at any time.";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -84,8 +111,7 @@ export function reminderEmail(d: Due, siteUrl: string, price: string | null): Ma
     ? "Nothing has been deleted. You can still open and read everything you entered. To record new purchases, dishes and sales again, choose a plan."
     : "Everything you have entered stays yours. To keep recording purchases, dishes and sales after that date, choose a plan.";
   const button = d.kind === "ended" ? "Choose a plan" : "See the plans";
-  const footer = "You are getting this because you created a Menu Master account with this email address. " +
-    "Payment is handled by Paystack; you can cancel at any time.";
+  const footer = FOOTER;
 
   const text = [
     "Hello,", "", lead, "", body, ...(price ? ["", price] : []), "",

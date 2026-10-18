@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
-import { hasSalesEntitlement } from '@/lib/data/context'
+import { hasSalesEntitlement, recordingOpen } from '@/lib/data/context'
 import { QuickAddMenu } from '@/app/(app)/dashboard/quick-add-menu'
 import { quickActions } from '@/app/(app)/dashboard/roles'
 
@@ -29,11 +29,12 @@ async function QuickAddForRole() {
   if (!user) return null
   // The caller's OWN membership: RLS lets a member read every membership of
   // the account, so the user filter matters (see lib/data/context.ts).
-  const [{ data: member }, salesPlan] = await Promise.all([
+  const [{ data: member }, salesPlan, open] = await Promise.all([
     supabase.from('memberships').select('role').eq('user_id', user.id)
       .order('created_at').limit(1).maybeSingle<{ role: string }>(),
     hasSalesEntitlement(),
+    recordingOpen(),
   ])
   if (!member) return null
-  return <QuickAddMenu actions={quickActions(member.role, salesPlan)} />
+  return <QuickAddMenu actions={quickActions(member.role, salesPlan, open)} />
 }

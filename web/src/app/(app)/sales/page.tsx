@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { currentContext, contextRedirect, hasSalesEntitlement } from '@/lib/data/context'
+import { currentContext, contextRedirect, hasSalesEntitlement, closedLine, recordingOpen } from '@/lib/data/context'
 import { SalesLocked } from '@/components/sales-locked'
 import { isSalesLocked } from '@/lib/sales-gate'
 import { PageHeader, Notice, Empty, SectionHeading, Badge } from '@/components/ui'
@@ -12,6 +12,7 @@ import { canSeeCosts, canSeeSellingPrices } from '@/lib/pricing'
 import { canRecordSales } from '@/app/(app)/dashboard/roles'
 import { localToday, formatDay } from '@/lib/dates'
 import { loadPlanOffers } from '@/lib/data/plans'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -90,7 +91,13 @@ export default async function SalesPage({
   // fail is better than telling a paying customer they cannot sell. RLS
   // refuses either way, so nothing is protected by guessing.
   const canSell = await hasSalesEntitlement()
-  if (isSalesLocked(canSell)) {
+  // After a trial (or a lapsed plan) Sales is off because the account is
+  // closed, not because the plan lacks it: fn_account_has_sales needs an
+  // entitled account. Such an account keeps its own sales list, read only,
+  // under the paused line below; the "plan does not include Sales" page is
+  // for an open Costing plan only. An unknown verdict (null) keeps today's page.
+  const open = await recordingOpen()
+  if (isSalesLocked(canSell) && open !== false) {
     const { data: sub } = await supabase
       .from('subscriptions').select('plan_id').maybeSingle<{ plan_id: string }>()
     const { data: plan } = sub
@@ -99,7 +106,14 @@ export default async function SalesPage({
       : { data: null }
     const { offers } = await loadPlanOffers(supabase)
     const trading = offers.find((o) => o.tier === 'trading')
-    return <SalesLocked planName={plan?.name ?? null} price={trading?.monthly ? money(trading.monthly) : null} />
+    // The web's billing safety switch (X4): only the exact "on" makes a plan
+    // switch self-serve. The same rule as billing's billingSelfServe()
+    // (lib/site/billing-words.ts on that branch), read here on the server.
+    const selfServe = process.env.BILLING_SELF_SERVE === 'on'
+    return (
+      <SalesLocked planName={plan?.name ?? null} price={trading?.monthly ? money(trading.monthly) : null}
+                   selfServe={selfServe} />
+    )
   }
 
   // What was kept is a cost figure: read only for the roles that may see
@@ -110,8 +124,17 @@ export default async function SalesPage({
   // kitchen the money columns are not selected at all; it sees what was sold
   // and how many sales, never how much.
   const takings = canSeeSellingPrices(ctx.role)
-  // Only the roles the database lets record a sale (0015) get the button.
-  const records = canRecordSales(ctx.role, canSell)
+  // Only the roles the database lets record a sale (0015) get the button,
+  // and only while recording is open: after a trial the order screen would
+  // only be refused (D3), so the button gives way to one line saying why.
+  // Only an explicit false closes it; a lookup that fails keeps the button.
+  // When closed, whether the plan has Sales cannot be told apart from the
+  // closure itself, so the role alone decides who is told why (D3).
+  const seller = canRecordSales(ctx.role, open === false ? null : canSell)
+  const records = seller && open !== false
+  const paused = seller && !records
+    ? await closedLine(ctx.role, 'new sales can’t be recorded, though money for a sale already confirmed can still be recorded on that sale')
+    : null
   const today = localToday()
   const week = lastDays(today, 7)
 
@@ -223,7 +246,7 @@ export default async function SalesPage({
         title="Sales"
         sub={showCosts ? 'What you sold, what it cost you, and what you kept.' : 'What you sold, day by day.'}
       />
-      {notice && <Notice tone={/could not|cannot|do not/i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
 
       {/* One obvious thing to do here. The order screen takes it from there. */}
       {records && (
@@ -231,6 +254,7 @@ export default async function SalesPage({
           <AppIcon name="plus" size={20} /> New sale
         </Link>
       )}
+      {paused && !notice && <Notice tone="warn">{paused}</Notice>}
       <div className="grid grid-cols-2 gap-2">
         {tiles.map((t) => (
           <Link key={t.href} href={t.href} className="mm-action-tile">

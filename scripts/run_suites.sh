@@ -12,6 +12,10 @@
 #   rows           FAIL rows count even without a summary row
 #   skip=REASON    never run
 #
+# Every working database is named after the head database (<head-db>_suite_run,
+# <head-db>_seq_NAME, <head-db>_era_NNNN), so two runs from different head
+# databases on one server never drop each other's copies.
+#
 # ALTER DATABASE ... SET is not copied by CREATE DATABASE ... TEMPLATE, so every
 # copy re-asserts the fresh-install flag.
 set -u
@@ -78,10 +82,10 @@ for file in "$R"/tests/0*.sql; do
   tpl="$HEAD"; label=head
   if [ -n "$era" ]; then tpl=$(era_db "$era"); label="era $era"; fi
   if [ -n "$seq" ]; then
-    db="suite_seq_$seq"
+    db="${HEAD}_seq_$seq"
     if [ -z "${seqdb[$seq]:-}" ]; then fresh_copy "$db" "$tpl"; seqdb[$seq]=1; fi
   else
-    db=suite_run; fresh_copy "$db" "$tpl"
+    db="${HEAD}_suite_run"; fresh_copy "$db" "$tpl"
   fi
   res=$(run_one "$s" "$db")
   if [ "$res" = "NO RESULT" ]; then printf '%-40s %-10s NO RESULT\n' "$s" "$label"; noresult=$((noresult+1)); continue; fi

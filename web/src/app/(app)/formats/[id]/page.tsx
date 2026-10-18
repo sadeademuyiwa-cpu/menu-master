@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import {
+  currentContext, contextRedirect, describeWriteError, withNotice, writeNotice, writeRefusal,
+} from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Badge, Disclosure,
@@ -9,6 +11,7 @@ import {
 import { quantity } from '@/lib/format'
 import { ConfirmSubmit } from '@/components/confirm-submit'
 import { canChangeSizes } from '../roles'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -50,10 +53,11 @@ async function removePackaging(formData: FormData) {
   const here = `/formats/${fid}`
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('serving_format_packaging')
-    .delete().eq('id', String(formData.get('id') ?? ''))
+  // .select: a refused delete is not an error, only zero rows (writeNotice).
+  const { data, error } = await supabase.from('serving_format_packaging')
+    .delete().eq('id', String(formData.get('id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Packaging removed.'))
+  redirect(withNotice(here, await writeNotice(error, data, 'Packaging removed.', ctx.role)))
 }
 
 async function updatePackaging(formData: FormData) {
@@ -66,10 +70,10 @@ async function updatePackaging(formData: FormData) {
   if (!Number.isFinite(qty) || qty <= 0) {
     redirect(withNotice(here, 'How many of that item does one use? It must be more than zero.'))
   }
-  const { error } = await supabase.from('serving_format_packaging')
-    .update({ qty }).eq('id', String(formData.get('id') ?? ''))
+  const { data, error } = await supabase.from('serving_format_packaging')
+    .update({ qty }).eq('id', String(formData.get('id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? 'Packaging updated.'))
+  redirect(withNotice(here, await writeNotice(error, data, 'Packaging updated.', ctx.role)))
 }
 
 /**
@@ -94,16 +98,16 @@ async function updateFormat(formData: FormData) {
   if ((qty === null) !== (unitRaw === '')) {
     redirect(withNotice(here, 'Give both a size and its unit, or neither.'))
   }
-  const { error } = await supabase.from('serving_formats').update({
+  const { data, error } = await supabase.from('serving_formats').update({
     name,
     description: String(formData.get('description') ?? '').trim() || null,
     capacity_qty: qty, capacity_unit_id: unitRaw || null,
-  }).eq('id', fid)
+  }).eq('id', fid).select('id')
   revalidatePath(here)
   revalidatePath('/formats')
-  redirect(withNotice(here, error
-    ? (error.code === '23505' ? `You already have a size called “${name}”.` : describeWriteError(error))
-    : 'Size updated.'))
+  redirect(withNotice(here, error?.code === '23505'
+    ? `You already have a size called “${name}”.`
+    : await writeNotice(error, data, 'Size updated.', ctx.role)))
 }
 
 /** Hidden, never deleted: sales and prices in this size keep it. */
@@ -114,10 +118,11 @@ async function setActive(formData: FormData) {
   const active = formData.get('active') === 'true'
   const ctx = await currentContext()
   const { supabase } = ctx
-  const { error } = await supabase.from('serving_formats').update({ is_active: active }).eq('id', fid)
+  const { data, error } = await supabase.from('serving_formats').update({ is_active: active }).eq('id', fid).select('id')
   revalidatePath(here)
   revalidatePath('/formats')
-  redirect(withNotice(here, describeWriteError(error)
+  const refused = await writeRefusal(error, data, ctx.role)
+  redirect(withNotice(here, refused
     ?? (active ? 'Size shown again.' : 'Size hidden. Dishes keep any price set for it; it no longer appears when you take an order.')))
 }
 
@@ -169,7 +174,7 @@ export default async function FormatDetail({
             : 'Sold by the piece') + (format.is_active ? '' : ' · hidden')}
         </p>
       </div>
-      {notice && <Notice tone={/could not|must be|how many|already|give /i.test(notice) ? 'warn' : 'info'}>{notice}</Notice>}
+      {notice && <Notice tone={noticeTone(notice)}>{notice}</Notice>}
 
       {changes && (
       <Disclosure summary="Edit this size">

@@ -23,16 +23,36 @@
 //   SUPABASE_URL                 provided by the platform
 //   SUPABASE_SERVICE_ROLE_KEY    provided by the platform
 //   SITE_URL                     where Paystack sends the browser back
+//   BILLING_SELF_SERVE           optional; "off" refuses every plan change of
+//                                a live paid plan (switch_needs_support), the
+//                                safe state if 0067 is ever rolled back
+//
+// 0067 (owner decision D5): an account that already pays may change plan by
+// itself. Before any quote or founder hold this refuses already_on_plan (the
+// same tier while active) and owner_only (the account already pays and the
+// caller is not its owner), and switch_needs_support when no Paystack
+// subscription code is on file to switch off, and change_in_progress (X3)
+// while an earlier change's old subscription still waits to be switched
+// off. An overdue (past_due) account
+// choosing its own tier is "Pay now" (integration decision X2): a
+// replacement of the failed subscription. A plan change and a Pay now carry
+// metadata.replaces, the old subscription's code, so the webhook can switch
+// it off once the new one is on file and nobody is charged twice.
 // ============================================================================
 
 import {
   billableEmail,
+  changeInProgress,
+  checkoutRefusal,
   initializeBody,
   missingPlanCode,
   parseTier,
-  pickAccount,
+  pickAccountRole,
+  readSubState,
+  replacesCode,
   resolveCallbackUrl,
   safeError,
+  selfServeOn,
   type Quote,
 } from "./lib.ts";
 
@@ -100,21 +120,61 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // No limit=1: a user on two accounts must NOT have one of them picked for
   // them and billed. pickAccount refuses instead, the same way the quote
   // refuses when no price exists.
+  const serviceHeaders = {
+    apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!}`,
+  };
   const memRes = await fetch(
     `${Deno.env.get("SUPABASE_URL")}/rest/v1/memberships` +
-      `?user_id=eq.${user.id}&select=account_id`,
-    {
-      headers: {
-        apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-        Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!}`,
-      },
-    },
+      `?user_id=eq.${user.id}&select=account_id,role`,
+    { headers: serviceHeaders },
   );
-  const picked = pickAccount(memRes.ok ? await memRes.json() : []);
+  const picked = pickAccountRole(memRes.ok ? await memRes.json() : []);
   if ("error" in picked) {
     return json(safeError(picked.error), picked.error === "no_account" ? 403 : 409);
   }
   const accountId = picked.accountId;
+
+  // 0067: WHAT THEY ALREADY PAY FOR. Read with the service role, before the
+  // quote, so a refusal never takes a founder hold. If it cannot be read,
+  // refuse: guessing "not paying" is how a second subscription gets opened.
+  const subRes = await fetch(
+    `${Deno.env.get("SUPABASE_URL")}/rest/v1/subscriptions` +
+      `?account_id=eq.${accountId}` +
+      `&select=status,current_period_end,provider_subscription_code,plans(tier)`,
+    { headers: serviceHeaders },
+  );
+  if (!subRes.ok) {
+    console.error(`paystack-checkout: subscription read failed with ${subRes.status}`);
+    return json(safeError("provider_unavailable"), 502);
+  }
+  const sub = readSubState(await subRes.json().catch(() => null));
+  const selfServe = selfServeOn(Deno.env.get("BILLING_SELF_SERVE"));
+  const refusal = checkoutRefusal(sub, tier, picked.isOwner, new Date(), selfServe);
+  if (refusal) return json(safeError(refusal.error), refusal.status);
+
+  // X3: IS AN EARLIER CHANGE STILL FINISHING? After a plan change or Pay now
+  // is paid, the old subscription stays the code on file, waiting in
+  // billing_superseded, until the new one's subscription.create lands. A
+  // second checkout in that window would open another subscription replacing
+  // the same old one, and both new ones would charge. Read with the service
+  // role; a failed read refuses rather than guesses. Skipped while the kill
+  // switch is off (a rolled-back 0067 has no billing_superseded to read).
+  const replaces = replacesCode(sub);
+  if (replaces && selfServe) {
+    const supRes = await fetch(
+      `${Deno.env.get("SUPABASE_URL")}/rest/v1/billing_superseded` +
+        `?subscription_code=eq.${encodeURIComponent(replaces)}&disabled_at=is.null&select=id`,
+      { headers: serviceHeaders },
+    ).catch(() => null);
+    if (!supRes?.ok) {
+      console.error(`paystack-checkout: replaced-subscription read failed with ${supRes?.status ?? "no response"}`);
+      return json(safeError("provider_unavailable"), 502);
+    }
+    if (changeInProgress(await supRes.json().catch(() => null))) {
+      return json(safeError("change_in_progress"), 409);
+    }
+  }
 
   // THE QUOTE. The database decides plan, price, price tier, founding
   // eligibility and slot availability. This function decides nothing.
@@ -140,7 +200,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
     body: JSON.stringify(
-      initializeBody(quote, email, callbackUrl),
+      initializeBody(quote, email, callbackUrl, replaces),
     ),
   });
 

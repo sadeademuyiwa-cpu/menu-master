@@ -32,6 +32,10 @@ const KIND_WORDS: Record<string, string> = {
   founder_slots_exhausted: 'Founding slots exhausted',
   past_due_beyond_grace: 'Past due beyond grace',
   subscription_no_period: 'Subscription without a period end',
+  subscription_not_switched_off: 'Old Paystack subscription not switched off',
+  superseded_subscription_charged: 'Replaced subscription took a payment (refund it)',
+  cancel_not_confirmed: 'Cancel not confirmed by Paystack',
+  possible_double_charge: 'Possible double charge',
 }
 
 export function alertWords(kind: string): string {

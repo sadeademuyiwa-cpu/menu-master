@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
-import { currentContext, contextRedirect } from '@/lib/data/context'
+import { currentContext, contextRedirect, entitlementStatus } from '@/lib/data/context'
 import { BackLink, Card, Empty, Notice, SectionHeading, Stat, StatRow, Badge } from '@/components/ui'
 import { DishTile } from '@/components/dish-tile'
 import { DishPhotoUpload } from '@/components/dish-photo-upload'
@@ -8,7 +8,7 @@ import { CostBreakdown } from '@/components/charts'
 import { setPrice } from '@/lib/actions/set-price'
 import { money, percent, quantity, NOT_ENTERED } from '@/lib/format'
 import { canSeeCosts, canSeeSellingPrices, canSetPrices } from '@/lib/pricing'
-import { canAddDishPhotos } from '@/lib/dish-photo'
+import { canAddDishPhotos, photoRefusal } from '@/lib/dish-photo'
 import { noticeTone } from '@/lib/ui/notice-tone'
 import { setDishPhoto } from './actions'
 import { canAddKindsOfWork, canEditDish, canMakeSizes } from './roles'
@@ -289,6 +289,8 @@ export default async function DishPage(props: {
   ].filter(Boolean).join(' · ')
 
   const otherView = pro ? here : `${here}?view=pro`
+  // What a refused photo upload says, for this person and this account (APP8).
+  const photoNote = photos ? photoRefusal(role, await entitlementStatus()) : undefined
 
   return (
     <div className="space-y-6">
@@ -310,7 +312,8 @@ export default async function DishPage(props: {
         </div>
         {photos && (
           <DishPhotoUpload businessId={recipe.business_id} recipeId={recipe.id}
-                           photoPath={recipe.photo_path ?? null} action={setDishPhoto} returnTo={returnTo} />
+                           photoPath={recipe.photo_path ?? null} action={setDishPhoto} returnTo={returnTo}
+                           refusal={photoNote} />
         )}
       </header>
 

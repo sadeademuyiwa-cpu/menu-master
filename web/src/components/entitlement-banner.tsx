@@ -13,6 +13,12 @@ import { TrackOnce } from '@/components/track-once'
  * The verdict and the date both come from fn_my_entitlement_status(), which
  * derives from the same predicate the write policies use. The only
  * arithmetic here is turning that date into "9 days left" for display.
+ *
+ * A failed payment in its grace days links to "Update your card", the words
+ * of the button it leads to -- while the web's billing switch is on
+ * (BILLING_SELF_SERVE exactly "on", decision X4). Off, that button is not
+ * there and Plans & billing says to message us, so the link says where it
+ * goes instead.
  */
 export async function EntitlementBanner() {
   const status = await entitlementStatus()
@@ -49,7 +55,10 @@ export async function EntitlementBanner() {
               {when && <span> Your access continues until {when}.</span>}
             </span>
           </span>
-          <Link href="/subscribe" className="mm-access-cta">Update payment</Link>
+          {/* The same words as the button it leads to (plan-chooser, Account). */}
+          <Link href="/subscribe" className="mm-access-cta">
+            {process.env.BILLING_SELF_SERVE === 'on' ? 'Update your card' : 'Plans & billing'}
+          </Link>
         </div>
       )
     }

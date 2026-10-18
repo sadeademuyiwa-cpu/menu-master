@@ -94,7 +94,16 @@ applied on 2–3 October (commits `5f08f2f`, `f8d5022`), 0060–0062 on
 `psql --single-transaction`. The rest of this file still describes
 10 September and is older than those facts.)*
 
-**Nothing is proposed.** The last two shipped with the food-app redesign
+**Proposed (18 October 2026), on branch `fix/trial-end`, not applied:**
+
+| Migration | What | Gate |
+|---|---|---|
+| `0066_trial_gate.sql` | After a trial (or a lapsed plan) nothing new is saved, through the tables or through any elevated function, except money received on a confirmed sale (`fn_record_order_payment`). Trials end at 23:59:59 Lagos on day 14; live trials move later to match, each logged. Onboarding refuses a caller-chosen trial length and a login that already has a membership. Custom units follow the ingredient roles. 118 policies; `fn_*` 99 → 102 | `deploy/runbook/DEPLOY_0066.md` |
+| `0067_billing_self_serve.sql` (after 0066) | Paystack notices are matched to the account by subscription code or customer code; a replaced subscription is switched off and its later notices change nothing; a cancel or failed payment for a code we do not hold is held for review. Supports Cancel plan, Update your card, Pay now and self-serve plan change (`paystack-manage`, new). 118 policies; `fn_*` 102 → 107 | `deploy/runbook/DEPLOY_0067.md` |
+
+The whole release, edge functions and switches included, is `deploy/runbook/DEPLOY_TRIAL_PHASE1.md`. `0065_help_videos` (another session's work, uncommitted when this was written) must be applied **before** 0066 if it ships: its checks expect 99 `fn_*`.
+
+Before that, the last two shipped with the food-app redesign
 (`branding/09-uiux/04-simplify-plan.md`), and the app that needs them is live
 (`6e64741`):
 

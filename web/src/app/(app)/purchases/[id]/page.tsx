@@ -1,7 +1,10 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, contextRedirect, describeWriteError, withNotice } from '@/lib/data/context'
+import {
+  currentContext, contextRedirect, describeWriteError, withNotice,
+  closedLine, closedRefusal, recordingOpen, refusalNotice, writeNotice,
+} from '@/lib/data/context'
 import {
   PageHeader, Card, Field, Submit, InlineSubmit, Notice, Empty,
   SectionHeading, BackLink, Disclosure,
@@ -14,11 +17,12 @@ import { formatDay } from '@/lib/dates'
 import { canSeeCosts } from '@/lib/pricing'
 import { ConfirmSubmit } from '@/components/confirm-submit'
 import { stateDot } from '../../recipes/_list/dish-figures'
-import { NOT_CHANGED, canRecordPurchases } from '../buy-roles'
+import { canRecordPurchases } from '../buy-roles'
 import { inSentence } from '../buy-figures'
 import '../buy.css'
 // .mm-dot, the dish state dot, as /recipes and /pricing draw it.
 import '../../recipes/_list/lists.css'
+import { noticeTone } from '@/lib/ui/notice-tone'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,11 +81,11 @@ async function removeLine(formData: FormData) {
   const here = `/purchases/${id}`
   const ctx = await currentContext()
   const { supabase } = ctx
-  // .select: a refused delete is not an error, only zero rows (NOT_CHANGED).
+  // .select: a refused delete is not an error, only zero rows (writeNotice).
   const { data, error } = await supabase.from('purchase_lines')
     .delete().eq('id', String(formData.get('line_id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? (data?.length ? 'Item removed.' : NOT_CHANGED)))
+  redirect(withNotice(here, await writeNotice(error, data, 'Item removed.', ctx.role)))
 }
 
 /**
@@ -89,6 +93,12 @@ async function removeLine(formData: FormData) {
  * double submit cannot post twice), zero-value refusal and conversion
  * blockers. It reports refusals as DATA, not errors, so the result must be
  * read rather than assumed successful.
+ *
+ * After a trial ends the button is gone, and a form posted anyway is refused
+ * here first (closedRefusal): recording sets ingredient prices and re-costs
+ * every dish, which a closed account must not do. 0066 refuses it in the
+ * database too (fn_require_entitled); this check is the courtesy, that one
+ * the boundary.
  */
 async function post(formData: FormData) {
   'use server'
@@ -96,6 +106,8 @@ async function post(formData: FormData) {
   const here = `/purchases/${id}`
   const ctx = await currentContext()
   const { supabase } = ctx
+  const closed = await closedRefusal(ctx.role)
+  if (closed) redirect(withNotice(here, closed))
 
   const { data, error } = await supabase.rpc('fn_post_purchase', { p_purchase_id: id })
   if (error) redirect(withNotice(here, describeWriteError(error) ?? 'Could not record that purchase.'))
@@ -139,7 +151,7 @@ async function updateLine(formData: FormData) {
     .update({ qty, unit_id: String(formData.get('unit_id') ?? ''), amount })
     .eq('id', String(formData.get('line_id') ?? '')).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? (data?.length ? 'Item updated.' : NOT_CHANGED)))
+  redirect(withNotice(here, await writeNotice(error, data, 'Item updated.', ctx.role)))
 }
 
 /** The draft's date, supplier and reference. */
@@ -158,7 +170,7 @@ async function updateHeader(formData: FormData) {
     note: String(formData.get('note') ?? '').trim() || null,
   }).eq('id', id).select('id')
   revalidatePath(here)
-  redirect(withNotice(here, describeWriteError(error) ?? (data?.length ? 'Saved.' : NOT_CHANGED)))
+  redirect(withNotice(here, await writeNotice(error, data, 'Saved.', ctx.role)))
 }
 
 /** A draft never set a price, so discarding one changes nothing. */
@@ -170,7 +182,7 @@ async function discardDraft(formData: FormData) {
   const { data, error } = await supabase.from('purchases').delete().eq('id', id).eq('status', 'draft').select('id')
   if (error) redirect(withNotice(`/purchases/${id}`, describeWriteError(error) ?? 'Could not discard that draft.'))
   // Zero rows: refused, or recorded in the meantime. Either way it is still there.
-  if (!data?.length) redirect(withNotice(`/purchases/${id}`, NOT_CHANGED))
+  if (!data?.length) redirect(withNotice(`/purchases/${id}`, await refusalNotice(ctx.role)))
   revalidatePath('/purchases')
   redirect(withNotice('/purchases', 'Draft discarded.'))
 }
@@ -185,6 +197,9 @@ async function reverse(formData: FormData) {
 
   const ctx = await currentContext()
   const { supabase } = ctx
+  // Cancelling undoes prices and re-costs dishes: closed after a trial (D3).
+  const closed = await closedRefusal(ctx.role)
+  if (closed) redirect(withNotice(here, closed))
   const { error } = await supabase.rpc('fn_reverse_purchase',
     { p_purchase_id: id, p_reason: reason })
   if (error) redirect(withNotice(here, describeWriteError(error) ?? 'Could not cancel that purchase.'))
@@ -212,7 +227,12 @@ export default async function PurchaseDetail({
   // or dish cost is selected at all. Changing a purchase is for the roles the
   // database lets write one (0015); the forms are not drawn for anyone else.
   const costs = canSeeCosts(ctx.role)
-  const canWrite = canRecordPurchases(ctx.role)
+  // After a trial ends nothing here can be recorded, cancelled or corrected
+  // (D3), so none of it is offered. Only an explicit false closes: when the
+  // account's state cannot be read the page is as it always was.
+  const open = await recordingOpen()
+  const buyer = canRecordPurchases(ctx.role)
+  const canWrite = buyer && open !== false
 
   const { data: purchase } = await supabase.from('purchases')
     .select('id,purchase_date,status,reference,note,supplier_id,reverses,reversal_reason')
@@ -227,6 +247,12 @@ export default async function PurchaseDetail({
 
   const draft = purchase.status === 'draft'
   const posted = purchase.status === 'posted'
+  // Said once, where the buttons were, to the people who would have had them.
+  const paused = buyer && !canWrite && (draft || (posted && !replacedBy))
+    ? await closedLine(ctx.role, draft
+        ? 'this draft can’t be changed or recorded'
+        : 'this purchase can’t be cancelled or corrected')
+    : null
 
   const [{ data: lines }, { data: ingredients }, { data: units }, { data: suppliers }, { data: supplier }] = await Promise.all([
     // The !constraint hints are required, not cosmetic: purchase_lines has two
@@ -310,10 +336,11 @@ export default async function PurchaseDetail({
         ].filter(Boolean).join(' · ') || undefined}
       />
       {notice && (
-        <Notice tone={/could not|do not yet|cancelling|must be|nothing was changed/i.test(notice) ? 'warn' : 'info'}>
+        <Notice tone={noticeTone(notice, /cancelling/i)}>
           {notice}
         </Notice>
       )}
+      {paused && !notice && <Notice tone="warn">{paused}</Notice>}
 
       {/*
         fn_reverse_purchase records the reason on the REVERSING purchase it

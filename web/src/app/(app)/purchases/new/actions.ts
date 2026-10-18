@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError } from '@/lib/data/context'
+import { currentContext, closedRefusal, describeWriteError } from '@/lib/data/context'
 import { localToday } from '@/lib/dates'
 import { writeMeasure } from '../../ingredients/measure'
 
@@ -49,6 +49,9 @@ export async function recordPurchase(_prev: PurchaseResult, formData: FormData):
   const ctx = await currentContext()
   const { supabase, accountId, businessId } = ctx
   if (!accountId || !businessId) return { error: 'Your session has ended. Sign in again, then record the purchase.' }
+  // Closed after a trial (D3): said plainly before anything is written.
+  const closed = await closedRefusal(ctx.role)
+  if (closed) return { error: closed }
 
   const { data: purchase, error: pErr } = await supabase.from('purchases').insert({
     account_id: accountId, business_id: businessId, purchase_date: date,

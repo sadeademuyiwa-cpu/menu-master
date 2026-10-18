@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { currentContext, contextRedirect } from '@/lib/data/context'
+import { currentContext, contextRedirect, closedLine, withNotice } from '@/lib/data/context'
 import { loadBuyingHistory, loadPurchaseCatalog } from '@/lib/data/purchase-catalog'
 import { localToday } from '@/lib/dates'
 import { canSeeCosts } from '@/lib/pricing'
@@ -31,6 +31,11 @@ export default async function NewPurchasePage(props: {
       </div>
     )
   }
+
+  // After a trial ends a purchase cannot be recorded (D3). Rather than a
+  // whole market run typed in and then refused, back to Purchases with why.
+  const paused = await closedLine(ctx.role, 'new purchases can’t be recorded')
+  if (paused) redirect(withNotice('/purchases', paused))
 
   const [{ items }, history, { data: suppliers }] = await Promise.all([
     loadPurchaseCatalog(supabase),

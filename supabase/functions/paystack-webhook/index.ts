@@ -10,6 +10,11 @@
 //   PAYSTACK_SECRET_KEY          hmac key for signature verification
 //   SUPABASE_URL                 provided by the platform
 //   SUPABASE_SERVICE_ROLE_KEY    provided by the platform
+//
+// 0067: after a verified delivery has been recorded, the webhook also
+// switches off any Paystack subscription that a newer one has replaced (a
+// plan change), so nobody pays for two plans. That runs in the background
+// and never changes what Paystack is told about the event itself.
 // ============================================================================
 
 import {
@@ -18,6 +23,8 @@ import {
   hmacSha512Hex,
   sha256Hex,
   redact,
+  paystackCaller,
+  switchOffReplaced,
 } from "./lib.ts";
 
 async function rpc(fn: string, args: Record<string, unknown>) {
@@ -35,6 +42,23 @@ async function rpc(fn: string, args: Record<string, unknown>) {
     throw new Error(`rpc ${fn} failed with ${res.status}`);
   }
   return await res.json();
+}
+
+/** Switch off replaced subscriptions without holding up Paystack's request.
+ *  EdgeRuntime.waitUntil keeps the work alive after the response is sent;
+ *  where it does not exist (local runs) the work is simply awaited. */
+async function afterDelivery(secret: string): Promise<void> {
+  const work = switchOffReplaced(rpc, paystackCaller(secret), 3)
+    .then((done) => {
+      for (const d of done) {
+        console.log(`paystack-webhook: switch-off ${d.code}: ${d.outcome}${d.recorded ? "" : " (NOT recorded)"}`);
+      }
+    })
+    .catch((e) => console.error("paystack-webhook: switch-off sweep failed", String(e)));
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt && typeof rt.waitUntil === "function") rt.waitUntil(work);
+  else await work;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -112,7 +136,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (ingest.action === "duplicate" || ingest.action === "lost_race") {
       // already recorded, or another worker holds it. Either way Paystack is
-      // done: a redelivery must not be treated as a new payment.
+      // done: a redelivery must not be treated as a new payment. A redelivery
+      // is still a good moment to retry a pending switch-off.
+      await afterDelivery(secret);
       return new Response(ingest.action, { status: 200 });
     }
 
@@ -123,6 +149,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (applied.status === "failed_transient") {
       return new Response("retry", { status: 500 });
     }
+
+    // 0067: switch off whatever this event (or an earlier one) replaced
+    await afterDelivery(secret);
     return new Response(applied.status, { status: 200 });
   } catch (e) {
     // the database is unreachable: ask Paystack to redeliver

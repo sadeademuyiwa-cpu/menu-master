@@ -25,16 +25,12 @@ export const MEASURE_REMOVE_ROLES = ['owner', 'manager'] as const
 /** suppliers: INSERT and UPDATE (0015). Hiding one is an update. */
 export const SUPPLIER_ROLES = ['owner', 'manager', 'accountant'] as const
 
-/**
- * What an UPDATE or DELETE that changed no row says. Row-level security
- * refuses those quietly, with no error and zero rows (a lapsed subscription
- * does it to every role), so the screens ask for the changed rows back and
- * say this rather than "Saved." The row may also have gone or moved on in
- * another tab; this does not guess which.
+/*
+ * What an UPDATE or DELETE that changed no row says is no longer here: it
+ * names the real reason now (the trial ended, a payment failed, the role) and
+ * lives with the other refusals in lib/data/write-notice.ts, reached through
+ * writeNotice and refusalNotice in lib/data/context.ts.
  */
-export const NOT_CHANGED =
-  'Nothing was changed. It may have been changed already, or your subscription ' +
-  'or your role on this account does not allow it at the moment.'
 
 const has = (roles: readonly string[], role: string | null | undefined) => roles.includes(role ?? '')
 

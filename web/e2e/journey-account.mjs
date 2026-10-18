@@ -8,21 +8,48 @@
  *   the trial and its days left are on every page, with a way to the plans
  *   the plans page says where the account stands and what each plan costs
  *   an ended trial says so, and that nothing entered is lost
+ *   after the trial an edit says "Nothing was changed" and why, and costs
+ *     nothing again; a purchase cannot be recorded, cancelled or corrected;
+ *     and a balance owed on a confirmed sale can still be recorded (0066)
  *   sign out is reachable, and so is "Forgot password?"
  *   a reset link signs you in to choose a new password, once
  *   an expired or edited link never leaves the site
+ *   /api/billing takes only our own pages' JSON requests
+ *   a paying owner sees "Your plan" and is refused a second payment for it
+ *   with the web's billing switch ON (BILLING_SELF_SERVE=on on the server):
+ *     the other plan is a switch, past a caution; Cancel plan asks first,
+ *     names the end date and warns a founder; a cancelled plan says when it
+ *     ends and can be chosen again ("a new paid month today"); a failed
+ *     payment offers Pay now, Update your card and Cancel plan ("recording
+ *     stops straight away"); the refunds page and terms promise those buttons
+ *   with the switch OFF (anything but "on"): no self-serve button for a
+ *     paying account, "message us" instead, checkout answers
+ *     switch_needs_support, /api/billing answers not_configured, and the
+ *     refunds page and terms say "message us"
+ *   staff see no cancel, card, switch or Pay now button, and the routes
+ *     refuse them
+ *
+ * Plans & billing tells the journey which state the server is in
+ * (data-self-serve), so run it twice: once with BILLING_SELF_SERVE=on in the
+ * app's environment, once without.
+ *
+ * This stack serves no edge functions (the gateway answers 404 for
+ * /functions/v1/*), so a real cancel or card request is expected to be
+ * refused in plain words, and the subscription row to stay as it was: only
+ * the webhook ever writes it.
  *
  * Email links come from the local gateway's stand-in mailbox
  * (/__local/last-mail), which exists only in e2e/supabase-local.mjs.
  */
 import { chromium } from 'playwright'
 import pg from 'pg'
-import { onboardBusiness, finishSetup } from './setup-helper.mjs'
+import { onboardBusiness, finishSetup, openDetails } from './setup-helper.mjs'
 
 const BASE = 'http://127.0.0.1:3100'
 const GATEWAY = 'http://127.0.0.1:54321'
 const stamp = Date.now()
 const A = { email: `acct-${stamp}@test.ng`, pass: 'correct-horse-battery' }
+const S = { email: `acct-sales-${stamp}@test.ng`, pass: 'correct-horse-battery' }
 
 const results = []
 const mark = (name, ok, detail = '') => {
@@ -57,6 +84,15 @@ async function waitText(page, needle, ms = 30000) {
   return false
 }
 const path = (page) => new URL(page.url()).pathname
+/** Press a form's button and wait for the page it lands on. */
+async function submit(page, locator) {
+  await Promise.all([page.waitForLoadState('domcontentloaded'), locator.click()])
+  await settle(page)
+  await page.locator('button[aria-busy="true"]').first().waitFor({ state: 'detached', timeout: 20000 }).catch(() => {})
+}
+/** This owner's own rows, read straight from the database. */
+const OWN = `join memberships m on m.account_id = t.account_id
+             join auth.users u on u.id = m.user_id and u.email = $1`
 
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
@@ -91,6 +127,33 @@ try {
   await settle(page)
   await must(page, 'the plans page says where the account stands',
     'Free trial', 'days left', 'Costing', 'Costing + Sales', '/month', 'What happens when my free trial ends?')
+
+  // --- a sale with a balance still owed, while the trial runs ----------------
+  // The same order screen as journey-sales.mjs: two plates at N500, confirmed,
+  // then a N300 deposit recorded on the sale's own page.
+  await go(page, '/sales/new')
+  await page.waitForTimeout(600)
+  await page.click('button[aria-label="Add Setup pepper soup"]')
+  if (!(await page.locator('dialog[open]').count())) {
+    await page.click('button[aria-label^="How many Setup pepper soup"]')
+  }
+  await page.fill('dialog[open] input[name=item_qty]', '2')
+  await page.fill('dialog[open] input[name=item_price]', '500')
+  await page.click('dialog[open] button:has-text("Done")')
+  await page.click('button:has-text("Next")')
+  await page.click('button:has-text("Confirm sale")')
+  await page.waitForURL(/\/sales\/[0-9a-f-]{36}/, { timeout: 60000 })
+  await settle(page)
+  const saleId = path(page).split('/').pop()
+  // A new sale is recorded as paid in full unless told otherwise, so the
+  // payment form sits under "Change the payment"; open it to take a deposit.
+  if (await page.locator('details:has(> summary:has-text("Change the payment"))').count()) {
+    await openDetails(page, 'Change the payment')
+  }
+  await page.fill('input[name=amount_paid]', '300')
+  await page.locator('select[name=payment_status]').selectOption('part_paid')
+  await submit(page, page.locator('button:has-text("Save payment")'))
+  await must(page, 'during the trial a deposit is recorded and the balance shown', 'Payment updated.', 'still to pay')
 
   // --- More, Account, sign out ----------------------------------------------
   await go(page, '/more')
@@ -167,9 +230,312 @@ try {
   await must(page, 'and says nothing entered is lost, with the way back', 'Your free trial ended', 'Everything you entered is still here to read', 'Choose a plan')
   await go(page, '/subscribe')
   await must(page, 'the plans page says the trial has ended', 'ended')
+  mark('an ended trial may pay for either plan', (await page.locator('[data-plan-action=pay]').count()) === 2)
+
+  // --- after the trial: an edit changes nothing, and says why (APP1) ----------
+  const { rows: [own] } = await db.query(
+    `select (select t.id from recipes t ${OWN} where t.name = 'Setup pepper soup' and t.deleted_at is null limit 1) as recipe_id,
+            (select t.id from purchases t ${OWN} where t.status = 'posted' and t.reverses is null
+              order by t.created_at limit 1) as purchase_id,
+            (select count(*)::int from cost_snapshots t ${OWN}) as snapshots,
+            (select count(*)::int from ingredient_prices t ${OWN}) as prices`, [A.email])
+  mark('(test) the setup dish and purchase were found', !!own?.recipe_id && !!own?.purchase_id, JSON.stringify(own))
+
+  await go(page, '/settings')
+  await page.locator('form:has(select[name=type]) input[name=name]').fill('Renamed after the trial')
+  await submit(page, page.locator('form:has(select[name=type]) button:has-text("Save")'))
+  await must(page, 'after the trial, saving Business details says nothing was changed, and why',
+    'Nothing was changed', 'Your free trial ended on', 'Choose a plan', 'Everything you entered is still here')
+  await mustNot(page, 'and never claims it was saved', 'Business details saved.')
+
+  await go(page, `/recipes/${own.recipe_id}`)
+  await openDetails(page, 'Edit this dish')
+  const editDish = page.locator('details:has(> summary:has-text("Edit this dish"))').first()
+  await editDish.locator('input[name=name]').fill('Setup pepper soup renamed')
+  await submit(page, editDish.locator('button:has-text("Save changes")'))
+  await must(page, 'after the trial, renaming a dish says nothing was changed, and why', 'Nothing was changed', 'Your free trial ended on')
+  await mustNot(page, 'and does not claim the dish was updated', 'Dish updated.')
+
+  // --- a recorded purchase can be neither cancelled nor corrected (APP2) ------
+  await go(page, `/purchases/${own.purchase_id}`)
+  await must(page, 'after the trial a recorded purchase says why it cannot be changed',
+    'can’t be cancelled or corrected', 'Choose a plan')
+  await mustNot(page, 'and offers no correction and no cancellation', 'Correct this purchase', 'Cancel it without a replacement')
+  await go(page, `/purchases/${own.purchase_id}/correct`)
+  mark('the correction page sends an ended trial back to the purchase', path(page) === `/purchases/${own.purchase_id}`, page.url())
+  await must(page, 'and says why', 'free trial ended', 'can’t be cancelled or corrected')
+  await go(page, '/purchases/new')
+  mark('a new purchase sends an ended trial back to Purchases', path(page) === '/purchases', page.url())
+  await must(page, 'and says why', 'new purchases can’t be recorded')
+  mark('Purchases has no New purchase button after the trial',
+    (await page.locator('a.mm-btn[href="/purchases/new"]').count()) === 0)
+  // --- and a new sale is not typed in only to be refused at Confirm ----------
+  await go(page, '/sales/new')
+  mark('a new sale sends an ended trial back to Sales', path(page) === '/sales', page.url())
+  await must(page, 'and says why', 'new sales can’t be recorded')
+  mark('Sales has no New sale button after the trial',
+    (await page.locator('a.mm-btn[href="/sales/new"]').count()) === 0)
+  await go(page, '/dashboard')
+  mark('Home offers neither Record a sale nor Record a purchase after the trial',
+    (await page.locator('a.mm-btn[href="/sales/new"], a.mm-btn[href="/purchases/new"]').count()) === 0)
+
+  const { rows: [after] } = await db.query(
+    `select (select count(*)::int from cost_snapshots t ${OWN}) as snapshots,
+            (select count(*)::int from ingredient_prices t ${OWN}) as prices`, [A.email])
+  mark('none of that re-costed a dish or wrote a price', after.snapshots === own.snapshots && after.prices === own.prices,
+    `snapshots ${own.snapshots} -> ${after.snapshots}, prices ${own.prices} -> ${after.prices}`)
+
+  // --- money owed on a confirmed sale can still come in (D2, 0066) ------------
+  await go(page, `/sales/${saleId}`)
+  await must(page, 'after the trial the sale still says what is owed, and that it can be recorded',
+    'still to pay', 'can still be recorded')
+  await mustNot(page, 'but it can no longer be cancelled', 'Something is wrong with this sale')
+  await page.fill('input[name=amount_paid]', '1000')
+  await page.locator('select[name=payment_status]').selectOption('paid')
+  await submit(page, page.locator('button:has-text("Save payment")'))
+  await must(page, 'after the trial the balance is recorded and the sale reads paid', 'Payment updated.', 'Paid in full')
+  const { rows: [paidRow] } = await db.query('select amount_paid::text as paid, payment_status::text as status from orders where id = $1', [saleId])
+  mark('and the database holds the payment', paidRow?.status === 'paid' && Number(paidRow?.paid) === 1000, JSON.stringify(paidRow))
+
+
+  // --- a paying account ---------------------------------------------------------
+  // (test) Paystack is not reachable from this stack, so the row is set the
+  // way the webhook leaves it after a Costing payment.
+  const setSub = (sql, label) => db.query(
+    `update subscriptions s set ${sql}
+       from memberships m join auth.users u on u.id = m.user_id
+      where m.account_id = s.account_id and u.email = $1`, [A.email])
+    .then(({ rowCount }) => mark(`(test) ${label}`, rowCount === 1, `rows ${rowCount}`))
+  const subRow = async () => (await db.query(
+    `select s.status, s.cancel_at_period_end from subscriptions s
+       join memberships m on m.account_id = s.account_id join auth.users u on u.id = m.user_id
+      where u.email = $1`, [A.email])).rows[0]
+  const postAs = (p, url, body, type = 'application/json') => p.evaluate(async ([u, b, t]) => {
+    const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': t }, body: JSON.stringify(b) })
+    return { status: r.status, body: await r.json().catch(() => ({})) }
+  }, [url, body, type])
+  const post = (url, body, type) => postAs(page, url, body, type)
+  const actionOf = (p, blurb) => p.locator(`.mm-card:has-text("${blurb}") [data-plan-action]`).first().getAttribute('data-plan-action')
+  const buttons = async (p, label) => p.locator(`button:has-text("${label}")`).count()
+  const COSTING = 'Know what your food costs'
+  const TRADING = 'everything you sell'
+  const MESSAGE_US = 'To change or cancel your plan, message us. We do it for you, so you are never charged twice.'
+  // The web's own refusals; anything else came from the (absent) edge function.
+  const WEB_REFUSALS = ['already_on_plan', 'owner_only', 'switch_needs_support', 'plan_unreadable']
+
+  // (test) Local plans carry no Paystack plan code, so every plan button
+  // would read "Online payment unavailable" and stay disabled. Give the
+  // active plans a stand-in code for this journey; the finally block takes
+  // them away again. Nothing here reaches Paystack.
+  const { rowCount: coded } = await db.query(
+    `update plans set provider_plan_code = 'PLN_e2e_' || id where is_active and provider_plan_code is null`)
+  mark('(test) the local plans can be paid for online', coded >= 0, `plans given a stand-in code: ${coded}`)
+
+  await setSub(`plan_id = 'costing', status = 'active', cancel_at_period_end = false,
+                founding_price_active = false, current_period_end = now() + interval '20 days'`,
+    'the account now pays for Costing')
+  await go(page, '/subscribe')
+  // The web's billing safety switch (BILLING_SELF_SERVE, exactly "on") on
+  // this server decides which half below applies. Run the journey once with
+  // it on and once without.
+  const selfServe = (await page.locator('[data-self-serve]').first().getAttribute('data-self-serve')) === 'on'
+  console.log(`      (this server's BILLING_SELF_SERVE is ${selfServe ? 'on' : 'not on'})`)
+  await must(page, 'Plans & billing says which plan is paid for and when it renews', 'You are on Costing', 'renewing on')
+  await mustNot(page, 'and never invites a second payment', 'Choose your plan below to pay again')
+  mark('the plan paid for reads "Your plan" and cannot be pressed',
+    (await actionOf(page, COSTING)) === 'your_plan'
+      && await page.locator('[data-plan-action=your_plan] button:has-text("Your plan")').isDisabled())
+  const again = await post('/api/checkout', { tier: 'costing' })
+  mark('paying again for the plan already paid for is refused', again.status === 409 && again.body.error === 'already_on_plan', JSON.stringify(again))
+
+  // The billing route takes only our own pages' JSON requests.
+  // Sent with the owner's own signed-in session (page.request shares the
+  // browser's cookies), so it reaches the route and only Origin differs; a
+  // request with no session is sent to the sign-in page before that.
+  const foreign = await page.request.post(`${BASE}/api/billing`, {
+    headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' },
+    data: JSON.stringify({ action: 'cancel' }), maxRedirects: 0,
+  }).then(async (r) => ({ status: r.status(), body: await r.json().catch(() => ({})) }))
+  mark('another site cannot ask /api/billing to cancel', foreign.status === 403 && foreign.body.error === 'bad_origin', JSON.stringify(foreign))
+  const notJson = await post('/api/billing', { action: 'cancel' }, 'text/plain')
+  mark('and a body not sent as JSON is refused', notJson.status === 415 && notJson.body.error === 'bad_request', JSON.stringify(notJson))
+
+  if (selfServe) {
+    // --- switch on: switching plan -----------------------------------------------
+    await must(page, 'the owner is told plans change here and cancel on Account', 'Change plan here', 'cancel from your Account page')
+    mark('the other plan is offered as a switch', (await actionOf(page, TRADING)) === 'change')
+    await page.click('button:has-text("Switch to this plan")')
+    await must(page, 'switching shows the caution before any payment',
+      'Your new plan starts the day you pay and your old plan stops', 'never charged for both',
+      'Unused days on the old plan are not refunded', 'Pay for Costing + Sales')
+    await page.click('button:has-text("Not now")')
+    mark('"Not now" closes it, and nothing is paid', (await buttons(page, 'Pay for Costing + Sales')) === 0)
+
+    // --- switch on: cancelling ---------------------------------------------------
+    await go(page, '/account')
+    await must(page, 'the owner sees when the plan renews, can change it or cancel, and how to get a copy',
+      'Renews on', 'Change your plan', 'Cancel plan', 'copy of your records', 'within one working day')
+    await mustNot(page, 'the Account page promises no export', 'export')
+    await page.click('button:has-text("Cancel plan")')
+    await must(page, 'cancelling asks first, and says what happens',
+      'Your plan stays on until', 'you can still open and read everything', 'cannot record new work',
+      'You will not be charged again', 'There is no undo', 'Keep my plan', 'Yes, cancel my plan')
+    await mustNot(page, 'a plan on the standard price is not warned about the founding price', 'You are on the founding price')
+    await page.click('button:has-text("Keep my plan")')
+    mark('"Keep my plan" changes nothing', (await buttons(page, 'Yes, cancel my plan')) === 0)
+
+    await page.click('button:has-text("Cancel plan")')
+    await page.click('button:has-text("Yes, cancel my plan")')
+    await waitText(page, 'Nothing has changed', 15000)
+    await must(page, 'with no billing service here, the cancel is refused in plain words', 'Nothing has changed', 'within one working day')
+    const kept = await subRow()
+    mark('and the plan is left as it was: only the webhook writes it',
+      kept?.status === 'active' && kept?.cancel_at_period_end === false, JSON.stringify(kept))
+
+    await setSub(`founding_price_active = true`, 'the account is on the founding price')
+    await go(page, '/account')
+    await page.click('button:has-text("Cancel plan")')
+    await must(page, 'a founder is warned that cancelling loses the founding price', 'You are on the founding price', 'standard price')
+
+    // Paystack's not_renew, as 0067's webhook records it (X8).
+    await setSub(`status = 'cancelled', cancel_at_period_end = true`, 'the plan is cancelled, paid month still running')
+    await go(page, '/account')
+    await must(page, 'after cancelling, the end date is said, with no further charge', 'Your plan ends on', 'You will not be charged again', 'Ends on')
+    mark('and there is no second Cancel plan', (await buttons(page, 'Cancel plan')) === 0)
+    await go(page, '/subscribe')
+    await must(page, 'Plans & billing says the same', 'Your plan ends on', 'Not renewing')
+    mark('the cancelled plan can be chosen again', (await actionOf(page, COSTING)) === 'change'
+      && (await buttons(page, 'Choose this plan again')) === 1)
+    await page.click('button:has-text("Choose this plan again")')
+    await must(page, 'choosing it again says a new paid month starts today',
+      'Your plan is on until', 'Choosing it again starts a new paid month today')
+    await page.click('button:has-text("Not now")')
+    const back = await post('/api/checkout', { tier: 'costing' })
+    mark('and checkout lets it through to the edge function', !WEB_REFUSALS.includes(back.body.error), JSON.stringify(back))
+
+    // --- switch on: a failed payment ---------------------------------------------
+    await setSub(`status = 'past_due', cancel_at_period_end = false, current_period_end = now() - interval '1 day'`,
+      'the last renewal failed, inside the grace period')
+    await go(page, '/subscribe')
+    await must(page, 'a failed payment offers Pay now and Update your card, and says nothing is charged twice',
+      'We could not take your last payment', 'Pay now', 'Update your card',
+      'The failed plan is switched off, so you are never charged twice')
+    mark('the plan paid for offers "Pay now"', (await actionOf(page, COSTING)) === 'pay_now')
+    mark('the other plan can still be switched to', (await actionOf(page, TRADING)) === 'change')
+    const payAgain = await post('/api/checkout', { tier: 'costing' })
+    mark('paying again for the overdue plan is not refused by the web (it replaces the failed one)',
+      !WEB_REFUSALS.includes(payAgain.body.error), JSON.stringify(payAgain))
+    await go(page, '/account')
+    await must(page, 'Account offers the owner Pay now, Update your card and Cancel plan', 'Pay now', 'Update your card', 'Cancel plan')
+    await page.click('button:has-text("Cancel plan")')
+    await must(page, 'an overdue cancel says recording stops straight away',
+      'Your last payment did not go through', 'recording stops straight away', 'You will not be charged again')
+    await page.click('button:has-text("Keep my plan")')
+    await page.click('button:has-text("Update your card")')
+    await waitText(page, 'Nothing has changed', 15000)
+    await must(page, 'with no billing service here, the card link is refused in plain words', 'Nothing has changed')
+
+    await go(page, '/refunds')
+    await must(page, 'the refunds page promises the buttons the owner has', 'press Cancel plan', 'Pay now or Update your card')
+    await go(page, '/terms')
+    await must(page, 'and so do the terms', 'from the Account page', 'Plans & billing page')
+  } else {
+    // --- switch off: nothing self-serve for a paying account ---------------------
+    await must(page, 'the owner is told to message us to change or cancel', MESSAGE_US)
+    mark('the other plan offers no switch, only "message us"', (await actionOf(page, TRADING)) === 'message_us'
+      && (await buttons(page, 'Switch to this plan')) === 0)
+    const sw = await post('/api/checkout', { tier: 'trading' })
+    mark('checkout refuses a paying account\'s switch while the switch is off',
+      sw.status === 409 && sw.body.error === 'switch_needs_support', JSON.stringify(sw))
+
+    await go(page, '/account')
+    await must(page, 'Account tells the owner to message us, and how to get a copy', MESSAGE_US, 'copy of your records', 'within one working day')
+    await mustNot(page, 'the Account page promises no export', 'export')
+    for (const b of ['Cancel plan', 'Update your card', 'Pay now']) {
+      mark(`no "${b}" on Account while the switch is off`, (await buttons(page, b)) === 0)
+    }
+    const c = await post('/api/billing', { action: 'cancel' })
+    mark('the billing route answers not_configured', c.status === 500 && c.body.error === 'not_configured', JSON.stringify(c))
+    const kept = await subRow()
+    mark('and the plan is left as it was', kept?.status === 'active' && kept?.cancel_at_period_end === false, JSON.stringify(kept))
+
+    await setSub(`status = 'cancelled', cancel_at_period_end = true`, 'the plan is cancelled, paid month still running')
+    await go(page, '/subscribe')
+    await must(page, 'a cancelled plan says when it ends', 'Your plan ends on', 'Not renewing')
+    mark('and is not chosen again by itself while the switch is off',
+      (await actionOf(page, COSTING)) === 'message_us' && (await actionOf(page, TRADING)) === 'message_us')
+    const re = await post('/api/checkout', { tier: 'costing' })
+    mark('checkout refuses it too', re.status === 409 && re.body.error === 'switch_needs_support', JSON.stringify(re))
+
+    await setSub(`status = 'past_due', cancel_at_period_end = false, current_period_end = now() - interval '1 day'`,
+      'the last renewal failed, inside the grace period')
+    await go(page, '/subscribe')
+    await must(page, 'a failed payment tells the owner to message us', 'We could not take your last payment', 'Message us')
+    for (const b of ['Pay now', 'Update your card']) {
+      mark(`no "${b}" on Plans & billing while the switch is off`, (await buttons(page, b)) === 0)
+    }
+    const owed = await post('/api/checkout', { tier: 'costing' })
+    mark('and checkout refuses paying again by itself', owed.status === 409 && owed.body.error === 'switch_needs_support', JSON.stringify(owed))
+    await go(page, '/account')
+    for (const b of ['Pay now', 'Update your card', 'Cancel plan']) {
+      mark(`no "${b}" on Account for an overdue plan while the switch is off`, (await buttons(page, b)) === 0)
+    }
+
+    await go(page, '/refunds')
+    await must(page, 'the refunds page says to message us', 'message us and we cancel it for you within one working day')
+    await mustNot(page, 'and promises no button the owner cannot see', 'press Cancel plan', 'Pay now', 'Update your card')
+    await go(page, '/terms')
+    await must(page, 'and so do the terms', 'by messaging us')
+    await mustNot(page, 'with no button promised', 'from the Account page')
+  }
+
+  // --- staff on a paying account (the row is past_due here) ----------------------
+  await go(page, '/settings/people')
+  await page.fill('input[name=email]', S.email)
+  await page.selectOption('select[name=role]', 'sales')
+  await page.click('form:has(input[name=email]) button[type=submit]')
+  await waitText(page, `${S.email} invited`)
+  const staffCtx = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const staff = await staffCtx.newPage()
+  await go(staff, `/signup?email=${encodeURIComponent(S.email)}`)
+  await staff.fill('input[type=email]', S.email)
+  await staff.fill('input[type=password]', S.pass)
+  await staff.click('button[type=submit]')
+  // The invitation is accepted on the first page that looks up the account,
+  // which can come a moment after sign-up has already sent the browser to
+  // setup. As people.mjs does: open Home until it is Home.
+  await staff.waitForURL((u) => !u.pathname.startsWith('/signup'), { timeout: 60000 })
+  for (let i = 0; i < 25 && path(staff) !== '/dashboard'; i++) {
+    await go(staff, '/dashboard')
+    if (path(staff) !== '/dashboard') await staff.waitForTimeout(400)
+  }
+  mark('the invited staff member lands in the business', path(staff) === '/dashboard', staff.url())
+  await go(staff, '/subscribe')
+  await must(staff, 'staff are told plan changes are the owner\'s', 'Plan changes are made by the account owner.')
+  await mustNot(staff, 'and are not told to change or cancel it themselves', 'Change plan here', 'cancel from your Account page')
+  for (const b of ['Switch to this plan', 'Update your card', 'Choose plan', 'Pay now']) {
+    mark(`staff see no "${b}" button`, (await buttons(staff, b)) === 0)
+  }
+  await go(staff, '/account')
+  await must(staff, 'Account tells staff the owner handles billing', 'Plan changes are made by the account owner.')
+  for (const b of ['Cancel plan', 'Update your card', 'Pay now']) {
+    mark(`staff see no "${b}" on Account`, (await buttons(staff, b)) === 0)
+  }
+  // With the switch off the billing route answers not_configured to everyone.
+  const staffBilling = selfServe ? { status: 403, error: 'owner_only' } : { status: 500, error: 'not_configured' }
+  const sCancel = await postAs(staff, '/api/billing', { action: 'cancel' })
+  mark('the billing route refuses a staff cancel', sCancel.status === staffBilling.status && sCancel.body.error === staffBilling.error, JSON.stringify(sCancel))
+  const sCard = await postAs(staff, '/api/billing', { action: 'card_link' })
+  mark('and a staff card change', sCard.status === staffBilling.status && sCard.body.error === staffBilling.error, JSON.stringify(sCard))
+  const sSwitch = await postAs(staff, '/api/checkout', { tier: 'trading' })
+  mark('the checkout route refuses a staff plan change', sSwitch.status === 403 && sSwitch.body.error === 'owner_only', JSON.stringify(sSwitch))
+  const sPay = await postAs(staff, '/api/checkout', { tier: 'costing' })
+  mark('and a staff Pay now', sPay.status === 403 && sPay.body.error === 'owner_only', JSON.stringify(sPay))
+  await staffCtx.close()
 } catch (e) {
   mark('the journey ran to the end', false, String(e?.stack ?? e))
 } finally {
+  await db.query(`update plans set provider_plan_code = null where provider_plan_code like 'PLN\_e2e\_%'`).catch(() => {})
   await browser.close()
   await db.end()
 }

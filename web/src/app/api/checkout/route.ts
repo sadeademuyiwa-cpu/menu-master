@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { currentContext } from '@/lib/data/context'
+import { checkoutGate } from '@/app/(app)/subscribe/billing-choices'
+import { billingSelfServe } from '@/lib/site/billing-words'
 
 /**
  * Checkout initialization, proxied.
@@ -14,11 +16,30 @@ import { createClient } from '@/lib/supabase/server'
  *   Proving the caller is signed in before anything reaches Paystack, and
  *   keeping the request on our own origin. It forwards the user's own access
  *   token and the tier they chose. Nothing else crosses.
+ *
+ * THE REFUSALS, ANSWERED HERE FIRST (K4 as amended by X2-X4)
+ *   already_on_plan (409): this tier is already paid for and renewing
+ *   (active). A past_due account may pay again on its own tier: that new
+ *   subscription replaces the failed one (X2).
+ *   owner_only (403): the account is already paying and the caller is not its
+ *   owner.
+ *   switch_needs_support (409): the account is already paying and the web's
+ *   safety switch is off (BILLING_SELF_SERVE is not exactly "on",
+ *   lib/site/billing-words.ts). Until 0067 and the new webhook are live,
+ *   nothing would switch the old Paystack subscription off. A trial's first
+ *   payment is never refused by the switch.
+ *   plan_unreadable (503): we could not tell whether the account already pays
+ *   (a read failed, or the plan's tier is unknown). Fails closed.
+ *   paystack-checkout makes its own refusals before any quote or founder hold,
+ *   and is the authority. These are repeated here from the caller's own reads
+ *   (the same rules, billing-choices.ts checkoutGate) so a refusal never
+ *   depends on which edge function version is deployed. This route only
+ *   refuses.
  */
 export async function POST(request: NextRequest) {
-  const supabase = await createClient()
+  const { supabase, status, accountId, role } = await currentContext()
   const { data: { session } } = await supabase.auth.getSession()
-  if (!session) {
+  if (status === 'unauthenticated' || !session) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
 
@@ -29,6 +50,34 @@ export async function POST(request: NextRequest) {
   if (tier !== 'costing' && tier !== 'trading') {
     return NextResponse.json({ error: 'choose_costing_or_trading' }, { status: 400 })
   }
+
+  // The account the app shows (the oldest membership), the same one
+  // paystack-checkout bills. Read with the caller's own session.
+  type Sub = {
+    plan_id: string; status: string
+    current_period_end: string | null; cancel_at_period_end: boolean | null
+  }
+  let sub: Sub | null = null
+  let subError = false
+  let planTier: string | null = null
+  if (accountId) {
+    const subRead = await supabase.from('subscriptions')
+      .select('plan_id,status,current_period_end,cancel_at_period_end')
+      .eq('account_id', accountId)
+      .maybeSingle<Sub>()
+    sub = subRead.data ?? null
+    subError = Boolean(subRead.error)
+    if (sub) {
+      const { data: plan } = await supabase.from('plans').select('tier')
+        .eq('id', sub.plan_id).maybeSingle<{ tier: string }>()
+      planTier = plan?.tier ?? null
+    }
+  }
+  const refusal = checkoutGate({
+    contextStatus: status, accountId, role, subError, sub, planTier, tier,
+    selfServe: billingSelfServe(),
+  })
+  if (refusal) return NextResponse.json({ error: refusal.error }, { status: refusal.status })
 
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL
   if (!base) {
