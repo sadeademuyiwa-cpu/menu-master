@@ -16,6 +16,13 @@ test('alert kinds read as words, unknown ones too', () => {
   assert.equal(alertWords('something_else'), 'something else')
 })
 
+test('the four billing alert kinds from 0067 have their own words', () => {
+  assert.equal(alertWords('subscription_not_switched_off'), 'Old Paystack subscription not switched off')
+  assert.equal(alertWords('superseded_subscription_charged'), 'Replaced subscription took a payment (refund it)')
+  assert.equal(alertWords('cancel_not_confirmed'), 'Cancel not confirmed by Paystack')
+  assert.equal(alertWords('possible_double_charge'), 'Possible double charge')
+})
+
 test('severity maps to the badge tones the app already uses', () => {
   assert.equal(severityTone('critical'), 'bad')
   assert.equal(severityTone('warn'), 'warn')

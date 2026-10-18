@@ -252,7 +252,7 @@ The full table, with what each one must show, is `DEPLOY_0067.md`
 | T9 | A test subscription renews | **write down whether a renewal charge carries our metadata or a subscription code**; it is applied to the current plan, and a renewal of a replaced subscription is `ignored` `superseded_charge` |
 | T10 | A renewal fails (a declining test card), then the overdue owner presses **Pay now** on the same plan | goes ahead; the account is `active` with a new month; the failed subscription is switched off; **one** Active subscription |
 | T11 | Another overdue owner presses **Cancel plan** | `ends_on` empty; the account is `cancelled` and read-only at once; a founder loses the founding price |
-| T12 | Cancel plan or Update your card in a second tab while a plan change is finishing | refused, `change_in_progress` (the window is seconds; if you cannot catch it, the automated tests cover it) |
+| T12 | Cancel plan, Update your card, or choosing a plan again, in a second tab while a plan change is finishing | refused, `change_in_progress` (the window is seconds; if you cannot catch it, the automated tests cover it) |
 | T13 | Switch off a second subscription of a paying test customer in the dashboard without recording it first | its notices are held `failed_permanent` `not_current_subscription`; the account is unchanged |
 
 **All must pass.** One that fails: leave the edge switch `off` and the
