@@ -5,15 +5,20 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/button'
 import { Notice } from '@/components/ui'
 import {
-  FOUNDER_WARNING, billingErrorText, cancelConfirmText, endingText, lagosLongDate,
+  CANCELLED_NOW_TEXT, FOUNDER_WARNING, billingErrorText, cancelConfirmText, endingText, lagosLongDate,
 } from '@/app/(app)/subscribe/billing-choices'
 
 /**
  * "Cancel plan", with one plain confirm step first.
  *
- * Shown only to the OWNER of an account that is paying and still renewing
+ * Shown only to the OWNER of an account that is still renewing, or whose
+ * last payment failed (X1), and only while the web's safety switch is on
  * (subscribe/billing-choices.ts, accountBilling). That is a courtesy:
  * /api/billing and paystack-manage both refuse anyone else on the server.
+ *
+ * An overdue plan has no paid month left, so the confirm step says recording
+ * stops straight away, and afterwards that the plan is cancelled, not that
+ * it "ends on" a date already past.
  *
  * Cancelling stops renewal at Paystack. Nothing here writes the subscription
  * row: the webhook records it when Paystack's subscription.not_renew arrives,
@@ -21,9 +26,11 @@ import {
  * still show the old row for a moment. There is no undo; the owner chooses a
  * plan again.
  */
-export function CancelPlan({ endsOn, founder, support }: {
+export function CancelPlan({ endsOn, overdue = false, founder, support }: {
   /** The paid-through date in words ("18 November 2026"), or null when unknown. */
   endsOn: string | null
+  /** The last payment failed (past_due). */
+  overdue?: boolean
   /** On the founding price: they are warned it is lost. */
   founder: boolean
   /** How to reach us, rendered on the server (components/legal-page.tsx). */
@@ -55,7 +62,7 @@ export function CancelPlan({ endsOn, founder, support }: {
       const code = body?.error
       setError({
         text: billingErrorText(code, 'cancel'),
-        askUs: code === 'no_subscription' || code === 'not_configured',
+        askUs: code === 'no_subscription' || code === 'not_configured' || code === 'switch_needs_support',
       })
     } catch {
       setError({ text: billingErrorText(null, 'cancel'), askUs: false })
@@ -64,7 +71,7 @@ export function CancelPlan({ endsOn, founder, support }: {
   }
 
   if (stage === 'done') {
-    return <Notice tone="info">{endingText(doneOn)}</Notice>
+    return <Notice tone="info">{overdue ? CANCELLED_NOW_TEXT : endingText(doneOn)}</Notice>
   }
 
   if (stage === 'idle') {
@@ -78,7 +85,7 @@ export function CancelPlan({ endsOn, founder, support }: {
   return (
     <div role="group" aria-label="Cancel your plan" className="mm-card space-y-3">
       <p className="font-semibold">Cancel your plan?</p>
-      <p className="text-sm">{cancelConfirmText(endsOn)}</p>
+      <p className="text-sm">{cancelConfirmText(endsOn, overdue)}</p>
       {founder && <Notice tone="warn"><span className="text-sm">{FOUNDER_WARNING}</span></Notice>}
       <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
         There is no undo. To carry on later, you choose a plan again.

@@ -6,9 +6,14 @@ import { PageHeader, Card, Badge, Disclosure, SectionHeading, BackLink } from '@
 import { money } from '@/lib/format'
 import { parentTab } from '@/lib/nav'
 import { daysLeft, planStatusLabel } from '@/lib/trial'
-import { PlanChooser } from '@/components/plan-chooser'
+import { PlanChooser, type PlanRow } from '@/components/plan-chooser'
 import { COSTING_FEATURES, TRADING_FEATURES, PLAN_FAQ as FAQ } from '@/lib/site/plan-features'
-import { accountBilling, changeLabel, endingText, isPaying, lagosLongDate, planAction } from './billing-choices'
+import { SupportContact } from '@/components/legal-page'
+import { MESSAGE_US, billingSelfServe } from '@/lib/site/billing-words'
+import {
+  accountBilling, changeCaution, changeLabel, endingText, isLive, lagosLongDate,
+  planAction, subscribeHeader,
+} from './billing-choices'
 import Loading from './skeleton'
 
 export const dynamic = 'force-dynamic'
@@ -34,11 +39,13 @@ async function SubscribePageBody() {
     : { data: null }
 
   // What each card and the status line offer: decided here, on the server,
-  // from the row and the caller's role (billing-choices.ts). paystack-checkout
-  // makes the same refusals itself, so this is never the only guard.
+  // from the row, the caller's role and the web's safety switch
+  // (billing-choices.ts, billing-words.ts). /api/checkout and
+  // paystack-checkout make the same refusals themselves, so this is never the
+  // only guard.
+  const selfServe = billingSelfServe()
   const billingSub = sub ? { ...sub, tier: currentPlan?.tier ?? null } : null
-  const paying = isPaying(billingSub)
-  const { ending, cancel } = accountBilling(billingSub, role)
+  const { ending, cancel } = accountBilling(billingSub, role, selfServe)
   const owner = role === 'owner'
   const days = entitlement?.reason === 'trial_active' ? daysLeft(entitlement.boundary) : null
   const renews = lagosLongDate(sub?.current_period_end ?? null)
@@ -53,9 +60,11 @@ async function SubscribePageBody() {
         : sub.status === 'active'
           ? `You are on ${currentPlan?.name ?? 'a paid plan'}${renews ? `, renewing on ${renews}` : ''}.`
           : sub.status === 'past_due'
-            ? (owner
-                ? 'We could not take your last payment. Use Update your card below to carry on.'
-                : 'We could not take your last payment. The account owner can update the card.')
+            ? (!owner
+                ? 'We could not take your last payment. The account owner can put it right.'
+                : selfServe
+                  ? 'We could not take your last payment. Use Pay now or Update your card below to carry on.'
+                  : 'We could not take your last payment. Message us and we help you pay again.')
             : sub.status === 'cancelled'
               ? 'Your plan has ended. Choose a plan to record new work again.'
               : `Your plan: ${planStatusLabel(sub.status)}.`
@@ -63,13 +72,28 @@ async function SubscribePageBody() {
   // One name per thing: More calls this page "Plans & billing", so it does too.
   const tab = parentTab('/subscribe')
 
+  const rows: PlanRow[] = offers.map((o) => ({
+    tier: o.tier,
+    name: o.name,
+    price: money(o.monthly),
+    monthly: o.monthly,
+    was: o.isFounding && o.standard !== null ? money(o.standard) : null,
+    isFounding: o.isFounding,
+    available: o.monthly !== null && o.available,
+    blurb: o.tier === 'costing'
+      ? 'Know what your food costs and what to charge.'
+      : 'Costing, plus everything you sell and who you sell to.',
+    features: o.tier === 'costing' ? COSTING_FEATURES : TRADING_FEATURES,
+    action: planAction(billingSub, o.tier, role, selfServe),
+    changeLabel: changeLabel(billingSub, o.tier),
+    caution: changeCaution(billingSub, o.tier, renews),
+  }))
+
   return (
-    <div className="space-y-5">
+    // data-self-serve tells the account journey which state the server is in.
+    <div className="space-y-5" data-self-serve={selfServe ? 'on' : 'off'}>
       {tab && <BackLink href={tab.href}>{tab.label}</BackLink>}
-      <PageHeader
-        title="Plans & billing"
-        sub="Monthly billing in naira. Change plan here, and cancel from your Account page whenever you like."
-      />
+      <PageHeader title="Plans & billing" sub={subscribeHeader(billingSub, role, selfServe, MESSAGE_US)} />
 
       {statusLine && (
         <Card>
@@ -83,7 +107,7 @@ async function SubscribePageBody() {
           </div>
           {cancel && (
             <p className="mt-2 text-sm" style={{ color: 'var(--mm-muted)' }}>
-              To stop renewing, <Link href="/account" className="underline">cancel from your Account page</Link>.
+              To stop your plan, <Link href="/account" className="underline">cancel from your Account page</Link>.
             </p>
           )}
         </Card>
@@ -101,23 +125,9 @@ async function SubscribePageBody() {
         </Card>
       )}
 
-      <PlanChooser rows={offers.map((o) => ({
-        tier: o.tier,
-        name: o.name,
-        price: money(o.monthly),
-        monthly: o.monthly,
-        was: o.isFounding && o.standard !== null ? money(o.standard) : null,
-        isFounding: o.isFounding,
-        available: o.monthly !== null && o.available,
-        blurb: o.tier === 'costing'
-          ? 'Know what your food costs and what to charge.'
-          : 'Costing, plus everything you sell and who you sell to.',
-        features: o.tier === 'costing' ? COSTING_FEATURES : TRADING_FEATURES,
-        action: planAction(billingSub, o.tier, role),
-        changeLabel: changeLabel(billingSub, o.tier),
-      }))} />
+      <PlanChooser support={<SupportContact />} rows={rows} />
 
-      {paying && owner && (
+      {isLive(billingSub) && rows.some((r) => r.action === 'change') && (
         <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>
           Switching plan: your new plan starts the day you pay and your old plan
           stops, so you are never charged for both. Unused days on the old plan

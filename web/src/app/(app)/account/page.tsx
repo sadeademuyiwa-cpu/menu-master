@@ -9,9 +9,12 @@ import { signOut } from '@/lib/auth-actions'
 import { Button } from '@/components/button'
 import { PhotoPreference } from '@/components/photo-preference'
 import { CancelPlan } from '@/components/cancel-plan'
-import { UpdateCardButton } from '@/components/plan-chooser'
+import { PayNowButton, UpdateCardButton } from '@/components/plan-chooser'
 import { SupportContact } from '@/components/legal-page'
-import { accountBilling, endingText, isPaying, lagosLongDate, OWNER_ONLY_NOTE } from '../subscribe/billing-choices'
+import { MESSAGE_US, billingSelfServe } from '@/lib/site/billing-words'
+import {
+  accountBilling, endingText, isPaying, lagosLongDate, OWNER_ONLY_NOTE, PAY_NOW_TEXT,
+} from '../subscribe/billing-choices'
 
 import Loading from './skeleton'
 
@@ -54,9 +57,13 @@ async function AccountPageBody() {
   const boundary = entitlement?.boundary ?? sub?.current_period_end ?? null
 
   // Which billing buttons this person sees. The owner rule is a courtesy:
-  // /api/billing and paystack-manage refuse anyone else on the server.
+  // /api/billing and paystack-manage refuse anyone else on the server. While
+  // the web's safety switch is off (lib/site/billing-words.ts) no self-serve
+  // button shows for a paying account, and the owner is told to message us.
+  const selfServe = billingSelfServe()
   const billingSub = sub ? { ...sub, tier: plan?.tier ?? null } : null
-  const billing = accountBilling(billingSub, role)
+  const billing = accountBilling(billingSub, role, selfServe)
+  const fixes = [billing.payNow && 'Pay now', billing.updateCard && 'Update your card'].filter(Boolean).join(' or ')
   const owner = role === 'owner'
   const paying = isPaying(billingSub)
   const endsOn = lagosLongDate(sub?.current_period_end ?? null)
@@ -77,16 +84,19 @@ async function AccountPageBody() {
             {entitlement.reason === 'trial_active'
               ? `You are on the free trial${boundary ? ` until ${fmtDate(boundary)}` : ''}.`
               : entitlement.reason === 'payment_failed_in_grace'
-                ? `We could not take your last payment. Your access continues while you sort it out.${billing.updateCard ? ' Use Update your card below.' : ''}`
+                ? (billing.payNow ? PAY_NOW_TEXT
+                  : `We could not take your last payment. Your access continues while you sort it out.${fixes ? ` Use ${fixes} below.` : ''}`)
                 : 'Your subscription is active.'}
           </Notice>
         ) : (
           <Notice>
-            {entitlement.reason === 'trial_ended'
-              ? `Your free trial ended${boundary ? ` on ${fmtDate(boundary)}` : ''}.`
-              : 'Your subscription has ended.'}{' '}
+            {billing.payNow
+              ? PAY_NOW_TEXT
+              : entitlement.reason === 'trial_ended'
+                ? `Your free trial ended${boundary ? ` on ${fmtDate(boundary)}` : ''}.`
+                : 'Your subscription has ended.'}{' '}
             Everything you entered is still here, and you can open and read every
-            recipe and price. To record new work again, choose a plan.
+            recipe and price.{billing.payNow ? '' : ' To record new work again, choose a plan.'}
           </Notice>
         )
       )}
@@ -153,20 +163,28 @@ async function AccountPageBody() {
         )}
 
         <div className="flex flex-wrap gap-3">
-          <Link href="/subscribe" className="mm-btn mm-btn-primary w-full sm:w-auto">
-            {paying ? (owner ? 'Change your plan' : 'Plans & billing') : 'Choose a plan'}
+          {billing.payNow && <PayNowButton tier={billing.payNow} className="w-full sm:w-auto" />}
+          {billing.updateCard && <UpdateCardButton className="w-full sm:w-auto" variant={billing.payNow ? 'secondary' : undefined} />}
+          <Link href="/subscribe" className={`mm-btn ${billing.payNow || billing.updateCard ? 'mm-btn-secondary' : 'mm-btn-primary'} w-full sm:w-auto`}>
+            {paying ? (owner && selfServe ? 'Change your plan' : 'Plans & billing') : 'Choose a plan'}
           </Link>
-          {billing.updateCard && <UpdateCardButton className="w-full sm:w-auto" />}
         </div>
 
-        {/* Owner only, and only while the plan renews. Staff see neither
-            button; the server refuses them anyway. */}
+        {/* Owner only, while the plan renews or a payment is overdue (X1),
+            and only while the switch is on. Staff see neither button; the
+            server refuses them anyway. */}
         {billing.cancel && (
           <CancelPlan
             endsOn={endsOn}
+            overdue={billing.overdue}
             founder={sub?.founding_price_active === true}
             support={<SupportContact />}
           />
+        )}
+        {billing.messageUs && (
+          <p className="text-sm" data-billing="message-us">
+            {MESSAGE_US} Write to <SupportContact />.
+          </p>
         )}
         {paying && !owner && (
           <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>

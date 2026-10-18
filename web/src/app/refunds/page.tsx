@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { LegalPage, H2, SupportContact } from '@/components/legal-page'
 import { LEGAL } from '@/lib/legal'
+import { billingSelfServe, billingWords } from '@/lib/site/billing-words'
 
 export const metadata: Metadata = { title: 'Refunds and cancellation — Menu Master NG' }
 
@@ -13,15 +14,19 @@ export const revalidate = 60
  * monthly plans, cancel any time, access to the end of the period paid for,
  * history never hidden, and the founding price forfeited on a lapse and never
  * re-issued (0049, founding_price_policy). Nothing here promises what the
- * system does not do: cancelling is the Account page's Cancel plan button,
- * a plan change is Plans & billing (the old Paystack subscription is switched
- * off once the new one is paid), and a copy of your records is sent on
- * request, because there is no download yet (tests/public-promises).
+ * system does not do. How to cancel, change plan and put a failed payment
+ * right follows the web's billing safety switch (BILLING_SELF_SERVE): the
+ * Account page's Cancel plan and Plans & billing when it is "on" (the old
+ * Paystack subscription is switched off once the new one is paid), "message
+ * us" otherwise. Those sentences come from lib/site/billing-words.ts, the one
+ * source for both states. A copy of your records is sent on request, because
+ * there is no download yet (tests/public-promises).
  *
  * This is the owner's draft to review, not legal advice.
  */
 export default function RefundsPage() {
   const L = LEGAL
+  const W = billingWords(billingSelfServe())
   return (
     <LegalPage title="Refunds and cancellation">
       <p>
@@ -40,13 +45,7 @@ export default function RefundsPage() {
 
       <H2>Cancelling</H2>
       <p>
-        The account owner can cancel at any time from the Account page in the
-        app: press Cancel plan, then confirm. Cancelling stops future charges.
-        Your paid plan continues to the end of the month you have already paid
-        for, and then your account becomes read-only: you can still open and
-        read everything you entered, you simply cannot record new work until
-        you choose a plan again. There is no undo button; to carry on, choose a
-        plan again. A founding subscription that is cancelled loses the
+        {W.refundsCancel} A founding subscription that is cancelled loses the
         founding price once its paid month ends (see below).
       </p>
       <p>
@@ -63,7 +62,7 @@ export default function RefundsPage() {
       </p>
       <ul className="list-disc space-y-1 pl-6">
         <li>you were charged twice for the same month;</li>
-        <li>you were charged after you had cancelled;</li>
+        <li>you were charged after you had cancelled, or after you had asked us to cancel;</li>
         <li>your old plan was charged again after you had moved to a new one;</li>
         <li>a fault on our side meant you could not use the product for most of the month you paid for.</li>
       </ul>
@@ -75,13 +74,7 @@ export default function RefundsPage() {
       </p>
 
       <H2>Failed payments</H2>
-      <p>
-        If a renewal fails, we do not cut you off the same day. You keep full
-        access for a short grace period while you update your card: the
-        account owner presses Update your card on Plans &amp; billing or the
-        Account page. If the payment still cannot be taken, your account
-        becomes read-only until it is.
-      </p>
+      <p>{W.refundsFailed}</p>
 
       <H2>The founding-member price</H2>
       <p>
@@ -96,12 +89,8 @@ export default function RefundsPage() {
 
       <H2>Changing plan</H2>
       <p>
-        The account owner changes plan on the Plans &amp; billing page. Your
-        new plan starts the day you pay for it and your old plan stops at the
-        same time, so you are never charged for both. Unused days on the old
-        plan are not refunded, in the same way as a month you have started.
-        Moving to a smaller plan never hides anything you entered on the
-        larger one; it only stops new entries of that kind.
+        {W.refundsChange} Moving to a smaller plan never hides anything you
+        entered on the larger one; it only stops new entries of that kind.
       </p>
 
       <H2>Questions</H2>
