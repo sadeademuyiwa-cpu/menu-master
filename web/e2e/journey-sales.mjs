@@ -17,7 +17,7 @@
  * Nothing here accepts HTTP 200 as evidence.
  */
 import { chromium } from 'playwright'
-import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
+import { onboardBusiness, finishSetup, newDish, openDetails, pickItem } from './setup-helper.mjs'
 
 const BASE = 'http://127.0.0.1:3100'
 const stamp = Date.now()
@@ -174,8 +174,8 @@ await must(page, 'the ingredient is priced from what was actually paid', '₦1.7
 await newDish(page, BASE, { name: 'Party Jollof', batch: '4500', unit: 'g — Gram', portion: '500' })
 const jollofUrl = page.url().split('?')[0]
 await openDetails(page, 'Add an ingredient')
-const addLine = page.locator('form:has(select[name=ingredient_id])')
-await pick(addLine, 'select[name=ingredient_id]', `Rice ${stamp}`)
+const addLine = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(addLine, 'ingredient_id', `Rice ${stamp}`)
 await addLine.locator('input[name=qty]').fill('4500')
 await pick(addLine, 'select[name=unit_id]', 'g — Gram')
 await press(addLine, page, 'button[type=submit]')
@@ -190,8 +190,8 @@ await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
 await newDish(page, BASE, { name: 'Mystery Stew', batch: '4000', unit: 'g — Gram', portion: '400' })
 await openDetails(page, 'Add an ingredient')
-const addLine2 = page.locator('form:has(select[name=ingredient_id])')
-await pick(addLine2, 'select[name=ingredient_id]', `Mystery Spice ${stamp}`)
+const addLine2 = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(addLine2, 'ingredient_id', `Mystery Spice ${stamp}`)
 await addLine2.locator('input[name=qty]').fill('4000')
 await pick(addLine2, 'select[name=unit_id]', 'g — Gram')
 await press(addLine2, page, 'button[type=submit]')

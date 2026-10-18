@@ -6,7 +6,7 @@ export type IconName =
   | 'settings' | 'people' | 'reports' | 'account' | 'admin'
   | 'plus' | 'arrow-right' | 'arrow-left' | 'info' | 'alert'
   | 'check' | 'store' | 'package' | 'supplier' | 'card' | 'lock'
-  | 'chart' | 'money' | 'menu' | 'chevron-right' | 'play'
+  | 'chart' | 'money' | 'menu' | 'chevron-right' | 'play' | 'search'
 
 type Props = Omit<SVGProps<SVGSVGElement>, 'name'> & {
   name: IconName
@@ -69,6 +69,8 @@ export function AppIcon({ name, size = 20, className = '', ...rest }: Props) {
       return <svg {...common}><path d="M19 12H5M10 7l-5 5 5 5"/></svg>
     case 'chevron-right':
       return <svg {...common}><path d="m9 5 7 7-7 7"/></svg>
+    case 'search':
+      return <svg {...common}><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
     case 'info':
       return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r="1" fill="currentColor" stroke="none"/></svg>
     case 'alert':

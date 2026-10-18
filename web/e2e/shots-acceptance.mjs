@@ -10,7 +10,7 @@
  * 44px, no overlapping navigation.
  */
 import { chromium } from 'playwright'
-import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
+import { onboardBusiness, finishSetup, newDish, openDetails, pickItem } from './setup-helper.mjs'
 import { mkdirSync } from 'fs'
 
 const BASE = 'http://127.0.0.1:3100'
@@ -146,8 +146,8 @@ await press(buy, page, 'button[type=submit]')
 
 await newDish(page, BASE, { name: 'Party Jollof', batch: '4500', unit: 'g — Gram', portion: '500' })
 await openDetails(page, 'Add an ingredient')
-const al = page.locator('form:has(select[name=ingredient_id])')
-await pick(al, 'select[name=ingredient_id]', `Rice ${stamp}`)
+const al = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(al, 'ingredient_id', `Rice ${stamp}`)
 await al.locator('input[name=qty]').fill('4500')
 await pick(al, 'select[name=unit_id]', 'g — Gram')
 await press(al, page, 'button[type=submit]')
@@ -160,8 +160,8 @@ await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
 await newDish(page, BASE, { name: 'Mystery Stew', batch: '4000', unit: 'g — Gram', portion: '400' })
 await openDetails(page, 'Add an ingredient')
-const al2 = page.locator('form:has(select[name=ingredient_id])')
-await pick(al2, 'select[name=ingredient_id]', `Unpriced spice ${stamp}`)
+const al2 = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(al2, 'ingredient_id', `Unpriced spice ${stamp}`)
 await al2.locator('input[name=qty]').fill('4000')
 await pick(al2, 'select[name=unit_id]', 'g — Gram')
 await press(al2, page, 'button[type=submit]')

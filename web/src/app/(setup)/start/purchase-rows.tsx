@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/button'
+import { ItemPicker } from '@/components/item-picker'
 
 export type MeasureKind = 'mass' | 'volume' | 'count'
 export type StarterIngredient = { id: string; name: string; group: string; kind: MeasureKind }
@@ -44,8 +45,6 @@ export function PurchaseRows({
   const [nextKey, setNextKey] = useState(Math.max(FIRST_ROWS, initial?.length ?? 0))
 
   const byId = new Map(ingredients.map((i) => [i.id, i]))
-  const groups = new Map<string, StarterIngredient[]>()
-  for (const i of ingredients) groups.set(i.group, [...(groups.get(i.group) ?? []), i])
   const commonItems = common.map((id) => byId.get(id)).filter((i): i is StarterIngredient => !!i)
 
   const unitsFor = (ingredientId: string) => {
@@ -83,23 +82,12 @@ export function PurchaseRows({
 
             <label className="block">
               <span className="text-sm font-medium">Ingredient</span>
-              <select
-                name="ingredient_id" value={r.ingredientId}
-                onChange={(e) => choose(r.key, e.target.value)}
-                className="mm-input mt-1"
-              >
-                <option value="">Choose an ingredient…</option>
-                {commonItems.length > 0 && (
-                  <optgroup label="Most bought">
-                    {commonItems.map((i) => <option key={`c-${i.id}`} value={i.id}>{i.name}</option>)}
-                  </optgroup>
-                )}
-                {[...groups.entries()].map(([group, items]) => (
-                  <optgroup key={group} label={group}>
-                    {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-                  </optgroup>
-                ))}
-              </select>
+              <ItemPicker
+                items={ingredients} name="ingredient_id" value={r.ingredientId} label={`Ingredient ${index + 1}`}
+                title="What did you buy?" placeholder="Choose an ingredient…" className="mt-1"
+                top={commonItems.length > 0 ? { label: 'Most bought', ids: commonItems.map((i) => i.id) } : undefined}
+                onChange={(id) => choose(r.key, id)}
+              />
             </label>
 
             <div className="grid grid-cols-3 gap-2">

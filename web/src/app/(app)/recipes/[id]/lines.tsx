@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { Badge, Disclosure, Field, inputClass } from '@/components/ui'
 import { Button } from '@/components/button'
 import { ConfirmSubmit } from '@/components/confirm-submit'
+import { ItemPicker } from '@/components/item-picker'
+import type { PickItem } from '@/lib/item-search'
 import { money, quantity, lineStatus } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
 import { perBuyingUnit } from '../../purchases/buy-figures'
@@ -211,7 +213,7 @@ export function WhatGoesIn({ lines, footer, ...rest }: {
 /** "Add an ingredient": one fold, opened by itself while the dish is empty. */
 export function AddIngredient({ recipeId, ingredients, units, open }: {
   recipeId: string
-  ingredients: { id: string; name: string }[]
+  ingredients: PickItem[]
   units: Unit[]
   open: boolean
 }) {
@@ -220,12 +222,12 @@ export function AddIngredient({ recipeId, ingredients, units, open }: {
       <form action={addLine} className="grid gap-3 sm:grid-cols-4 sm:items-end">
         <input type="hidden" name="recipe_id" value={recipeId} />
         <div className="sm:col-span-2">
+          {/* Starts empty and must be chosen. As a <select> it had no empty
+              option, so the first item (Acha) went in whenever only an amount
+              was typed. */}
           <Field label="Ingredient">
-            <select name="ingredient_id" required className={inputClass}>
-              {ingredients.map((i) => (
-                <option key={i.id} value={i.id}>{i.name}</option>
-              ))}
-            </select>
+            <ItemPicker items={ingredients} name="ingredient_id" required label="Ingredient" title="Which ingredient?"
+                        placeholder="Choose an ingredient…" missing="Choose the ingredient first." className="mt-1" />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:col-span-2">
@@ -233,7 +235,9 @@ export function AddIngredient({ recipeId, ingredients, units, open }: {
             <input name="qty" type="number" step="any" min="0" required inputMode="decimal" className={inputClass} />
           </Field>
           <Field label="Unit">
-            <select name="unit_id" required className={inputClass}>
+            {/* Empty first, for the same reason: never a unit nobody chose. */}
+            <select name="unit_id" required defaultValue="" className={inputClass}>
+              <option value="" disabled>Choose…</option>
               {units.map((u) => (
                 <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
               ))}

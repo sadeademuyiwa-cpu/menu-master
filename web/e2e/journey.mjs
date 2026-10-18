@@ -11,7 +11,7 @@
  */
 import { chromium } from 'playwright'
 import { fileURLToPath } from 'node:url'
-import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
+import { onboardBusiness, finishSetup, newDish, openDetails, pickItem } from './setup-helper.mjs'
 
 const BASE = 'http://127.0.0.1:3100'
 const stamp = Date.now()
@@ -184,6 +184,21 @@ async function signUp(page, who) {
  *  25 tries, not 15: the first run against a cold database took longer than
  *  six seconds to write the auth cookie and the harness, not the product,
  *  failed. */
+/**
+ * Record a sale / Record a purchase lead Home: before the dishes, with their
+ * top in the first half-screen. 'ok', or what is wrong instead.
+ */
+async function homeLeads(page) {
+  return page.evaluate(() => {
+    window.scrollTo(0, 0)
+    const qa = document.querySelector('[data-quick-actions]')
+    if (!qa) return 'no quick actions'
+    const dishes = document.getElementById('home-dishes')
+    if (dishes && !(qa.compareDocumentPosition(dishes) & Node.DOCUMENT_POSITION_FOLLOWING)) return 'after the dishes'
+    const top = qa.getBoundingClientRect().top
+    return top < window.innerHeight / 2 ? 'ok' : `${Math.round(top)}px down`
+  })
+}
 async function settled(page, path, needle, tries = 25) {
   for (let i = 0; i < tries; i++) {
     await go(page, path)
@@ -314,8 +329,8 @@ const stepsFirstRecipe = steps
 
 // --- 1. a complete, costed recipe -------------------------------------------
 await openDetails(page, 'Add an ingredient')
-const addLine = page.locator('form:has(select[name=ingredient_id])')
-await pick(addLine, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
+const addLine = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(addLine, 'ingredient_id', `Ofada Rice ${stamp}`)
 await addLine.locator('input[name=qty]').fill('2000')
 await pick(addLine, 'select[name=unit_id]', 'g — Gram')
 steps++
@@ -353,8 +368,8 @@ await pick(page, 'select[name=base_unit_id]', 'Volume — millilitres')
 await submit(page, 'form button[type=submit]')
 await go(page, recipeUrl)
 await openDetails(page, 'Add an ingredient')
-const addLine2 = page.locator('form:has(select[name=ingredient_id])')
-await pick(addLine2, 'select[name=ingredient_id]', `Palm Oil ${stamp}`)
+const addLine2 = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(addLine2, 'ingredient_id', `Palm Oil ${stamp}`)
 await addLine2.locator('input[name=qty]').fill('100')
 await pick(addLine2, 'select[name=unit_id]', 'ml — Millilitre')
 steps++
@@ -532,8 +547,8 @@ await newDish(page, BASE, { name: `Format Soup ${stamp}`, batch: '10000', unit: 
 const fmtRecipeUrl = page.url().split('?')[0]
 
 await openDetails(page, 'Add an ingredient')
-const fLine = page.locator('form:has(select[name=ingredient_id])')
-await pick(fLine, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
+const fLine = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(fLine, 'ingredient_id', `Ofada Rice ${stamp}`)
 await fLine.locator('input[name=qty]').fill('10000')
 await pick(fLine, 'select[name=unit_id]', 'g — Gram')
 steps++
@@ -604,7 +619,7 @@ await must(page, 'a market can be added as a supplier', `Mile 12 ${stamp}`)
 await go(page, '/purchases/new')
 await must(page, 'a purchase opens on its own screen, ready for items', 'Record a purchase', 'What did you buy?')
 await page.waitForTimeout(500)
-await page.selectOption('select[aria-label="Item 1"]', { label: `Ofada Rice ${stamp}` })
+await pickItem(page, 'Item 1', `Ofada Rice ${stamp}`)
 await page.fill('input[aria-label="How much, item 1"]', '25')
 await page.selectOption('select[aria-label="Unit, item 1"]', { label: 'kg' })
 await page.fill('input[aria-label="Paid, item 1"]', '42000')
@@ -663,8 +678,8 @@ await rendered(page)
 await newDish(page, BASE, { name: 'Garri Test', batch: '1000', unit: 'g — Gram', portion: '250' })
 const convRecipeUrl = page.url().split('?')[0]
 await openDetails(page, 'Add an ingredient')
-const addConv = page.locator('form:has(select[name=ingredient_id])')
-await pick(addConv, 'select[name=ingredient_id]', `Garri ${stamp}`)
+const addConv = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(addConv, 'ingredient_id', `Garri ${stamp}`)
 await addConv.locator('input[name=qty]').fill('2')
 await pick(addConv, 'select[name=unit_id]', 'paint')
 steps++
@@ -691,8 +706,10 @@ await must(page, 'the recipe opens from a direct URL', 'Ofada Special', '₦4,50
 
 // --- 8. validation ----------------------------------------------------------
 await openDetails(page, 'Add an ingredient')
-const addLine3 = page.locator('form:has(select[name=ingredient_id])')
-await pick(addLine3, 'select[name=ingredient_id]', `Ofada Rice ${stamp}`)
+const addLine3 = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(addLine3, 'ingredient_id', `Ofada Rice ${stamp}`)
+// A unit too: the form now asks for one, and this step is about the amount.
+await pick(addLine3, 'select[name=unit_id]', 'g — Gram')
 await addLine3.locator('input[name=qty]').fill('0')
 steps++
 await addLine3.locator('button[type=submit]').click()
@@ -747,8 +764,8 @@ await pick(page, 'select[name=base_unit_id]', 'Weight — grams')
 await submit(page, 'form button[type=submit]')
 await go(page, fmtRecipeUrl)
 await openDetails(page, 'Add an ingredient')
-const upLine = page.locator('form:has(select[name=ingredient_id])')
-await pick(upLine, 'select[name=ingredient_id]', `Unpriced Pepper ${stamp}`)
+const upLine = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(upLine, 'ingredient_id', `Unpriced Pepper ${stamp}`)
 await upLine.locator('input[name=qty]').fill('50')
 await pick(upLine, 'select[name=unit_id]', 'g — Gram')
 steps++
@@ -776,7 +793,63 @@ await must(page, 'an ingredient a recipe uses but nobody priced is surfaced',
 await mustNot(page, 'and the starter catalogue does not fill the list with noise',
   'Semovita', 'Poundo yam flour', 'Rice (imported)')
 await must(page, 'and quick actions are offered', 'Record a sale', 'Record a purchase')
+{
+  const lead = await homeLeads(page)
+  mark('and they lead Home, above the week and the dishes', lead === 'ok', lead)
+}
 await page.screenshot({ path: 'e2e/shots/p5-dashboard-live.png', fullPage: true })
+
+// ===========================================================================
+// NEW DISH SUGGESTS WHAT GOES IN — names only, she types every amount
+// ===========================================================================
+{
+  await go(page, '/recipes/new')
+  const offer = page.locator('[data-suggest]')
+  // Typed before the page has hydrated, the name may not reach the screen's state: type again.
+  for (let i = 0; i < 10 && !(await offer.isVisible().catch(() => false)); i++) {
+    await page.fill('input[name=name]', '')
+    await page.fill('input[name=name]', 'efo riro')
+    await page.waitForTimeout(400)
+  }
+  await must(page, 'typing a dish offers its usual ingredients', 'Usual ingredients for Efo Riro', 'Add these to the dish')
+  await offer.locator('button:has-text("Add these to the dish")').click()
+  await must(page, 'they become rows on the dish', 'Added the usual ingredients for Efo Riro')
+  const chosen = await page.$$eval('[data-picker="line_ingredient_id"]', (els) => els.map((e) => e.getAttribute('aria-label') ?? ''))
+  mark('the rows are her own items, by name', ['Tatashe', 'Palm oil', 'Locust bean', 'Efo tete'].every((n) => chosen.some((l) => l.includes(n))),
+    JSON.stringify(chosen.slice(0, 6)))
+  const amounts = await page.$$eval('input[name=line_qty]', (els) => els.map((e) => e.value))
+  mark('and every amount is left for her to type', amounts.length > 4 && amounts.every((v) => v === ''), JSON.stringify(amounts))
+
+  await page.fill('input[name=batch_yield_qty]', '20')
+  await page.selectOption('select[name=yield_unit_id]', { label: 'Kilograms (kg)' })
+  await page.locator('input[name=line_qty]').first().fill('2')
+  await page.locator('select[name=line_unit_id]').first().selectOption({ label: 'grams' })
+  await page.click('button:has-text("Save dish")')
+  await must(page, 'a suggested row without an amount is refused', 'enter how much goes into one batch')
+  const firstQty = await page.locator('input[name=line_qty]').first().inputValue()
+  const batchKept = await page.inputValue('input[name=batch_yield_qty]')
+  const nameKept = await page.inputValue('input[name=name]')
+  mark('and nothing she typed is lost', firstQty === '2' && batchKept === '20' && nameKept === 'efo riro',
+    `qty ${firstQty}, batch ${batchKept}, name ${nameKept}`)
+  // React resets a form after each save attempt; a select would fall back to its first option.
+  const shown = async (sel) => page.locator(sel).first().evaluate((s) => s.selectedOptions[0]?.textContent ?? '')
+  const countedIn = await shown('select[name=yield_unit_id]')
+  const unitKept = await shown('select[name=line_unit_id]')
+  mark('nor what she chose: the batch unit and the ingredient unit', countedIn === 'Kilograms (kg)' && unitKept === 'grams',
+    `counted in ${countedIn}, unit ${unitKept}`)
+
+  // A dish that needs an item she does not have yet: add it in place.
+  await page.fill('input[name=name]', 'abacha')
+  await offer.waitFor({ state: 'visible', timeout: 10000 })
+  await offer.locator('button:has-text("Add these to the dish")').click()
+  await must(page, 'what she lacks is named, with a way to add it', 'Not on your list yet', 'Utazi leaf')
+  await page.locator('[data-followup] li', { hasText: 'Utazi leaf' }).locator('button:has-text("Add it")').click()
+  await page.locator('[data-picker="line_ingredient_id"][aria-label*="Utazi leaf"]').first()
+    .waitFor({ state: 'attached', timeout: 20000 }).catch(() => {})
+  const afterAdd = await page.$$eval('[data-picker="line_ingredient_id"]', (els) => els.map((e) => e.getAttribute('aria-label') ?? ''))
+  mark('Add it puts Utazi leaf on her list and on the dish', afterAdd.some((l) => l.includes('Utazi leaf')), JSON.stringify(afterAdd.slice(-3)))
+  await page.screenshot({ path: 'e2e/shots/p5-dish-suggest.png', fullPage: true })
+}
 
 // ===========================================================================
 // MOBILE — the value moment on a phone
@@ -786,6 +859,11 @@ for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'ta
   ctxM.on('dialog', (d) => d.accept())
   const pageM = await ctxM.newPage()
   await logIn(pageM, A)
+  await settled(pageM, '/dashboard', 'Record a sale')
+  {
+    const lead = await homeLeads(pageM)
+    mark(`Record a sale and Record a purchase are in Home's first screen at ${tag}px`, lead === 'ok', lead)
+  }
   // logIn already polls /dashboard, but the recipe page is a different route
   // and a second browser context racing the first has been seen to reach it
   // before its own cookie is live. Poll the page we are about to assert on,
@@ -801,16 +879,30 @@ for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'ta
   // it mid-page, which LOOKS like it covers the ingredient rows. That is a
   // capture artifact -- but whether it covers real content at the true bottom
   // of the page is a real question, so measure it instead of trusting a class.
+  // The bar is the fixed .mm-bottom-nav wrapper, and the "+" floats above it.
+  // (This used to measure the first <nav> in the page: on a phone that is the
+  // hidden sidebar, so the check passed without measuring anything.)
   const occluded = await pageM.evaluate(() => {
     window.scrollTo(0, document.body.scrollHeight)
-    const nav = document.querySelector('nav')
-    if (!nav || getComputedStyle(nav).position !== 'fixed') return []
-    const bar = nav.getBoundingClientRect()
+    const covers = [...document.querySelectorAll('.mm-bottom-nav, .mm-fab')]
+      .map((el) => el.getBoundingClientRect()).filter((r) => r.height > 0)
     const hidden = []
     for (const el of document.querySelectorAll('main button, main input, main a, main select')) {
       const r = el.getBoundingClientRect()
       if (r.height === 0) continue
-      if (r.bottom > bar.top && r.top < bar.bottom) hidden.push(el.textContent?.trim() || el.tagName)
+      // Nothing to tap: a visually hidden input (sr-only, a picker's
+      // "required" stand-in) is reached through its visible label or button,
+      // and a folded section's form is not drawn at all -- though Chrome
+      // still gives its fields the place they would have if it were open.
+      const s = getComputedStyle(el)
+      if (r.width <= 2 || r.height <= 2 || s.opacity === '0' || s.visibility === 'hidden') continue
+      if (el.closest('details:not([open])') && !el.closest('summary')) continue
+      if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue
+      if (covers.some((c) => r.bottom > c.top && r.top < c.bottom && r.right > c.left && r.left < c.right)) {
+        const what = el.textContent?.trim() ||
+          `${el.tagName}${el.type ? `[type=${el.type}]` : ''}${el.name ? `[name=${el.name}]` : ''} ${Math.round(r.width)}x${Math.round(r.height)}`
+        hidden.push(what)
+      }
     }
     return hidden
   })
@@ -821,13 +913,20 @@ for (const [w, h, tag] of [[360, 780, '360'], [390, 844, '390'], [820, 1180, 'ta
   // owner has no reason to expect. Ten items did not fit a 360px phone; the
   // bar scrolled and the last entries sat off-screen.
   const navCut = await pageM.evaluate(() => {
-    const nav = document.querySelector('nav')
+    // The primary nav on show at this width: the bottom bar on a phone, the
+    // header from md. Not simply the first <nav>, which is the hidden sidebar.
+    const nav = [...document.querySelectorAll('nav[aria-label="Primary"]')]
+      .find((n) => n.getBoundingClientRect().height > 0)
     if (!nav) return ['no nav']
     const bar = nav.getBoundingClientRect()
+    // The screen too: from md the header nav grows to fit its links, so
+    // its own box alone could never show one running off the page.
+    const right = Math.min(bar.right, document.documentElement.clientWidth)
+    const left = Math.max(bar.left, 0)
     return [...nav.querySelectorAll('a')]
       .filter((a) => {
         const r = a.getBoundingClientRect()
-        return r.right > bar.right + 1 || r.left < bar.left - 1
+        return r.right > right + 1 || r.left < left - 1
       })
       .map((a) => a.textContent?.trim() ?? '?')
   })

@@ -2,8 +2,9 @@ import { redirect } from 'next/navigation'
 import { currentContext, contextRedirect } from '@/lib/data/context'
 import { loadPurchaseCatalog } from '@/lib/data/purchase-catalog'
 import { BackLink } from '@/components/ui'
+import { canEditItems } from '../../purchases/buy-roles'
 import { NewDish } from './new-dish'
-import { createDish } from './actions'
+import { addSuggestedItem, createDish } from './actions'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,8 @@ export default async function NewDishPage() {
   return (
     <div className="space-y-4">
       <BackLink href="/recipes">Dishes</BackLink>
-      <NewDish items={items} priced={recent} yieldUnits={yieldUnits} action={createDish} />
+      <NewDish items={items} priced={recent} yieldUnits={yieldUnits} action={createDish}
+               canAddItems={canEditItems(ctx.role)} addItem={addSuggestedItem} />
     </div>
   )
 }

@@ -66,6 +66,27 @@ export function localWord(u: { code: string; name: string }): string {
   return UNIT_LABEL[u.code] ?? (u.name.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase() || u.code)
 }
 
+/** Where an item is listed in a picker: its category, "Packaging", or her own. */
+function groupOf(kind: string, category: string | undefined): string {
+  return kind === 'packaging' ? 'Packaging' : (category ?? 'Your own items')
+}
+
+/**
+ * Every active item with its group, for an item picker (components/item-picker.tsx)
+ * on a page that needs names only: a dish's "Add an ingredient", a draft or
+ * corrected purchase.
+ */
+export async function loadItemList(supabase: Supabase): Promise<{ id: string; name: string; group: string }[]> {
+  const [{ data: ingredients }, { data: categories }] = await Promise.all([
+    supabase.from('ingredients').select('id,name,kind,category_id')
+      .is('deleted_at', null).eq('is_active', true).order('name')
+      .returns<{ id: string; name: string; kind: string; category_id: string | null }[]>(),
+    supabase.from('ingredient_categories').select('id,name').returns<{ id: string; name: string }[]>(),
+  ])
+  const category = new Map((categories ?? []).map((c) => [c.id, c.name]))
+  return (ingredients ?? []).map((i) => ({ id: i.id, name: i.name, group: groupOf(i.kind, category.get(i.category_id ?? '')) }))
+}
+
 /** Units a recipe measures in: the buying units plus the kitchen spoons and cups. */
 const COOKING_UNITS = new Set([...BUYING_UNITS, 'mg', 'tsp', 'tbsp', 'cup_m'])
 
@@ -92,7 +113,7 @@ export async function loadPurchaseCatalog(supabase: Supabase, purpose: 'buy' | '
     ])
 
   const unitById = new Map((units ?? []).map((u) => [u.id, u]))
-  const groupOf = new Map((categories ?? []).map((c) => [c.id, c.name]))
+  const categoryName = new Map((categories ?? []).map((c) => [c.id, c.name]))
   const convOf = new Map<string, { unit_id: string; qty_in_base: string }[]>()
   for (const c of conversions ?? []) convOf.set(c.ingredient_id, [...(convOf.get(c.ingredient_id) ?? []), c])
 
@@ -120,7 +141,7 @@ export async function loadPurchaseCatalog(supabase: Supabase, purpose: 'buy' | '
     const item: CatalogItem = {
       id: i.id,
       name: i.name,
-      group: i.kind === 'packaging' ? 'Packaging' : (groupOf.get(i.category_id ?? '') ?? 'Your own items'),
+      group: groupOf(i.kind, categoryName.get(i.category_id ?? '')),
       units: [...sameKind, ...ownUnits].map((u) => ({ id: u.id, label: label(u) })).concat(local),
     }
     if (purpose === 'buy' && base) {

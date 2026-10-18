@@ -8,14 +8,18 @@ import { useEffect, useRef } from 'react'
  * middle on a larger screen, so the page behind it stays as it was.
  *
  * Built on <dialog>, so focus, Escape and the backdrop are the browser's own.
+ *
+ * `top` hangs it from the top of a phone instead: for a search, where the
+ * keyboard takes the bottom of the screen and would hide the results.
  */
 export function Sheet({
-  open, onClose, title, children,
+  open, onClose, title, children, top = false,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: React.ReactNode
+  top?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
 
@@ -29,7 +33,7 @@ export function Sheet({
   return (
     <dialog
       ref={ref}
-      className="mm-sheet"
+      className={top ? 'mm-sheet mm-sheet--top' : 'mm-sheet'}
       onClose={onClose}
       onClick={(e) => { if (e.target === ref.current) onClose() }}
       aria-label={title}

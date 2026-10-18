@@ -16,6 +16,8 @@ import { money, quantity, purchaseReference } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
 import { canSeeCosts } from '@/lib/pricing'
 import { ConfirmSubmit } from '@/components/confirm-submit'
+import { ItemPicker } from '@/components/item-picker'
+import { loadItemList } from '@/lib/data/purchase-catalog'
 import { stateDot } from '../../recipes/_list/dish-figures'
 import { canRecordPurchases } from '../buy-roles'
 import { inSentence } from '../buy-figures'
@@ -39,7 +41,6 @@ type Line = {
   ingredient: { id: string; name: string } | null
   unit: { code: string; name: string } | null
 }
-type Ingredient = { id: string; name: string }
 type Affected = {
   recipe_id: string; variant_id: string | null
   product_name: string; format_name: string | null
@@ -57,6 +58,10 @@ async function addLine(formData: FormData) {
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, here))
 
+  const ingredientId = String(formData.get('ingredient_id') ?? '')
+  const unitId = String(formData.get('unit_id') ?? '')
+  if (!ingredientId) redirect(withNotice(here, 'Choose what you bought first.'))
+  if (!unitId) redirect(withNotice(here, 'Choose the unit you bought it in.'))
   const qty = Number(formData.get('qty'))
   const amount = Number(formData.get('amount'))
   if (!Number.isFinite(qty) || qty <= 0) {
@@ -68,8 +73,8 @@ async function addLine(formData: FormData) {
 
   const { error } = await supabase.from('purchase_lines').insert({
     account_id: accountId, purchase_id: id,
-    ingredient_id: String(formData.get('ingredient_id') ?? ''),
-    qty, unit_id: String(formData.get('unit_id') ?? ''), amount,
+    ingredient_id: ingredientId,
+    qty, unit_id: unitId, amount,
   })
   revalidatePath(here)
   redirect(withNotice(here, describeWriteError(error) ?? 'Item added.'))
@@ -267,8 +272,7 @@ export default async function PurchaseDetail({
       .eq('purchase_id', id).returns<Line[]>(),
     // The pickers are only for a draft someone here may change.
     draft && canWrite
-      ? supabase.from('ingredients').select('id,name').is('deleted_at', null)
-          .eq('is_active', true).order('name').returns<Ingredient[]>()
+      ? loadItemList(supabase).then((data) => ({ data }))
       : Promise.resolve({ data: null }),
     draft && canWrite
       ? supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<Unit[]>()
@@ -516,12 +520,11 @@ export default async function PurchaseDetail({
             <form action={addLine} className="grid gap-3 sm:grid-cols-5">
               <input type="hidden" name="purchase_id" value={id} />
               <div className="sm:col-span-2">
+                {/* Starts empty and must be chosen: as a <select> with no empty
+                    option, the first item went in when nobody chose one. */}
                 <Field label="Ingredient">
-                  <select name="ingredient_id" required className={inputClass} style={inputStyle}>
-                    {(ingredients ?? []).map((i) => (
-                      <option key={i.id} value={i.id}>{i.name}</option>
-                    ))}
-                  </select>
+                  <ItemPicker items={ingredients ?? []} name="ingredient_id" required label="Ingredient" title="What did you buy?"
+                              placeholder="Choose what you bought…" missing="Choose what you bought first." className="mt-1" />
                 </Field>
               </div>
               <Field label="Quantity bought">
@@ -529,7 +532,8 @@ export default async function PurchaseDetail({
                   className={inputClass} style={inputStyle} />
               </Field>
               <Field label="Unit">
-                <select name="unit_id" required className={inputClass} style={inputStyle}>
+                <select name="unit_id" required defaultValue="" className={inputClass} style={inputStyle}>
+                  <option value="" disabled>Choose…</option>
                   {(units ?? []).map((u) => (
                     <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
                   ))}

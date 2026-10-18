@@ -5,7 +5,7 @@
  * 12px, horizontal overflow, and controls hidden behind fixed furniture.
  */
 import { chromium } from 'playwright'
-import { onboardBusiness, finishSetup, newDish, openDetails } from './setup-helper.mjs'
+import { onboardBusiness, finishSetup, newDish, openDetails, pickItem } from './setup-helper.mjs'
 import { mkdirSync } from 'node:fs'
 
 const BASE = 'http://127.0.0.1:3100'
@@ -57,8 +57,8 @@ await buy.locator('button[type=submit]').click(); await page.waitForTimeout(1200
 await newDish(page, BASE, { name: 'Party Jollof Rice with Chicken', batch: '4500', unit: 'g — Gram', portion: '500' })
 const recipeUrl = page.url().split('?')[0]
 await openDetails(page, 'Add an ingredient')
-const line = page.locator('form:has(select[name=ingredient_id])')
-await pick(line, 'select[name=ingredient_id]', 'Ofada Rice')
+const line = page.locator('form:has([data-picker=ingredient_id])')
+await pickItem(line, 'ingredient_id', 'Ofada Rice')
 await line.locator('input[name=qty]').fill('4500')
 await pick(line, 'select[name=unit_id]', 'g — Gram')
 await line.locator('button[type=submit]').click(); await page.waitForTimeout(1500)

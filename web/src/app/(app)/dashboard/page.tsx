@@ -33,8 +33,8 @@ type Step = { done: boolean; label: string; href: string; hint: string; icon: Ic
 const skip = <T,>() => Promise.resolve({ data: null as T | null, error: null, count: null as number | null })
 
 /**
- * Home, as a food business's front page: what the week brought in, what needs
- * her, her dishes as a menu, and the two things she records most.
+ * Home, as a food business's front page: the two things she records most, then
+ * what the week brought in, what needs her, and her dishes as a menu.
  *
  * WHO SEES WHAT is decided here, on the server, and a figure a role may not
  * see is never asked for, so it cannot reach the phone:
@@ -162,6 +162,24 @@ async function HomeBody() {
           the page for a screen reader without saying it twice on screen. */}
       <h1 className="sr-only">{businessName || 'Home'}</h1>
 
+      {/* The two things recorded most come first, at every width: at the foot
+          they sat two or three phone screens down for an owner with a menu.
+          From lg they span both columns (the sr-only h1 takes no grid cell). */}
+      {(sellsNow || buysNow) && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:col-span-2" data-quick-actions>
+          {sellsNow && (
+            <Link href="/sales/new" className="mm-btn mm-btn-primary w-full">
+              <AppIcon name="sales" size={19} /> Record a sale
+            </Link>
+          )}
+          {buysNow && (
+            <Link href="/purchases/new" className={`mm-btn ${sellsNow ? 'mm-btn-secondary' : 'mm-btn-primary'} w-full`}>
+              <AppIcon name="purchases" size={19} /> Record a purchase
+            </Link>
+          )}
+        </div>
+      )}
+
       {firstColumn && (
         <div className="space-y-5">
           {settingUp && <SetupCard steps={core} wizardOpen={wizardOpen} />}
@@ -243,21 +261,6 @@ async function HomeBody() {
               })}
             </ul>
           </section>
-        )}
-
-        {(sellsNow || buysNow) && (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {sellsNow && (
-              <Link href="/sales/new" className="mm-btn mm-btn-primary w-full">
-                <AppIcon name="sales" size={19} /> Record a sale
-              </Link>
-            )}
-            {buysNow && (
-              <Link href="/purchases/new" className={`mm-btn ${sellsNow ? 'mm-btn-secondary' : 'mm-btn-primary'} w-full`}>
-                <AppIcon name="purchases" size={19} /> Record a purchase
-              </Link>
-            )}
-          </div>
         )}
       </div>
     </div>

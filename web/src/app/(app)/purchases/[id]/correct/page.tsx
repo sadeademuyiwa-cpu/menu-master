@@ -8,6 +8,9 @@ import {
   PageHeader, Card, Field, Notice, SectionHeading, BackLink, inputClass, inputStyle,
 } from '@/components/ui'
 import { Button } from '@/components/button'
+import { ItemPicker } from '@/components/item-picker'
+import { loadItemList } from '@/lib/data/purchase-catalog'
+import type { PickItem } from '@/lib/item-search'
 import { money, quantity, purchaseReference } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
 import { canRecordPurchases } from '../../buy-roles'
@@ -131,12 +134,21 @@ export default async function CorrectPurchase({
               'ingredient:ingredients!fk_purchase_lines_ingredient_id_account(id,name),' +
               'unit:units!purchase_lines_unit_id_fkey(id,code)')
       .eq('purchase_id', id).returns<Line[]>(),
-    supabase.from('ingredients').select('id,name').is('deleted_at', null)
-      .eq('is_active', true).order('name').returns<Named[]>(),
+    loadItemList(supabase).then((data) => ({ data })),
     supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<Unit[]>(),
     supabase.from('suppliers').select('id,name').eq('is_active', true).order('name').returns<Named[]>(),
   ])
   const rows = lines ?? []
+  // An item switched off since it was bought is still on this purchase: keep
+  // it choosable, or its row would open empty and the line would be dropped.
+  const items: PickItem[] = [...(ingredients ?? [])]
+  const listed = new Set(items.map((g) => g.id))
+  for (const l of rows) {
+    // Once each, though one item may be on two lines.
+    if (!l.ingredient || listed.has(l.ingredient.id)) continue
+    listed.add(l.ingredient.id)
+    items.push({ id: l.ingredient.id, name: l.ingredient.name, group: 'No longer on your list' })
+  }
   // Added in whole kobo, so the figure in the title is exact.
   const total = sumMoney(rows.map((l) => l.amount))
 
@@ -200,10 +212,8 @@ export default async function CorrectPurchase({
                   <div className="grid gap-3 sm:grid-cols-5 sm:items-end">
                     <div className="sm:col-span-2">
                       <Field label={r.was ? `Item · was ${r.was}` : `Item ${i + 1} (optional)`}>
-                        <select name="ingredient_id" defaultValue={r.ingredientId} className={inputClass} style={inputStyle}>
-                          <option value="">— none —</option>
-                          {(ingredients ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                        </select>
+                        <ItemPicker items={items} name="ingredient_id" defaultValue={r.ingredientId} label={`Item ${i + 1}`} title="Which item?"
+                                    placeholder="No item" clearLabel="No item (leave this line out)" className="mt-1" />
                       </Field>
                     </div>
                     <Field label="Quantity">

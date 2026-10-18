@@ -489,6 +489,42 @@ summary:focus-visible {
   .mm-sheet-body { padding: 1.25rem; }
 }
 @keyframes mm-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+/* A search sheet (the item picker) hangs from the top on a phone. Android
+   does not resize the page for the keyboard (no interactive-widget setting),
+   so a sheet at the bottom would sit behind it; from the top, the search box
+   and the first results stay in view. */
+.mm-sheet.mm-sheet--top {
+  margin: 0 auto auto;
+  max-height: 100dvh;
+  border-radius: 0 0 var(--mm-radius) var(--mm-radius);
+}
+.mm-sheet.mm-sheet--top[open] { animation-name: mm-sheet-down; }
+.mm-sheet--top .mm-sheet-body { padding-top: calc(1.1rem + env(safe-area-inset-top)); }
+@keyframes mm-sheet-down { from { transform: translateY(-24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (min-width: 640px) {
+  .mm-sheet.mm-sheet--top { margin: 8dvh auto auto; max-height: 84dvh; border-radius: var(--mm-radius); }
+  .mm-sheet--top .mm-sheet-body { padding-top: 1.25rem; }
+}
+/* An item picker's list scrolls inside the sheet, under its search box. */
+.mm-pick-list {
+  max-height: min(56dvh, 26rem); overflow-y: auto; overscroll-behavior: contain;
+  /* Room for the sticky group heading, so a row scrolled to is not under it. */
+  scroll-padding-top: 2rem;
+}
+.mm-pick-option {
+  display: flex; width: 100%; min-height: var(--mm-touch); align-items: center; justify-content: space-between;
+  gap: .75rem; padding: .35rem .6rem; border-radius: 10px; text-align: left;
+}
+.mm-pick-option:hover, .mm-pick-option[data-active] { background: var(--mm-surface-2); }
+.mm-pick-option[aria-selected="true"] { color: var(--mm-accent); font-weight: 600; }
+.mm-pick-heading {
+  position: sticky; top: 0; z-index: 1; padding: .5rem .6rem .25rem; background: var(--mm-surface);
+  font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--mm-muted);
+}
+/* The picker's stand-in for the browser's "required" check: in the form,
+   never seen or tapped, sitting under the button so a browser that does
+   point at it points at the right place. */
+.mm-pick-proxy { position: absolute; left: 50%; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 
 /* ===========================================================================
    TAKE ORDER -- menu tiles with big steppers and a running-total bar.

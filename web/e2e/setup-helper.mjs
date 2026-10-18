@@ -54,7 +54,7 @@ export async function finishSetup(page, base, { dish = 'Setup pepper soup', pric
   await settle(page)
 
   await waitFor(page, 'What did you pay for your ingredients?')
-  await page.locator('select[name=ingredient_id]').first().selectOption({ label: 'Salt' })
+  await pickItem(page, 'ingredient_id', 'Salt')
   await page.locator('input[name=qty]').first().fill('1')
   await page.locator('select[name=unit_id]').first().selectOption({ label: 'kg' })
   await page.locator('input[name=amount]').first().fill('600')
@@ -100,6 +100,30 @@ export async function newDish(page, base, { name, batch, unit, portion }) {
   await page.click('button:has-text("Save dish")')
   await page.waitForURL(/\/recipes\/[0-9a-f-]{36}/, { timeout: 60000 })
   await settle(page)
+}
+
+/**
+ * Choose an item in an item picker (src/components/item-picker.tsx): open
+ * it by its field name or label (`which`, its data-picker), type, and tap the
+ * item. The exact name wins; otherwise the first item containing `needle`.
+ * Works with a page or a locator as `scope`; the sheet itself is on the body.
+ */
+export async function pickItem(scope, which, needle) {
+  const page = typeof scope.page === 'function' ? scope.page() : scope
+  const trigger = scope.locator(`[data-picker="${which}"]`).first()
+  const sheet = page.locator('dialog[open]:has([role=listbox])').last()
+  // Before the page has hydrated the button does nothing: tap until it opens.
+  for (let i = 0; i < 25; i++) {
+    await trigger.click()
+    if (await sheet.isVisible().catch(() => false)) break
+    await page.waitForTimeout(300)
+  }
+  await sheet.locator('input[type=search]').fill(needle)
+  const q = needle.replace(/["\\]/g, '\\$&')
+  const exact = sheet.locator(`[role=option][data-name="${q}"]`)
+  const option = (await exact.count()) > 0 ? exact.first() : sheet.locator(`[role=option][data-name*="${q}"]`).first()
+  await option.click()
+  await sheet.waitFor({ state: 'hidden', timeout: 10000 })
 }
 
 /** Open a folded section by its title, without closing one that is already open. */

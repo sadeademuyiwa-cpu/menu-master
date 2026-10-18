@@ -1,14 +1,18 @@
 import { SkeletonPage, Skeleton } from '@/components/skeleton'
 
 /**
- * Home while its data streams in, in Home's own shape: the week's figure and
- * its bars, a few "Needs you" rows, the dish grid and the two buttons. The
+ * Home while its data streams in, in Home's own shape: the two buttons, the
+ * week's figure and its bars, a few "Needs you" rows and the dish grid. The
  * same two columns from lg as the page, so nothing jumps when it arrives.
  */
 export default function Loading() {
   return (
     <SkeletonPage>
       <div className="space-y-5 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-start lg:gap-6 lg:space-y-0">
+        <div className="grid gap-2 sm:grid-cols-2 lg:col-span-2">
+          <Skeleton h="46px" />
+          <Skeleton h="46px" />
+        </div>
         <div className="space-y-5">
           <div className="mm-card space-y-2">
             <Skeleton w="45%" h="0.875rem" />
@@ -45,10 +49,6 @@ export default function Loading() {
                 </div>
               ))}
             </div>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Skeleton h="46px" />
-            <Skeleton h="46px" />
           </div>
         </div>
       </div>

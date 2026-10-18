@@ -4,6 +4,7 @@ import { useActionState, useEffect, useMemo, useRef, useState, useTransition } f
 import Link from 'next/link'
 import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
+import { ItemPicker } from '@/components/item-picker'
 import type { CatalogItem, CatalogUnit, LastBought } from '@/lib/data/purchase-catalog'
 import { formatDay } from '@/lib/dates'
 import { money } from '@/lib/format'
@@ -113,11 +114,6 @@ export function NewPurchase({
     setFocusKey(null)
   }, [focusKey])
 
-  const groups = useMemo(() => {
-    const g = new Map<string, CatalogItem[]>()
-    for (const i of items) g.set(i.group, [...(g.get(i.group) ?? []), i])
-    return [...g.entries()]
-  }, [items])
   const boughtBefore = often.map((id) => byId.get(id)).filter((i): i is CatalogItem => !!i)
   const chips = boughtBefore.slice(0, 8)
   const repeat = lastRun.filter((l) => byId.has(l.ingredientId))
@@ -261,23 +257,12 @@ export function NewPurchase({
               </div>
               <label className="block">
                 <span className="text-sm font-medium">What did you buy?</span>
-                <select
-                  value={r.ingredientId} aria-label={`Item ${index + 1}`}
-                  onChange={(e) => set(r.key, { ingredientId: e.target.value, unitId: startUnit(e.target.value) })}
-                  className="mm-input mt-1"
-                >
-                  <option value="">Choose…</option>
-                  {boughtBefore.length > 0 && (
-                    <optgroup label="Bought before">
-                      {boughtBefore.slice(0, 12).map((i) => <option key={`r-${i.id}`} value={i.id}>{i.name}</option>)}
-                    </optgroup>
-                  )}
-                  {groups.map(([group, list]) => (
-                    <optgroup key={group} label={group}>
-                      {list.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-                    </optgroup>
-                  ))}
-                </select>
+                <ItemPicker
+                  items={items} value={r.ingredientId} label={`Item ${index + 1}`} title="What did you buy?" className="mt-1"
+                  top={boughtBefore.length > 0 ? { label: 'Bought before', ids: boughtBefore.slice(0, 12).map((i) => i.id) } : undefined}
+                  // Chosen: the cursor goes on to "How much", as it does from a chip.
+                  onChange={(id) => { set(r.key, { ingredientId: id, unitId: startUnit(id) }); if (id) setFocusKey(r.key) }}
+                />
               </label>
               <div className="grid grid-cols-3 gap-2">
                 <label className="block">

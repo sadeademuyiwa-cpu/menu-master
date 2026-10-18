@@ -10,6 +10,7 @@ import { money, percent, quantity, NOT_ENTERED } from '@/lib/format'
 import { canSeeCosts, canSeeSellingPrices, canSetPrices } from '@/lib/pricing'
 import { canAddDishPhotos, photoRefusal } from '@/lib/dish-photo'
 import { noticeTone } from '@/lib/ui/notice-tone'
+import { loadItemList } from '@/lib/data/purchase-catalog'
 import { setDishPhoto } from './actions'
 import { canAddKindsOfWork, canEditDish, canMakeSizes } from './roles'
 import { costParts, portionShare, type PartLine } from './breakdown'
@@ -121,8 +122,7 @@ export default async function DishPage(props: {
     menuPrices, basisRows, formats, variants, labourLines, labourRates,
   ] = await Promise.all([
     when(true, () => supabase.from('units').select('id,code,name,kind').order('kind').order('code').returns<Unit[]>()),
-    when(edits, () => supabase.from('ingredients').select('id,name').is('deleted_at', null).eq('is_active', true)
-      .order('name').returns<{ id: string; name: string }[]>()),
+    edits ? loadItemList(supabase) : null,
     when(edits, () => supabase.from('recipes').select('id,name,yield_unit_id')
       .is('deleted_at', null).neq('id', id).order('name')
       .returns<{ id: string; name: string; yield_unit_id: string }[]>()),

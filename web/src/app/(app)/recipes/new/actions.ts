@@ -2,9 +2,75 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError } from '@/lib/data/context'
+import { currentContext, describeWriteError, refusalNotice } from '@/lib/data/context'
+import { loadPurchaseCatalog, type CatalogItem } from '@/lib/data/purchase-catalog'
+import { NEW_ITEMS } from '@/lib/dish-library-data'
+import { canEditItems } from '../../purchases/buy-roles'
 
 export type DishResult = { error: string } | null
+export type AddedItem = { item: CatalogItem } | { error: string }
+
+const BASE_UNIT = { weight: 'g', volume: 'ml', count: 'unit' } as const
+
+/**
+ * An item a dish suggestion needs that she does not have yet (Utazi leaf for
+ * Abacha), added without leaving the dish. Only the items the dish list
+ * names (NEW_ITEMS), measured and filed the way that list says; anything
+ * else is added under Ingredients. Row-level security still decides who may
+ * add an item (owner, manager, kitchen; 0015). If she already has it, that
+ * one is used: names are unique per business, whatever the case.
+ */
+export async function addSuggestedItem(name: string): Promise<AddedItem> {
+  const wanted = NEW_ITEMS.find((x) => x.name === name)
+  if (!wanted) return { error: 'Add that item under Ingredients.' }
+  const ctx = await currentContext()
+  const { supabase, accountId } = ctx
+  if (!accountId) return { error: 'Your session has ended. Sign in again, then add the item.' }
+  if (!canEditItems(ctx.role)) return { error: `Ask the owner or a manager to add ${wanted.name} under Ingredients.` }
+
+  // Put away earlier: bring that one back, with its prices, rather than make a
+  // second one (a put-away item does not hold its name, 0001's partial index,
+  // and could then never be restored).
+  const { data: away } = await supabase.from('ingredients').select('id')
+    .eq('account_id', accountId).ilike('name', wanted.name).not('deleted_at', 'is', null)
+    .order('deleted_at', { ascending: false }).limit(1).returns<{ id: string }[]>()
+  if (away?.[0]) {
+    const { data: back, error: backError } = await supabase.from('ingredients').update({ deleted_at: null })
+      .eq('id', away[0].id).select('id').maybeSingle<{ id: string }>()
+    if (backError && backError.code !== '23505') return { error: describeWriteError(backError) ?? `We could not add ${wanted.name}.` }
+    if (back) return finish(back.id)
+  }
+
+  const [{ data: unit }, { data: categories }] = await Promise.all([
+    supabase.from('units').select('id').eq('code', BASE_UNIT[wanted.measuredBy]).maybeSingle<{ id: string }>(),
+    // Her own business's category: someone in two businesses can read both.
+    supabase.from('ingredient_categories').select('id').eq('account_id', accountId).eq('name', wanted.group)
+      .limit(1).returns<{ id: string }[]>(),
+  ])
+  if (!unit) return { error: `We could not add ${wanted.name}. Try again.` }
+
+  const { data: made, error } = await supabase.from('ingredients').insert({
+    account_id: accountId, name: wanted.name, kind: 'ingredient',
+    base_unit_id: unit.id, category_id: categories?.[0]?.id ?? null,
+  }).select('id').maybeSingle<{ id: string }>()
+  let id = made?.id
+  if (error) {
+    if (error.code !== '23505') return { error: describeWriteError(error) ?? `We could not add ${wanted.name}.` }
+    const { data: existing } = await supabase.from('ingredients').select('id')
+      .ilike('name', wanted.name).is('deleted_at', null).limit(1).returns<{ id: string }[]>()
+    id = existing?.[0]?.id
+  }
+  // No row and no error: refused quietly (the role, or the trial has ended).
+  if (!id) return { error: await refusalNotice(ctx.role) }
+  return finish(id)
+
+  async function finish(itemId: string): Promise<AddedItem> {
+    revalidatePath('/ingredients')
+    const { items } = await loadPurchaseCatalog(supabase, 'cook')
+    const item = items.find((i) => i.id === itemId)
+    return item ? { item } : { error: `${wanted!.name} was added. Reload the page to use it.` }
+  }
+}
 
 /**
  * A new dish and what goes into one batch of it, in one go. The same rows

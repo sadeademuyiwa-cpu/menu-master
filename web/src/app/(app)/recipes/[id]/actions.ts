@@ -63,6 +63,10 @@ export async function addLine(formData: FormData) {
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, here))
 
+  const ingredientId = String(formData.get('ingredient_id') ?? '')
+  const unitId = String(formData.get('unit_id') ?? '')
+  if (!ingredientId) redirect(withNotice(here, 'Choose the ingredient first.'))
+  if (!unitId) redirect(withNotice(here, 'Choose the unit the amount is in.'))
   const qty = Number(formData.get('qty'))
   if (!Number.isFinite(qty) || qty <= 0) {
     redirect(withNotice(here, 'Enter how much of that ingredient the dish uses. It must be greater than zero.'))
@@ -71,9 +75,9 @@ export async function addLine(formData: FormData) {
   const { error } = await supabase.from('recipe_lines').insert({
     account_id: accountId,
     recipe_id: recipeId,
-    ingredient_id: String(formData.get('ingredient_id') ?? ''),
+    ingredient_id: ingredientId,
     qty,
-    unit_id: String(formData.get('unit_id') ?? ''),
+    unit_id: unitId,
   })
   if (error) redirect(withNotice(here, describeWriteError(error)))
 
