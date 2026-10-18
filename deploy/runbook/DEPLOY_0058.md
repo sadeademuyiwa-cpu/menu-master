@@ -21,17 +21,17 @@ Fill in with the date you checked. "Unconfirmed" means nobody has looked yet.
 
 | | Answer | Checked on | How to check |
 |---|---|---|---|
-| `trial-reminder-mailer` deployed, JWT check off | unconfirmed | | `CHECK_TRIAL_MAILER.md` B1, B5 |
-| Its secrets set (`RESEND_API_KEY`, `MAILER_TOKEN`, `TRIAL_EMAIL_FROM`, `SITE_URL`) | unconfirmed | | B2 |
-| pg_cron and pg_net on | pg_cron 1.6.4 installed; **pg_net NOT installed** (0.20.4 available) | 18 Oct 2026 | `CHECK_TRIAL_MAILER.sql` rows 8-9 |
-| `mm_mailer_token` in Vault | unconfirmed | | `SCHEDULE_TRIAL_MAILER.sql` refuses without it |
-| Job `mm-trial-mailer`, `20 * * * *`, active, token from Vault | **no job calls trial-reminder-mailer** (only `mm-admin-scan`, `7 * * * *`) | 18 Oct 2026 | rows 11-12 |
-| One run watched: HTTP 200, emails delivered | unconfirmed | | rows 14-17, `CHECK_TRIAL_MAILER.md` C2 |
+| `trial-reminder-mailer` deployed, JWT check off | deployed with --no-verify-jwt; answers 401 without the token | 18 Oct 2026 | `CHECK_TRIAL_MAILER.md` B1, B5 |
+| Its secrets set (`RESEND_API_KEY`, `MAILER_TOKEN`, `TRIAL_EMAIL_FROM`, `SITE_URL`) | all four set; MAILER_TOKEN replaced with a new 48-character token (the old value was unknown); `SUPPORT_EMAIL` not set, so replies go to hello@, which has no inbox | 18 Oct 2026 | B2 |
+| pg_cron and pg_net on | pg_cron 1.6.4 and pg_net 0.20.4 on (pg_net switched on by the owner) | 18 Oct 2026 | `CHECK_TRIAL_MAILER.sql` rows 8-9 |
+| `mm_mailer_token` in Vault | yes, 48 characters, the same token | 18 Oct 2026 | `SCHEDULE_TRIAL_MAILER.sql` refuses without it |
+| Job `mm-trial-mailer`, `20 * * * *`, active, token from Vault | yes (jobid 2); `mm-alert-mailer` `12 * * * *` too, token from Vault, alerts to the owner's Gmail | 18 Oct 2026 | rows 11-12 |
+| One run watched: HTTP 200, emails delivered | 13:20 UTC run succeeded, HTTP 200, 1 `ends_tomorrow` sent; alert mailer 13:12 UTC run emailed 9 open alerts | 18 Oct 2026 | rows 14-17, `CHECK_TRIAL_MAILER.md` C2 |
 | Emails ever sent (rows 1-4) | **never**: 0 of each kind | 18 Oct 2026 | rows 1-4 |
 | Owed for more than 2 hours (row 6) | 1 (`ends_tomorrow`) | 18 Oct 2026 | row 6 (healthy: 0) |
 | Trials that ended without an email (row 7) | 7, all ended more than 7 days ago (earliest 20 Sep) | 18 Oct 2026 | row 7 |
 | menumasterng.com verified in Resend; SPF, DKIM, DMARC pass in Gmail | unconfirmed | | `EMAIL_DELIVERABILITY.md` steps 2, 6 |
-| Mailer redeployed with the 18 October change (no guessed price; "The free trial never charges you.") | not yet | | `SCHEDULE_TRIAL_MAILER.md` step 2 |
+| Mailer redeployed with the 18 October change (no guessed price; "The free trial never charges you.") | yes (first deploy of the mailer) | 18 Oct 2026 | `SCHEDULE_TRIAL_MAILER.md` step 2 |
 
 Expected starting state when it was applied: **0057 applied**, 118 policies,
 93 `fn_*` functions.
