@@ -12,6 +12,10 @@
     skip=REASON    never run
   Fails if any suite reports a failure.
 
+  Every working database is named after the head database (<head>_suite_run,
+  <head>_seq_NAME, <head>_era_NNNN), so two runs from different head
+  databases on one server never drop each other's copies.
+
 .EXAMPLE
   pwsh -File scripts/setup_db.ps1 -Database mm
   pwsh -File scripts/run_suites.ps1 -Template mm
@@ -95,9 +99,9 @@ foreach ($f in Get-ChildItem (Join-Path $repo 'tests') -File -Filter '0*.sql' | 
     $tpl = $Template; $label = 'head'
     if ($e.ContainsKey('era')) { $tpl = Era-Db $e.era; $label = "era $($e.era)" }
     if ($e.ContainsKey('seq')) {
-        $db = "suite_seq_$($e.seq)"
+        $db = "${Template}_seq_$($e.seq)"
         if (-not $seqDb.ContainsKey($e.seq)) { Fresh-Copy $db $tpl; $seqDb[$e.seq] = $true }
-    } else { $db = 'suite_run'; Fresh-Copy $db $tpl }
+    } else { $db = "${Template}_suite_run"; Fresh-Copy $db $tpl }
 
     $r = Run-One $s $db ([bool]$e.ContainsKey('rows'))
     if ($null -eq $r) { $table += [pscustomobject]@{ Suite=$s; Db=$label; Pass=''; Fail=''; Note='NO RESULT' }; $noresult++; continue }

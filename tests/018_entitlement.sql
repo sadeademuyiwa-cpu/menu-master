@@ -157,9 +157,14 @@ begin
   -- entitlement-gated. 0032 splits each into named per-verb policies, adding 9
   -- gated write policies. THE RULE CHANGED; THE TEST IS NOT BEING WEAKENED --
   -- the expected count went UP, and check 12 still proves no read is gated.
-  insert into t9 values (13,'write policies carrying the gate: 60 before 0032, 69 after',
-    case when n in (60, 69) then 'PASS' else 'FAIL' end,
-    n||' policy(ies)'||case when n=69 then ' (0032 applied)' else ' (pre-0032)' end);
+  -- 0066 gates one more: p_units_write, replaced under the same name, so the
+  -- policy total in check 14 does not move. Once 0066 is in (fn_require_entitled
+  -- exists) the only legal value is 70.
+  insert into t9 values (13,'write policies carrying the gate: 60 before 0032, 69 after, 70 after 0066',
+    case when to_regprocedure('public.fn_require_entitled(uuid,boolean)') is not null
+         then case when n = 70 then 'PASS' else 'FAIL' end
+         when n in (60, 69) then 'PASS' else 'FAIL' end,
+    n||' policy(ies)'||case when n=70 then ' (0066 applied)' when n=69 then ' (0032 applied)' else ' (pre-0032)' end);
 
   select count(*) into n from pg_policies where schemaname='public';
   -- 105 before 0031/0032. After them: +12 -3 on the cost tables, +1 for

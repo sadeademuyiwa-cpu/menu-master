@@ -68,8 +68,14 @@ from unnest(array[
   'fn_variant_cost_components(uuid)', 'fn_allocate_order_discount(uuid)',
   'fn_confirm_order(uuid)', 'fn_finalise_order(uuid)', 'fn_void_order(uuid,text)',
   'fn_reissue_order(uuid)', 'fn_post_purchase(uuid)',
-  'fn_compute_recipe_cost_snapshot(uuid,date,uuid)']) f
-where not has_function_privilege('authenticated', f, 'execute');
+  'fn_compute_recipe_cost_snapshot(uuid,date,uuid)',
+  -- 0066: the sale page records money received through it, after a trial too.
+  -- fn_finalise_order above stays: 0066 gates it, it does not revoke it.
+  'fn_record_order_payment(uuid,numeric,payment_status)']) f
+where case when f like 'fn_record_order_payment(%'
+            and to_regprocedure('public.fn_require_entitled(uuid,boolean)') is null
+           then false                                    -- before 0066 it does not exist
+           else not has_function_privilege('authenticated', f, 'execute') end;
 
 -- ---------------------------------------------------------------------------
 -- 3. THE ONE THAT MATTERED
