@@ -11,7 +11,7 @@
  */
 import { chromium } from 'playwright'
 import { fileURLToPath } from 'node:url'
-import { onboardBusiness, finishSetup, newDish, openDetails, pickItem } from './setup-helper.mjs'
+import { onboardBusiness, finishSetup, newDish, openDetails, pickItem, createItemInPicker } from './setup-helper.mjs'
 
 const BASE = 'http://127.0.0.1:3100'
 const stamp = Date.now()
@@ -825,7 +825,7 @@ await page.screenshot({ path: 'e2e/shots/p5-dashboard-live.png', fullPage: true 
   await page.locator('input[name=line_qty]').first().fill('2')
   await page.locator('select[name=line_unit_id]').first().selectOption({ label: 'grams' })
   await page.click('button:has-text("Save dish")')
-  await must(page, 'a suggested row without an amount is refused', 'enter how much goes into one batch')
+  await must(page, 'a suggested row without a quantity is refused', 'enter the quantity that goes into one batch')
   const firstQty = await page.locator('input[name=line_qty]').first().inputValue()
   const batchKept = await page.inputValue('input[name=batch_yield_qty]')
   const nameKept = await page.inputValue('input[name=name]')
@@ -849,6 +849,82 @@ await page.screenshot({ path: 'e2e/shots/p5-dashboard-live.png', fullPage: true 
   const afterAdd = await page.$$eval('[data-picker="line_ingredient_id"]', (els) => els.map((e) => e.getAttribute('aria-label') ?? ''))
   mark('Add it puts Utazi leaf on her list and on the dish', afterAdd.some((l) => l.includes('Utazi leaf')), JSON.stringify(afterAdd.slice(-3)))
   await page.screenshot({ path: 'e2e/shots/p5-dish-suggest.png', fullPage: true })
+}
+
+// ===========================================================================
+// WHAT SHE PAID, BESIDE AN INGREDIENT — and an item the search did not find
+// ===========================================================================
+{
+  await go(page, '/recipes/new')
+  const dishName = `Price test soup ${stamp}`
+  for (let i = 0; i < 10; i++) {
+    await page.fill('input[name=name]', dishName)
+    await page.waitForTimeout(300)
+    if ((await page.inputValue('input[name=name]')) === dishName) break
+  }
+  await page.fill('input[name=batch_yield_qty]', '5')
+  const rowAt = (n) => page.locator('form ol > li').nth(n)
+  await pickItem(rowAt(0), 'line_ingredient_id', 'Tatashe')
+  await rowAt(0).locator('input[name=line_qty]').fill('200')
+  await rowAt(0).locator('select[name=line_unit_id]').selectOption({ label: 'grams' })
+  await must(page, 'an item with no price offers boxes for what she paid', 'What you paid for it (optional)')
+  await rowAt(0).locator('input[aria-label^="You paid in naira"]').fill('2500')
+  await rowAt(0).locator('input[aria-label^="Quantity bought for that price"]').fill('1')
+  await rowAt(0).locator('select[aria-label^="Bought in"]').selectOption({ label: 'kg' })
+
+  const leaf = `Ofe test leaf ${stamp}`
+  await createItemInPicker(rowAt(1), 'line_ingredient_id', leaf, 'weight')
+  const second = await rowAt(1).locator('[data-picker="line_ingredient_id"]').getAttribute('aria-label')
+  mark('a search that finds nothing adds the item there and then', (second ?? '').includes(leaf), second ?? '')
+  await rowAt(1).locator('input[name=line_qty]').fill('50')
+  await rowAt(1).locator('select[name=line_unit_id]').selectOption({ label: 'grams' })
+
+  await page.click('button:has-text("Save dish")')
+  await page.waitForURL(/\/recipes\/[0-9a-f-]{36}/, { timeout: 60000 })
+  await must(page, 'saving records what she paid, and the dish is costed from it at once',
+    'what you paid for 1 item is recorded', 'Tatashe', '₦500', leaf)
+
+  // The dish page: an ingredient added with what was paid for it.
+  await openDetails(page, 'Add an ingredient')
+  const add = page.locator('form:has([data-picker=ingredient_id])')
+  await pickItem(add, 'ingredient_id', 'Onion')
+  await add.locator('input[name=qty]').fill('100')
+  await pick(add, 'select[name=unit_id]', 'g — Gram')
+  await add.locator('input[name=paid]').fill('900')
+  await add.locator('input[name=paid_qty]').fill('1')
+  await add.locator('select[name=paid_unit_id]').selectOption({ label: 'kg' })
+  await add.locator('button[type=submit]').click()
+  await must(page, 'the dish page records what she paid with the ingredient', 'Ingredient added, and what you paid is recorded', '₦90')
+
+  // An item with a price shows it, and offers a new one rather than retyping the old.
+  await openDetails(page, 'Add an ingredient')
+  await pickItem(page.locator('form:has([data-picker=ingredient_id])'), 'ingredient_id', 'Tatashe')
+  await must(page, 'a priced item shows what was paid, with a way to give a new price', 'You paid', 'Paid a new price?')
+  await page.screenshot({ path: 'e2e/shots/p5-dish-price.png', fullPage: true })
+
+  // What she typed for one item never stays in the boxes for the next.
+  const addForm = page.locator('form:has([data-picker=ingredient_id])')
+  await pickItem(addForm, 'ingredient_id', leaf)
+  await addForm.locator('input[name=paid]').fill('700')
+  await addForm.locator('input[name=paid_qty]').fill('2')
+  await pickItem(addForm, 'ingredient_id', 'Utazi leaf')
+  const carried = [await addForm.locator('input[name=paid]').inputValue(), await addForm.locator('input[name=paid_qty]').inputValue()]
+  mark('a price typed for one item is cleared when another is chosen', carried.join('') === '', JSON.stringify(carried))
+
+  // Punctuation is not a name: nothing listed, nothing to add. A market name
+  // of an item she has says so beside "+ Add".
+  const sheet = page.locator('dialog[open]:has([role=listbox])').last()
+  const trigger = addForm.locator('[data-picker=ingredient_id]').first()
+  for (let i = 0; i < 25 && !(await sheet.isVisible().catch(() => false)); i++) { await trigger.click(); await page.waitForTimeout(300) }
+  await sheet.locator('input[type=search]').fill('--')
+  const junk = { options: await sheet.locator('[role=option]').count(), create: await sheet.locator('[data-create]').count(),
+    says: (await sheet.innerText()).includes('Type the name in letters') }
+  mark('a search of only punctuation lists nothing and offers nothing to add', junk.options === 0 && junk.create === 0 && junk.says, JSON.stringify(junk))
+  await sheet.locator('input[type=search]').fill('maggi')
+  const alias = await sheet.locator('[data-create]').innerText().catch(() => '')
+  mark('"+ Add" for a market name says which item it already is', alias.includes('Seasoning cube'), alias)
+  await page.keyboard.press('Escape')
+  await sheet.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {})
 }
 
 // ===========================================================================

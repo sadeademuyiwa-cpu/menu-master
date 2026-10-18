@@ -7,6 +7,10 @@ import {
   currentContext, contextRedirect, describeWriteError, withNotice, refusalNotice, writeRefusal,
 } from '@/lib/data/context'
 import { priceReturnPath, recipeIdOrNull } from '@/lib/pricing'
+import { keepsAmount, keepsQty, priceProblem, recordPurchase, type PricePaid } from '@/lib/data/record-purchase'
+import { paidDay } from '@/lib/dates'
+import { canRecordPurchases } from '../../purchases/buy-roles'
+import { canEditDish } from './roles'
 import { DISH_BUCKET, canAddDishPhotos, dishThumbPath, isDishPhotoPath } from '@/lib/dish-photo'
 
 // ---------------------------------------------------------------------------
@@ -63,13 +67,41 @@ export async function addLine(formData: FormData) {
   const { supabase, accountId } = ctx
   if (!accountId) redirect(contextRedirect(ctx, here))
 
+  // The page offers this form to the dish roles only; a tab left open after a
+  // role change is told, before anything is written.
+  if (!canEditDish(ctx.role)) redirect(withNotice(here, 'Dishes are changed by the owner, a manager or the kitchen.'))
+
   const ingredientId = String(formData.get('ingredient_id') ?? '')
   const unitId = String(formData.get('unit_id') ?? '')
   if (!ingredientId) redirect(withNotice(here, 'Choose the ingredient first.'))
   if (!unitId) redirect(withNotice(here, 'Choose the unit the amount is in.'))
   const qty = Number(formData.get('qty'))
-  if (!Number.isFinite(qty) || qty <= 0) {
-    redirect(withNotice(here, 'Enter how much of that ingredient the dish uses. It must be greater than zero.'))
+  if (!keepsQty(qty)) {
+    redirect(withNotice(here, 'Enter the quantity of that ingredient the dish uses. It must be greater than zero.'))
+  }
+
+  // What she paid for it, if she said: a real purchase (lib/data/record-purchase.ts).
+  // Everything about it is checked before the line is written, and it is
+  // recorded only after: never a purchase left behind for a refused line.
+  const paidRaw = String(formData.get('paid') ?? '').replace(/,/g, '').trim()
+  let price: { date: string; line: PricePaid } | null = null
+  if (paidRaw !== '') {
+    const amount = Number(paidRaw)
+    const bought = Number(String(formData.get('paid_qty') ?? '').replace(/,/g, '').trim())
+    const boughtIn = String(formData.get('paid_unit_id') ?? '')
+    if (!keepsAmount(amount)) redirect(withNotice(here, 'Enter what you paid in naira, digits only, more than zero.'))
+    if (!keepsQty(bought) || !boughtIn) {
+      redirect(withNotice(here, 'Say how much you bought for that price, and in what (kg, paint, bag…).'))
+    }
+    if (!canRecordPurchases(ctx.role)) {
+      redirect(withNotice(here, 'Purchases are recorded by the owner, a manager or the accountant. Ask one of them to record what was paid.'))
+    }
+    const date = paidDay(String(formData.get('paid_on') ?? ''))
+    if (!date) redirect(withNotice(here, 'Choose the day you paid. It cannot be after today.'))
+    const line = { ingredientId, qty: bought, unitId: boughtIn, amount }
+    const problem = await priceProblem(ctx, [line])
+    if (problem) redirect(withNotice(here, problem.message))
+    price = { date, line }
   }
 
   const { error } = await supabase.from('recipe_lines').insert({
@@ -81,9 +113,12 @@ export async function addLine(formData: FormData) {
   })
   if (error) redirect(withNotice(here, describeWriteError(error)))
 
+  const refused = price ? await recordPurchase(ctx, price.date, [price.line]) : null
   const failed = await recompute(supabase, recipeId)
   revalidatePath(here)
-  redirect(withNotice(here, failed ?? 'Ingredient added.'))
+  if (price && !refused) revalidatePath('/purchases')
+  redirect(withNotice(here, refused ? `Ingredient added, but what you paid was not recorded. ${refused}`
+    : failed ?? (price ? 'Ingredient added, and what you paid is recorded.' : 'Ingredient added.')))
 }
 
 /**

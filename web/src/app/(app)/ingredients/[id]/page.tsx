@@ -13,7 +13,7 @@ import {
 import { Sparkline } from '@/components/charts'
 import { ConfirmSubmit } from '@/components/confirm-submit'
 import { money, percent, quantity, NOT_ENTERED } from '@/lib/format'
-import { localToday, formatDay } from '@/lib/dates'
+import { localToday, formatDay, paidDay } from '@/lib/dates'
 import { canSeeCosts } from '@/lib/pricing'
 import { canAddMeasures, canEditItems, canRecordPurchases, canRemoveMeasures } from '../../purchases/buy-roles'
 import { dayShort, inSentence, perBuyingUnit, priceTrend, sinceWords, trendWords } from '../../purchases/buy-figures'
@@ -70,11 +70,14 @@ async function addPrice(formData: FormData) {
   // A purchase recorded at zero naira would drag the weighted-average cost of
   // this ingredient down for every recipe that uses it.
   const amount = requiredAmount(formData, 'amount')
-  const effective = String(formData.get('effective_date') ?? '')
+  // Empty is today; a day after today, or one that does not exist, is refused
+  // (costing is as of today, so a future price would be recorded and unused).
+  const effective = paidDay(String(formData.get('effective_date') ?? ''))
 
   if (!Number.isFinite(qty) || qty <= 0 || amount === null) {
     redirect(withNotice(here, 'Enter a quantity greater than zero and the amount you paid, using digits only.'))
   }
+  if (!effective) redirect(withNotice(here, 'Choose the day you paid. It cannot be after today.'))
 
   const { data: qtyBase, error: resolveError } = await supabase.rpc('fn_resolve_qty_to_base', {
     p_ingredient_id: id, p_qty: qty, p_unit_id: unitId,
@@ -98,7 +101,7 @@ async function addPrice(formData: FormData) {
   // links the line, and it carries the checks this screen must not duplicate:
   // role enforcement, draft-only posting (so a double submit cannot post
   // twice), zero-value refusal, and conversion blockers.
-  const date = effective || localToday()
+  const date = effective
   // Recording a purchase is closed after a trial (D3); say why, plainly.
   const closed = await closedRefusal(ctx.role)
   if (closed) redirect(withNotice(here, closed))
@@ -523,7 +526,7 @@ export default async function IngredientDetail(props: {
                     className={inputClass} style={inputStyle} />
                 </Field>
                 <Field label="Date">
-                  <input name="effective_date" type="date" className={inputClass} style={inputStyle} />
+                  <input name="effective_date" type="date" max={today} className={inputClass} style={inputStyle} />
                 </Field>
                 <div className="col-span-2 sm:col-span-1"><Submit>Record</Submit></div>
               </form>

@@ -126,6 +126,26 @@ export async function pickItem(scope, which, needle) {
   await sheet.waitFor({ state: 'hidden', timeout: 10000 })
 }
 
+/**
+ * Add an item the search does not find, from inside an item picker: open
+ * it, type the name, "+ Add", and say how it is bought ('weight', 'volume'
+ * or 'count'). The new item is then chosen in that picker.
+ */
+export async function createItemInPicker(scope, which, name, measure = 'weight') {
+  const page = typeof scope.page === 'function' ? scope.page() : scope
+  const trigger = scope.locator(`[data-picker="${which}"]`).first()
+  const sheet = page.locator('dialog[open]:has([role=listbox])').last()
+  for (let i = 0; i < 25; i++) {
+    await trigger.click()
+    if (await sheet.isVisible().catch(() => false)) break
+    await page.waitForTimeout(300)
+  }
+  await sheet.locator('input[type=search]').fill(name)
+  await sheet.locator('[data-create] button').first().click()
+  await sheet.locator(`[data-measure="${measure}"]`).click()
+  await sheet.waitFor({ state: 'hidden', timeout: 20000 })
+}
+
 /** Open a folded section by its title, without closing one that is already open. */
 export async function openDetails(page, title) {
   const d = page.locator(`details:has(> summary:has-text("${title}"))`).first()

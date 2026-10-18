@@ -2,74 +2,35 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentContext, describeWriteError, refusalNotice } from '@/lib/data/context'
-import { loadPurchaseCatalog, type CatalogItem } from '@/lib/data/purchase-catalog'
+import { currentContext, describeWriteError } from '@/lib/data/context'
+import { keepsAmount, keepsQty, priceProblem, recordPurchase, type PricePaid } from '@/lib/data/record-purchase'
+import { localToday, paidDay } from '@/lib/dates'
 import { NEW_ITEMS } from '@/lib/dish-library-data'
-import { canEditItems } from '../../purchases/buy-roles'
+import { createOwnItem, type CreatedItem } from '@/lib/actions/items'
+import { canRecordPurchases } from '../../purchases/buy-roles'
 
 export type DishResult = { error: string } | null
-export type AddedItem = { item: CatalogItem } | { error: string }
-
-const BASE_UNIT = { weight: 'g', volume: 'ml', count: 'unit' } as const
+export type AddedItem = CreatedItem
 
 /**
  * An item a dish suggestion needs that she does not have yet (Utazi leaf for
  * Abacha), added without leaving the dish. Only the items the dish list
  * names (NEW_ITEMS), measured and filed the way that list says; anything
- * else is added under Ingredients. Row-level security still decides who may
- * add an item (owner, manager, kitchen; 0015). If she already has it, that
- * one is used: names are unique per business, whatever the case.
+ * else is added through the search's own "+ Add". Who may add, and never a
+ * second copy of one she has or put away: createOwnItem.
  */
 export async function addSuggestedItem(name: string): Promise<AddedItem> {
   const wanted = NEW_ITEMS.find((x) => x.name === name)
   if (!wanted) return { error: 'Add that item under Ingredients.' }
-  const ctx = await currentContext()
-  const { supabase, accountId } = ctx
-  if (!accountId) return { error: 'Your session has ended. Sign in again, then add the item.' }
-  if (!canEditItems(ctx.role)) return { error: `Ask the owner or a manager to add ${wanted.name} under Ingredients.` }
+  return createOwnItem(wanted.name, wanted.measuredBy, 'dish', wanted.group)
+}
 
-  // Put away earlier: bring that one back, with its prices, rather than make a
-  // second one (a put-away item does not hold its name, 0001's partial index,
-  // and could then never be restored).
-  const { data: away } = await supabase.from('ingredients').select('id')
-    .eq('account_id', accountId).ilike('name', wanted.name).not('deleted_at', 'is', null)
-    .order('deleted_at', { ascending: false }).limit(1).returns<{ id: string }[]>()
-  if (away?.[0]) {
-    const { data: back, error: backError } = await supabase.from('ingredients').update({ deleted_at: null })
-      .eq('id', away[0].id).select('id').maybeSingle<{ id: string }>()
-    if (backError && backError.code !== '23505') return { error: describeWriteError(backError) ?? `We could not add ${wanted.name}.` }
-    if (back) return finish(back.id)
-  }
-
-  const [{ data: unit }, { data: categories }] = await Promise.all([
-    supabase.from('units').select('id').eq('code', BASE_UNIT[wanted.measuredBy]).maybeSingle<{ id: string }>(),
-    // Her own business's category: someone in two businesses can read both.
-    supabase.from('ingredient_categories').select('id').eq('account_id', accountId).eq('name', wanted.group)
-      .limit(1).returns<{ id: string }[]>(),
-  ])
-  if (!unit) return { error: `We could not add ${wanted.name}. Try again.` }
-
-  const { data: made, error } = await supabase.from('ingredients').insert({
-    account_id: accountId, name: wanted.name, kind: 'ingredient',
-    base_unit_id: unit.id, category_id: categories?.[0]?.id ?? null,
-  }).select('id').maybeSingle<{ id: string }>()
-  let id = made?.id
-  if (error) {
-    if (error.code !== '23505') return { error: describeWriteError(error) ?? `We could not add ${wanted.name}.` }
-    const { data: existing } = await supabase.from('ingredients').select('id')
-      .ilike('name', wanted.name).is('deleted_at', null).limit(1).returns<{ id: string }[]>()
-    id = existing?.[0]?.id
-  }
-  // No row and no error: refused quietly (the role, or the trial has ended).
-  if (!id) return { error: await refusalNotice(ctx.role) }
-  return finish(id)
-
-  async function finish(itemId: string): Promise<AddedItem> {
-    revalidatePath('/ingredients')
-    const { items } = await loadPurchaseCatalog(supabase, 'cook')
-    const item = items.find((i) => i.id === itemId)
-    return item ? { item } : { error: `${wanted!.name} was added. Reload the page to use it.` }
-  }
+/** "3,000" or "3000"; null when left empty, NaN when it is not a usable amount. */
+function typed(raw: string | undefined): number | null {
+  const t = String(raw ?? '').replace(/,/g, '').trim()
+  if (t === '') return null
+  const n = Number(t)
+  return Number.isFinite(n) && n > 0 ? n : NaN
 }
 
 /**
@@ -77,6 +38,18 @@ export async function addSuggestedItem(name: string): Promise<AddedItem> {
  * the recipe page writes -- the recipe, its lines -- followed by EXACTLY ONE
  * cost snapshot (F3; see recipes/[id]). A dish may be saved with no
  * ingredients yet: its page then asks for them first.
+ *
+ * Beside an ingredient she may say what she paid for it ("₦3,000 for 1
+ * paint"). That is recorded as a real purchase on the day she gives
+ * (recordPurchase), before the cost is worked out, so the dish is costed
+ * from it at once. Never an estimate, and never a figure she did not type.
+ *
+ * Everything that can be checked is checked before the first write, so a
+ * refusal keeps her form. Then the dish, its lines, and last what she paid:
+ * a purchase cannot be taken back without a cancellation, so it is never
+ * recorded for lines that were refused, and a save tried again cannot record
+ * it twice. Once the dish is written it is kept (only the owner may delete a
+ * dish, 0015); anything refused after that is said on its page.
  */
 export async function createDish(_prev: DishResult, formData: FormData): Promise<DishResult> {
   const name = String(formData.get('name') ?? '').trim()
@@ -106,16 +79,42 @@ export async function createDish(_prev: DishResult, formData: FormData): Promise
   const ids = formData.getAll('line_ingredient_id').map(String)
   const qtys = formData.getAll('line_qty').map(String)
   const units = formData.getAll('line_unit_id').map(String)
+  const paid = formData.getAll('line_paid').map(String)
+  const paidQtys = formData.getAll('line_paid_qty').map(String)
+  const paidUnits = formData.getAll('line_paid_unit_id').map(String)
   const lines: { ingredient_id: string; qty: number; unit_id: string }[] = []
+  const prices: PricePaid[] = []
+  /** The row each price was typed on, to say which one a refusal is about. */
+  const priceRow: number[] = []
   for (let i = 0; i < ids.length; i++) {
     const raw = (qtys[i] ?? '').trim()
-    if (!ids[i] && !raw) continue
+    const amount = typed(paid[i])
+    if (!ids[i] && !raw && amount === null) continue
     if (!ids[i]) return { error: `Ingredient ${i + 1}: choose which ingredient it is, or clear the row.` }
     const qty = Number(raw)
-    if (!raw || !Number.isFinite(qty) || qty <= 0 || !units[i]) {
-      return { error: `Ingredient ${i + 1}: enter how much goes into one batch. It must be more than zero.` }
+    if (!raw || !keepsQty(qty) || !units[i]) {
+      return { error: `Ingredient ${i + 1}: enter the quantity that goes into one batch. It must be more than zero.` }
     }
     lines.push({ ingredient_id: ids[i], qty, unit_id: units[i] })
+    if (amount === null) continue
+    if (Number.isNaN(amount) || !keepsAmount(amount)) return { error: `Ingredient ${i + 1}: enter what you paid in naira, digits only, more than zero.` }
+    const bought = typed(paidQtys[i])
+    if (bought === null || Number.isNaN(bought) || !keepsQty(bought) || !paidUnits[i]) {
+      return { error: `Ingredient ${i + 1}: say how much you bought for that price, and in what (kg, paint, bag…).` }
+    }
+    prices.push({ ingredientId: ids[i], qty: bought, unitId: paidUnits[i], amount })
+    priceRow.push(i + 1)
+  }
+  let date = localToday()
+  if (prices.length > 0) {
+    if (!canRecordPurchases(ctx.role)) {
+      return { error: 'Purchases are recorded by the owner, a manager or the accountant. Clear the price boxes to save the dish.' }
+    }
+    const day = paidDay(String(formData.get('paid_on') ?? ''))
+    if (!day) return { error: 'Choose the day you paid. It cannot be after today.' }
+    date = day
+    const problem = await priceProblem(ctx, prices)
+    if (problem) return { error: problem.at === null ? problem.message : `Ingredient ${priceRow[problem.at]}: ${problem.message}` }
   }
 
   const { data: recipe, error: rErr } = await supabase.from('recipes').insert({
@@ -127,19 +126,26 @@ export async function createDish(_prev: DishResult, formData: FormData): Promise
       ? `You already have a dish called “${name}”. Give this one a different name.`
       : describeWriteError(rErr) ?? 'We could not save that dish.' }
   }
-
-  if (lines.length > 0) {
-    const { error: lErr } = await supabase.from('recipe_lines')
-      .insert(lines.map((l) => ({ account_id: accountId, recipe_id: recipe.id, ...l })))
-    if (lErr) {
-      await supabase.from('recipes').delete().eq('id', recipe.id)
-      return { error: describeWriteError(lErr) ?? 'We could not save what goes into that dish.' }
-    }
-    await supabase.rpc('fn_compute_recipe_cost_snapshot', { p_recipe_id: recipe.id })
+  // Typed in full so the compiler knows nothing runs after it (redirect throws).
+  const saved: (notice: string) => never = (notice) => {
+    revalidatePath('/recipes')
+    revalidatePath('/dashboard')
+    redirect(`/recipes/${recipe.id}?notice=${encodeURIComponent(notice)}`)
   }
 
-  revalidatePath('/recipes')
-  revalidatePath('/dashboard')
-  const notice = lines.length ? 'Dish saved.' : 'Dish saved. Now add what goes into one batch.'
-  redirect(`/recipes/${recipe.id}?notice=${encodeURIComponent(notice)}`)
+  if (lines.length === 0) saved('Dish saved. Now add what goes into one batch.')
+  const { error: lErr } = await supabase.from('recipe_lines')
+    .insert(lines.map((l) => ({ account_id: accountId, recipe_id: recipe.id, ...l })))
+  if (lErr) {
+    saved(`Dish saved, but what goes into it was not: ${describeWriteError(lErr) ?? 'it was refused.'} Add the ingredients below.`
+      + (prices.length ? ' What you paid was not recorded either.' : ''))
+  }
+
+  // What she paid, after the lines it belongs to; the cost worked out below uses it.
+  const refused = await recordPurchase(ctx, date, prices)
+  await supabase.rpc('fn_compute_recipe_cost_snapshot', { p_recipe_id: recipe.id })
+  if (prices.length && !refused) revalidatePath('/purchases')
+  saved(refused ? `Dish saved, but what you paid was not recorded. ${refused}`
+    : prices.length ? `Dish saved, and what you paid for ${prices.length} item${prices.length === 1 ? '' : 's'} is recorded.`
+    : 'Dish saved.')
 }

@@ -38,7 +38,6 @@ const SKIP = ['(app)/account', '(app)/subscribe', 'api/checkout', 'api/billing',
  */
 const ALLOWED: Record<string, number> = {
   '(app)/purchases/new/actions.ts purchases.delete': 1,
-  '(app)/recipes/new/actions.ts recipes.delete': 1,
   '(app)/sales/new/actions.ts orders.delete': 1,
   '(app)/sales/new/actions.ts customers.delete': 1,
   '(setup)/start/page.tsx purchases.delete': 1,

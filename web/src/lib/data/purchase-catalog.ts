@@ -158,6 +158,28 @@ export async function loadPurchaseCatalog(supabase: Supabase, purpose: 'buy' | '
   return { items, recent }
 }
 
+/** How an item's price came about: a purchase, or an estimate typed before purchases were the only way. */
+export type PriceKind = 'purchase' | 'estimate'
+
+/**
+ * Which items have a price, and whether it came from a purchase: one row per
+ * item, read from v_ingredient_price_status (0042), the rule the Ingredients
+ * list uses. Not a page of price rows, which leaves out anything priced long
+ * ago and counts estimates as purchases. An estimate still costs dishes
+ * (fn_ingredient_cost_basis), so it is a price, said as what it is.
+ *
+ * For a role that may see costs (canSeeCosts): to anyone else the view shows
+ * every item as never priced, which would read "no price yet" everywhere.
+ */
+export async function loadPricedItems(supabase: Supabase, businessId: string): Promise<Record<string, PriceKind>> {
+  const { data } = await supabase.from('v_ingredient_price_status').select('ingredient_id,price_state')
+    .eq('business_id', businessId).neq('price_state', 'never_priced')
+    .returns<{ ingredient_id: string; price_state: string }[]>()
+  const out: Record<string, PriceKind> = {}
+  for (const r of data ?? []) out[r.ingredient_id] = r.price_state === 'estimate_only' ? 'estimate' : 'purchase'
+  return out
+}
+
 /**
  * What this business has bought before, from its own recorded purchases:
  * the items it buys most often (for the "Bought before" chips), the items and

@@ -10,8 +10,12 @@ import { money, percent, quantity, NOT_ENTERED } from '@/lib/format'
 import { canSeeCosts, canSeeSellingPrices, canSetPrices } from '@/lib/pricing'
 import { canAddDishPhotos, photoRefusal } from '@/lib/dish-photo'
 import { noticeTone } from '@/lib/ui/notice-tone'
-import { loadItemList } from '@/lib/data/purchase-catalog'
-import { setDishPhoto } from './actions'
+import { loadBuyingHistory, loadItemList, loadPricedItems, loadPurchaseCatalog } from '@/lib/data/purchase-catalog'
+import { createOwnItem } from '@/lib/actions/items'
+import { localToday } from '@/lib/dates'
+import { canEditItems, canRecordPurchases } from '../../purchases/buy-roles'
+import { addLine, setDishPhoto } from './actions'
+import { AddIngredient } from './add-ingredient'
 import { canAddKindsOfWork, canEditDish, canMakeSizes } from './roles'
 import { costParts, portionShare, type PartLine } from './breakdown'
 import {
@@ -19,7 +23,7 @@ import {
   type DishVerdict, type SizeMoney,
 } from './money'
 import { charged } from './charged'
-import { AddIngredient, AddSubDish, WhatGoesIn } from './lines'
+import { AddSubDish, WhatGoesIn } from './lines'
 import { TimeItTakes } from './work'
 import { AboutDish } from './about'
 import { TryPrice } from './try-price'
@@ -117,6 +121,18 @@ export default async function DishPage(props: {
   if (!found) notFound()
   const recipe = found
 
+  // Saying what was paid beside a new ingredient records a purchase: of the
+  // dish roles, owner and manager (0015). Their buying units, last purchases
+  // and priced items, read alongside everything else.
+  const buys = edits && canRecordPurchases(role)
+  const buyingRead = buys
+    ? Promise.all([
+        loadPurchaseCatalog(supabase, 'buy'),
+        loadBuyingHistory(supabase, { withAmounts: costs }),
+        loadPricedItems(supabase, recipe.business_id),
+      ])
+    : Promise.resolve(null)
+
   const [
     units, ingredients, otherRecipes, costLines, plainLines, checks, snaps, settings,
     menuPrices, basisRows, formats, variants, labourLines, labourRates,
@@ -176,6 +192,9 @@ export default async function DishPage(props: {
     when(edits, () => supabase.from('labour_rates').select('id,name').eq('is_active', true)
       .order('name').returns<{ id: string; name: string }[]>()),
   ])
+  const buying = await buyingRead
+  const buyUnitsOf = new Map((buying?.[0].items ?? []).map((i) => [i.id, i.units]))
+  const priced = buying?.[2] ?? {}
 
   // One shape for the lines, whoever is looking. The plain read leaves every
   // cost field null: not zero, not known to this person.
@@ -456,7 +475,10 @@ export default async function DishPage(props: {
 
         {edits && (
           <>
-            <AddIngredient recipeId={recipe.id} ingredients={ingredients ?? []} units={unitList} open={lines.length === 0} />
+            <AddIngredient recipeId={recipe.id} units={unitList} open={lines.length === 0} action={addLine}
+                           ingredients={(ingredients ?? []).map((i) => ({ ...i, buyUnits: buyUnitsOf.get(i.id) ?? [] }))}
+                           canAddItems={canEditItems(role)} canBuy={buys} priced={priced} lastBought={buying?.[1].lastBought ?? {}}
+                           today={localToday()} createItem={createOwnItem} />
             <AddSubDish recipeId={recipe.id} dishes={otherRecipes ?? []} units={unitList}
                         unitCode={(uid) => unitById.get(uid)?.code ?? '?'} />
           </>

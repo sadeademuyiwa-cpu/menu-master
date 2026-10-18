@@ -20,6 +20,28 @@ export function localToday(now: Date = new Date(), timeZone: string = BUSINESS_T
 }
 
 /**
+ * The day something was paid, as typed: '' is today; otherwise a real
+ * YYYY-MM-DD that is not after today. null for anything else. A purchase
+ * dated next month has not happened, and costing (as of today) would skip it
+ * while the screen said "recorded"; 2026-02-30 would reach the database as a
+ * raw error.
+ */
+export function paidDay(
+  raw: string | null | undefined,
+  now: Date = new Date(),
+  timeZone: string = BUSINESS_TIME_ZONE,
+): string | null {
+  const t = String(raw ?? '').trim()
+  const today = localToday(now, timeZone)
+  if (t === '') return today
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null
+  const [y, m, d] = t.split('-').map(Number)
+  const real = new Date(Date.UTC(y, m - 1, d))
+  if (real.getUTCFullYear() !== y || real.getUTCMonth() !== m - 1 || real.getUTCDate() !== d) return null
+  return t <= today ? t : null
+}
+
+/**
  * A date the way the owner would say it: "Today", "Yesterday", "11 Oct 2026".
  *
  * WHY THIS EXISTS

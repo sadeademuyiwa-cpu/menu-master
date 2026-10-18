@@ -4,7 +4,8 @@ import { loadBuyingHistory, loadPurchaseCatalog } from '@/lib/data/purchase-cata
 import { localToday } from '@/lib/dates'
 import { canSeeCosts } from '@/lib/pricing'
 import { BackLink, Empty, PageHeader } from '@/components/ui'
-import { canAddMeasures, canRecordPurchases } from '../buy-roles'
+import { createOwnItem } from '@/lib/actions/items'
+import { canAddMeasures, canEditItems, canRecordPurchases } from '../buy-roles'
 import { NewPurchase } from './new-purchase'
 import { recordPurchase, saveMeasure } from './actions'
 import '../buy.css'
@@ -53,6 +54,7 @@ export default async function NewPurchasePage(props: {
         lastBought={history.lastBought} suppliers={suppliers ?? []}
         today={localToday()} first={ingredient ?? null} action={recordPurchase}
         canMeasure={canAddMeasures(ctx.role)} saveMeasure={saveMeasure}
+        canAddItems={canEditItems(ctx.role)} createItem={createOwnItem}
       />
     </div>
   )

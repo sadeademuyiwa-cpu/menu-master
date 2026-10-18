@@ -179,3 +179,8 @@ export function dayShort(day: string): string {
 export function inSentence(formatted: string): string {
   return formatted === 'Today' || formatted === 'Yesterday' ? formatted.toLowerCase() : formatted
 }
+
+/** The same, after "bought" or "paid": "today", "yesterday", "on 30 Sep 2026" (never "on Today"). */
+export function onDay(formatted: string): string {
+  return formatted === 'Today' || formatted === 'Yesterday' ? formatted.toLowerCase() : `on ${formatted}`
+}

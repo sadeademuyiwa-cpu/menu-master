@@ -35,8 +35,13 @@ const page = await ctx.newPage()
 await go(page, '/signup')
 await page.fill('input[type=email]', `audit-${stamp}@t.ng`)
 await page.fill('input[type=password]', 'correct-horse-battery')
-await Promise.all([page.waitForLoadState('domcontentloaded'), page.click('button[type=submit]')])
-await page.waitForLoadState('networkidle').catch(() => {})
+await page.click('button[type=submit]')
+// Wait for the sign-up itself to finish (it leaves /signup), as the journeys
+// do. Going to /onboarding while it was still in flight cancelled it on a
+// cold server: no session, and onboarding never appeared.
+await page.waitForURL((u) => !u.pathname.startsWith('/signup'), { timeout: 60000 }).catch(async () => {
+  throw new Error(`sign-up never finished: ${(await page.locator('body').innerText()).slice(0, 300)}`)
+})
 // onboardBusiness polls /onboarding until the auth cookie has landed
 await onboardBusiness(page, BASE, { business: 'Ada Kitchen' })
 await finishSetup(page, BASE)

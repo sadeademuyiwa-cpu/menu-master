@@ -2,8 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   sumMoney, weekStart, lastWeeks, monthStart, spendByWeek, groupByDay,
-  priceTrend, sinceWords, trendWords, perBuyingUnit, nameList,
+  priceTrend, sinceWords, trendWords, perBuyingUnit, nameList, inSentence, onDay,
 } from '../src/app/(app)/purchases/buy-figures.ts'
+
+test('a day inside a sentence never reads "on Today"', () => {
+  assert.equal(inSentence('Today'), 'today')
+  assert.equal(inSentence('30 Sep 2026'), '30 Sep 2026')
+  assert.equal(`You paid ₦2,500 ${onDay('Today')}.`, 'You paid ₦2,500 today.')
+  assert.equal(onDay('Yesterday'), 'yesterday')
+  assert.equal(onDay('30 Sep 2026'), 'on 30 Sep 2026')
+})
 
 test('money adds in kobo and nothing is not zero', () => {
   assert.equal(sumMoney(['0.10', '0.20']), 0.3)

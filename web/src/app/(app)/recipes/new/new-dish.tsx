@@ -6,20 +6,40 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
 import { ItemPicker } from '@/components/item-picker'
-import type { CatalogItem } from '@/lib/data/purchase-catalog'
+import type { LastBought, PriceKind } from '@/lib/data/purchase-catalog'
+import type { CreatedItem, NewOwnItem } from '@/lib/actions/items'
 import { DISHES, NEW_ITEMS, type LibraryDish } from '@/lib/dish-library-data'
 import { findDishes, ownItemFinder, suggestFor, type Suggestion } from '@/lib/item-search'
+import { money } from '@/lib/format'
+import { formatDay } from '@/lib/dates'
+import { onDay } from '../../purchases/buy-figures'
 import type { AddedItem, DishResult } from './actions'
 
+type Item = NewOwnItem
 type YieldUnit = { id: string; code: string; label: string }
-/** `suggested`: put there by a dish suggestion and not chosen by her since. */
-type Row = { key: number; ingredientId: string; unitId: string; qty: string; suggested?: boolean }
+/**
+ * One ingredient line. `suggested`: put there by a dish suggestion and not
+ * chosen by her since. `paid`, `paidQty`, `paidUnitId`: what she paid for it,
+ * if she says ("₦3,000 for 1 paint"); `newPrice` opens those boxes for an
+ * item that already has a price.
+ */
+type Row = {
+  key: number; ingredientId: string; unitId: string; qty: string; suggested?: boolean
+  paid: string; paidQty: string; paidUnitId: string; newPrice?: boolean
+}
 type Followup = {
   dish: string; partial: boolean; added: number
-  optional: CatalogItem[]; notInList: Suggestion<CatalogItem>['notInList']
+  optional: Item[]; notInList: Suggestion<Item>['notInList']
 }
 
 const muted = { color: 'var(--mm-muted)' }
+const empty = { ingredientId: '', unitId: '', qty: '', paid: '', paidQty: '', paidUnitId: '' }
+
+/** "1 bag", "25 kg", "2 pieces": a quantity said with its unit. */
+function amountOf(qty: number, unit: string): string {
+  const one: Record<string, string> = { pieces: 'piece', grams: 'gram', litres: 'litre', pairs: 'pair' }
+  return `${qty.toLocaleString('en-NG', { maximumFractionDigits: 3 })} ${qty === 1 ? (one[unit] ?? unit) : unit}`.trim()
+}
 
 /**
  * A new dish on one screen: its name, how much one batch makes, and what goes
@@ -30,20 +50,36 @@ const muted = { color: 'var(--mm-muted)' }
  *
  * Typing a dish's name offers its usual ingredients, by NAME, from the
  * dishes Recipe by LunchLoft's kitchen has checked (lib/dish-library-data.ts).
- * They become rows with the amount left empty: she types every amount, and
- * a row without one is refused on save. Every field is held here, so a
- * refused save keeps what she typed (React resets an uncontrolled form after
- * each submission).
+ * They become rows with the quantity left empty: she types every quantity,
+ * and a row without one is refused on save.
+ *
+ * Beside each ingredient, someone who records purchases may say what she
+ * paid for it. An item with no price gets empty boxes; one with a price
+ * shows it ("You paid ₦85,000 for 1 bag on 12 Oct"), and "Paid a new price?"
+ * opens empty boxes with that purchase as a hint. Never pre-filled: a new
+ * amount over last time's quantity would cost every dish wrongly. What she
+ * types is recorded as a real purchase when the dish is saved.
+ *
+ * Every field is held here, so a refused save keeps what she typed (React
+ * resets an uncontrolled form after each submission).
  */
-export function NewDish({ items, priced, yieldUnits, action, canAddItems, addItem }: {
-  items: CatalogItem[]
-  /** Ingredients with a price from the owner's own purchases. */
-  priced: string[]
+export function NewDish({ items, priced, recent, lastBought, yieldUnits, today, action, canAddItems, canBuy, addItem, createItem }: {
+  items: Item[]
+  /** Which ingredients have a price, and how it came about; null for a role that may not see costs. */
+  priced: Record<string, PriceKind> | null
+  /** Ingredients priced most recently first: the short list before she types. */
+  recent: string[]
+  /** What each item came to last time. Amounts only for a role that may see costs. */
+  lastBought: Record<string, LastBought>
   yieldUnits: YieldUnit[]
+  today: string
   action: (prev: DishResult, formData: FormData) => Promise<DishResult>
   /** Whether she may add an item (owner, manager, kitchen). */
   canAddItems: boolean
+  /** Whether she may record what was paid (of the dish roles: owner, manager). */
+  canBuy: boolean
   addItem: (name: string) => Promise<AddedItem>
+  createItem: (name: string, measuredBy: 'weight' | 'volume' | 'count', purpose: 'buy' | 'dish') => Promise<CreatedItem>
 }) {
   const [result, formAction] = useActionState(action, null)
   const portionUnit = yieldUnits.find((u) => u.code === 'portion')
@@ -52,6 +88,7 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
   const [name, setName] = useState('')
   const [batch, setBatch] = useState('')
   const [portion, setPortion] = useState('')
+  const [paidOn, setPaidOn] = useState(today)
   // Typed on a slow phone before the page's script arrived: keep it, or the
   // next render would clear it.
   const nameRef = useRef<HTMLInputElement>(null)
@@ -61,21 +98,34 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
     if (batchRef.current?.value) setBatch(batchRef.current.value)
   }, [])
   const nextKey = useRef(3)
-  const blank = (): Row => ({ key: nextKey.current++, ingredientId: '', unitId: '', qty: '' })
-  const [rows, setRows] = useState<Row[]>([0, 1, 2].map((key) => ({ key, ingredientId: '', unitId: '', qty: '' })))
+  const blank = (): Row => ({ key: nextKey.current++, ...empty })
+  const [rows, setRows] = useState<Row[]>([0, 1, 2].map((key) => ({ key, ...empty })))
 
-  // Items added from a suggestion on this screen; the page's own list catches up on its next render.
-  const [extra, setExtra] = useState<CatalogItem[]>([])
+  // Items added on this screen; the page's own list catches up on its next render.
+  const [extra, setExtra] = useState<Item[]>([])
   const all = useMemo(() => {
     const seen = new Set(items.map((i) => i.id))
     return [...items, ...extra.filter((i) => !seen.has(i.id))]
   }, [items, extra])
   const byId = useMemo(() => new Map(all.map((i) => [i.id, i])), [all])
-  const pricedSet = useMemo(() => new Set(priced), [priced])
-  const pricedItems = all.filter((i) => pricedSet.has(i.id))
+  const isPriced = (id: string) => !!priced?.[id]
+  const pricedItems = priced ? recent.filter((id) => byId.has(id) && priced[id]) : []
   const set = (key: number, patch: Partial<Row>) =>
     setRows((current) => current.map((r) => (r.key === key ? { ...r, ...patch } : r)))
-  const unpricedChosen = rows.some((r) => r.ingredientId && !pricedSet.has(r.ingredientId))
+  /** A row for an item: its usual cooking unit, and the unit it is most often bought in. */
+  const rowFor = (item: Item, patch: Partial<Row> = {}): Row =>
+    ({ ...blank(), ingredientId: item.id, unitId: item.units[0]?.id ?? '', paidUnitId: buyUnitOf(item), ...patch })
+  /**
+   * The unit she last bought it in, if this screen offers it; else the first
+   * it does. A unit from the item's own page (tablespoons) or a measure since
+   * removed would be posted while the box showed something else.
+   */
+  const buyUnitOf = (item: Item | undefined) => {
+    const last = item && lastBought[item.id]?.unitId
+    return (last && item?.buyUnits?.some((u) => u.id === last) ? last : item?.buyUnits?.[0]?.id) ?? ''
+  }
+  const unpricedChosen = !!priced && rows.some((r) => r.ingredientId && !priced[r.ingredientId] && !r.paid.trim())
+  const anyPaid = rows.some((r) => r.paid.trim())
 
   // React resets the form after every save attempt. Inputs held here keep
   // their text, but a select drops back to its first option while her choice
@@ -90,6 +140,8 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
     for (const r of rows) {
       const unit = document.getElementById(`unit-${r.key}`)
       if (unit instanceof HTMLSelectElement) unit.value = r.unitId
+      const paidUnit = document.getElementById(`paid-unit-${r.key}`)
+      if (paidUnit instanceof HTMLSelectElement) paidUnit.value = r.paidUnitId
     }
     // Only after a save attempt: the rest of the time React keeps them in step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +168,7 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
   const [addingName, setAddingName] = useState<string | null>(null)
   const [addError, setAddError] = useState<string | null>(null)
 
-  // After a suggestion adds rows, the cursor waits in the first "How much";
+  // After a suggestion adds rows, the cursor waits in the first quantity;
   // after one item is added, in that item's; when a suggestion added nothing,
   // on the note that says why.
   const [focusKey, setFocusKey] = useState<number | null>(null)
@@ -132,24 +184,23 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
   }, [focusKey, focusItem, focusNote, rows])
 
   /** Put an item on a row of its own, or go to the row it is already on. Read against the latest rows. */
-  function addRow(item: CatalogItem) {
+  function addRow(item: Item) {
     setRows((current) => (current.some((r) => r.ingredientId === item.id)
       ? current
-      : [...current.filter((r) => r.ingredientId || r.qty.trim()), { ...blank(), ingredientId: item.id, unitId: item.units[0]?.id ?? '' }]))
+      : [...current.filter((r) => r.ingredientId || r.qty.trim()), rowFor(item)]))
     setFocusItem(item.id)
   }
 
   /**
-   * A dish's usual ingredients as rows: her items only, amounts empty. Another
-   * dish chosen instead replaces the rows the last suggestion put there that
-   * she has not touched; her own rows, and any with an amount, stay.
+   * A dish's usual ingredients as rows: her items only, quantities empty.
+   * Another dish chosen instead replaces the rows the last suggestion put
+   * there that she has not touched; her own rows, and any with a quantity, stay.
    */
   function apply(dish: LibraryDish) {
     const s = suggestFor(dish, all, NEW_ITEMS, name)
-    const kept = rows.filter((r) => (r.ingredientId || r.qty.trim()) && !(r.suggested && !r.qty.trim()))
+    const kept = rows.filter((r) => (r.ingredientId || r.qty.trim()) && !(r.suggested && !r.qty.trim() && !r.paid.trim()))
     const have = new Set(kept.map((r) => r.ingredientId))
-    const added = s.rows.filter((r) => !r.optional && !have.has(r.item.id))
-      .map((r) => ({ ...blank(), ingredientId: r.item.id, unitId: r.item.units[0]?.id ?? '', suggested: true }))
+    const added = s.rows.filter((r) => !r.optional && !have.has(r.item.id)).map((r) => rowFor(r.item, { suggested: true }))
     const next = [...kept, ...added]
     setRows(next.length ? next : [blank()])
     setApplied(dish.name)
@@ -183,7 +234,7 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
   }
 
   /** An ingredient she now has (added here or in another tab): onto the dish, and off the "not on your list" list. */
-  function takeFound(missingName: string, item: CatalogItem) {
+  function takeFound(missingName: string, item: Item) {
     addRow(item)
     setFollowup((f) => f && { ...f, notInList: f.notInList.filter((n) => n.name !== missingName) })
   }
@@ -231,7 +282,7 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
               </p>
             )}
             <p className="text-xs" style={muted}>
-              From Recipe by LunchLoft&apos;s checked recipes. Only the names: you type how much of each you use.
+              From Recipe by LunchLoft&apos;s checked recipes. Only the names: you type the quantity of each you use.
             </p>
           </div>
         )}
@@ -270,8 +321,8 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
               {followup.added === 0
                 ? `None of the usual ingredients for ${followup.dish} are on your list yet. Add them below, or choose your own in the rows.`
                 : followup.partial
-                  ? `Added what we know goes into ${followup.dish}. Add the rest yourself, then type how much of each goes into one batch.`
-                  : `Added the usual ingredients for ${followup.dish}. Type how much of each goes into one batch, and remove any you don't use.`}
+                  ? `Added what we know goes into ${followup.dish}. Add the rest yourself, then type the quantity of each in one batch.`
+                  : `Added the usual ingredients for ${followup.dish}. Type the quantity of each in one batch, and remove any you don't use.`}
             </p>
             {matches.some((m) => m.name !== applied) && (
               <p className="text-xs" style={muted}>
@@ -339,6 +390,9 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
         <ol className="space-y-2">
           {rows.map((r, index) => {
             const item = byId.get(r.ingredientId)
+            const last = item ? lastBought[item.id] : undefined
+            const hasPrice = !!item && isPriced(item.id)
+            const showBoxes = canBuy && !!item && (!hasPrice || r.newPrice)
             return (
               <li key={r.key} className="mm-card space-y-2">
                 <div className="flex items-center gap-2">
@@ -346,9 +400,17 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
                     <ItemPicker
                       items={all} name="line_ingredient_id" value={r.ingredientId} label={`Ingredient ${index + 1}`}
                       title="Which ingredient?" placeholder="Choose an ingredient…"
-                      top={pricedItems.length > 0 ? { label: 'Priced by you', ids: pricedItems.map((i) => i.id) } : undefined}
-                      note={(i) => (pricedSet.has(i.id) ? undefined : 'no price yet')}
-                      onChange={(id) => set(r.key, { ingredientId: id, unitId: byId.get(id)?.units[0]?.id ?? '', suggested: false })}
+                      top={pricedItems.length > 0 ? { label: 'Priced by you', ids: pricedItems } : undefined}
+                      note={(i) => (priced && !priced[i.id] ? 'no price yet' : undefined)}
+                      onChange={(id) => set(r.key, { ingredientId: id, unitId: byId.get(id)?.units[0]?.id ?? '', suggested: false,
+                        paid: '', paidQty: '', paidUnitId: buyUnitOf(byId.get(id)), newPrice: false })}
+                      onCreate={canAddItems ? (n, m) => createItem(n, m, 'dish') : undefined}
+                      onCreated={(made) => {
+                        setExtra((current) => (current.some((i) => i.id === made.id) ? current : [...current, made]))
+                        set(r.key, { ingredientId: made.id, unitId: made.units[0]?.id ?? '', suggested: false,
+                          paid: '', paidQty: '', paidUnitId: made.buyUnits?.[0]?.id ?? '', newPrice: false })
+                        setFocusKey(r.key)
+                      }}
                     />
                   </div>
                   {rows.length > 1 && (
@@ -357,14 +419,59 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <input id={`qty-${r.key}`} name="line_qty" inputMode="decimal" aria-label={`How much, ingredient ${index + 1}`}
-                         placeholder="How much" className="mm-input" value={r.qty} onChange={(e) => set(r.key, { qty: e.target.value })} />
-                  <select id={`unit-${r.key}`} name="line_unit_id" value={r.unitId} aria-label={`Unit, ingredient ${index + 1}`}
-                          onChange={(e) => set(r.key, { unitId: e.target.value })} className="mm-input">
-                    {!item && <option value="">Unit</option>}
-                    {item?.units.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
-                  </select>
+                  <label className="block">
+                    <span className="text-xs font-medium" style={muted}>Quantity in one batch</span>
+                    <input id={`qty-${r.key}`} name="line_qty" inputMode="decimal" aria-label={`Quantity, ingredient ${index + 1}`}
+                           placeholder="e.g. 2" className="mm-input mt-1" value={r.qty} onChange={(e) => set(r.key, { qty: e.target.value })} />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium" style={muted}>Unit</span>
+                    <select id={`unit-${r.key}`} name="line_unit_id" value={r.unitId} aria-label={`Unit, ingredient ${index + 1}`}
+                            onChange={(e) => set(r.key, { unitId: e.target.value })} className="mm-input mt-1">
+                      {!item && <option value="">Unit</option>}
+                      {item?.units.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+                    </select>
+                  </label>
                 </div>
+
+                {/* What she paid, sent for every row so the lists stay aligned. */}
+                <input type="hidden" name="line_paid" value={showBoxes ? r.paid : ''} />
+                <input type="hidden" name="line_paid_qty" value={showBoxes ? r.paidQty : ''} />
+                <input type="hidden" name="line_paid_unit_id" value={showBoxes ? r.paidUnitId : ''} />
+                {canBuy && item && hasPrice && !r.newPrice && (
+                  <p className="text-xs" style={muted} data-price-known>
+                    {last && last.amount !== undefined
+                      ? <>You paid <span className="mm-num font-semibold" style={{ color: 'var(--mm-fg)' }}>{money(last.amount)}</span> for {amountOf(last.qty, last.unit)} {onDay(formatDay(last.day))}.{' '}</>
+                      : priced?.[item.id] === 'estimate'
+                        ? <>Costed from an estimate you typed, not a purchase.{' '}</>
+                        : <>Priced from what you paid.{' '}</>}
+                    <button type="button" className="mm-inline-tap font-semibold underline" style={{ color: 'var(--mm-fg)' }}
+                            onClick={() => set(r.key, { newPrice: true, paidUnitId: r.paidUnitId || buyUnitOf(item) })}>
+                      Paid a new price?
+                    </button>
+                  </p>
+                )}
+                {showBoxes && (
+                  <div className="space-y-1 rounded-[11px] border p-2" style={{ borderColor: 'var(--mm-line)', background: 'var(--mm-surface-2)' }} data-price-boxes>
+                    <p className="text-xs font-medium" style={muted}>
+                      {hasPrice ? 'What you paid this time' : 'What you paid for it (optional)'}
+                    </p>
+                    <div className="grid grid-cols-[1.1fr_0.8fr_1fr] gap-2">
+                      {/* After "Paid a new price?" (gone with its own tap), the cursor waits here. */}
+                      <input inputMode="decimal" aria-label={`You paid in naira, ingredient ${index + 1}`} className="mm-input"
+                             autoFocus={!!r.newPrice}
+                             placeholder={last?.amount !== undefined ? `₦ e.g. ${last.amount.toLocaleString('en-NG')}` : '₦ e.g. 3000'}
+                             value={r.paid} onChange={(e) => set(r.key, { paid: e.target.value })} />
+                      <input inputMode="decimal" aria-label={`Quantity bought for that price, ingredient ${index + 1}`} className="mm-input"
+                             placeholder={last ? `for ${last.qty}` : 'for 1'}
+                             value={r.paidQty} onChange={(e) => set(r.key, { paidQty: e.target.value })} />
+                      <select id={`paid-unit-${r.key}`} aria-label={`Bought in, ingredient ${index + 1}`} className="mm-input"
+                              value={r.paidUnitId} onChange={(e) => set(r.key, { paidUnitId: e.target.value })}>
+                        {(item.buyUnits ?? []).map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                )}
               </li>
             )
           })}
@@ -373,6 +480,13 @@ export function NewDish({ items, priced, yieldUnits, action, canAddItems, addIte
                 onClick={() => setRows((current) => [...current, blank()])}>
           + Add another ingredient
         </button>
+        {anyPaid && (
+          <label className="flex flex-wrap items-center gap-2 text-sm">
+            <span>The prices you typed were paid on</span>
+            <input type="date" name="paid_on" value={paidOn} max={today} onChange={(e) => setPaidOn(e.target.value)}
+                   className="mm-input" style={{ width: 'auto' }} />
+          </label>
+        )}
         {unpricedChosen && (
           <p className="text-xs" style={muted}>
             Some of these have no price yet. The dish is saved, and its page tells you exactly what to price.

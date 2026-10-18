@@ -6,6 +6,7 @@ import { Button } from '@/components/button'
 import { AppIcon } from '@/components/icons'
 import { ItemPicker } from '@/components/item-picker'
 import type { CatalogItem, CatalogUnit, LastBought } from '@/lib/data/purchase-catalog'
+import type { CreatedItem } from '@/lib/actions/items'
 import { formatDay } from '@/lib/dates'
 import { money } from '@/lib/format'
 import { inSentence, sumMoney } from '../buy-figures'
@@ -51,9 +52,13 @@ function amountOf(qty: number, unit: string): string {
  * re-costed by the database.
  */
 export function NewPurchase({
-  items, often, lastRun, lastRunDay, lastBought, suppliers, today, first, action, canMeasure, saveMeasure,
+  items: given, often, lastRun, lastRunDay, lastBought, suppliers, today, first, action, canMeasure, saveMeasure,
+  canAddItems, createItem,
 }: {
   items: CatalogItem[]
+  /** Whether she may add an item her search did not find (owner, manager, kitchen; not the accountant). */
+  canAddItems: boolean
+  createItem: (name: string, measuredBy: 'weight' | 'volume' | 'count', purpose: 'buy' | 'dish') => Promise<CreatedItem>
   /** Item ids, most often bought first. */
   often: string[]
   /** The items and units of the last recorded purchase. */
@@ -71,6 +76,9 @@ export function NewPurchase({
   saveMeasure: (input: MeasureInput) => Promise<MeasureResult>
 }) {
   const [result, formAction] = useActionState(action, null)
+  // Items added from the search on this screen; the page's own list catches up on its next render.
+  const [made, setMade] = useState<CatalogItem[]>([])
+  const items = useMemo(() => [...given, ...made.filter((m) => !given.some((i) => i.id === m.id))], [given, made])
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items])
   // Sizes saved on this screen. The page's own list catches up when it next
   // renders; until then these make the unit usable straight away.
@@ -262,6 +270,12 @@ export function NewPurchase({
                   top={boughtBefore.length > 0 ? { label: 'Bought before', ids: boughtBefore.slice(0, 12).map((i) => i.id) } : undefined}
                   // Chosen: the cursor goes on to "How much", as it does from a chip.
                   onChange={(id) => { set(r.key, { ingredientId: id, unitId: startUnit(id) }); if (id) setFocusKey(r.key) }}
+                  onCreate={canAddItems ? (n, m) => createItem(n, m, 'buy') : undefined}
+                  onCreated={(item) => {
+                    setMade((current) => (current.some((i) => i.id === item.id) ? current : [...current, item]))
+                    set(r.key, { ingredientId: item.id, unitId: item.units[0]?.id ?? '' })
+                    setFocusKey(r.key)
+                  }}
                 />
               </label>
               <div className="grid grid-cols-3 gap-2">

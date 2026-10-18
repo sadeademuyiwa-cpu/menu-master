@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { currentContext, closedRefusal, describeWriteError } from '@/lib/data/context'
-import { localToday } from '@/lib/dates'
+import { paidDay } from '@/lib/dates'
 import { writeMeasure } from '../../ingredients/measure'
 
 export type PurchaseResult = { error: string } | null
@@ -44,7 +44,10 @@ export async function recordPurchase(_prev: PurchaseResult, formData: FormData):
       return { error: `Item ${i + 1}: enter what you paid, in naira. It must be more than zero.` }
     }
   }
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(p.date ?? '') ? p.date! : localToday()
+  // A real day, not after today: costing works as of today, so a purchase
+  // dated next week would be recorded and then left out of every dish.
+  const date = paidDay(p.date)
+  if (!date) return { error: 'Choose the day you bought these. It cannot be after today.' }
 
   const ctx = await currentContext()
   const { supabase, accountId, businessId } = ctx

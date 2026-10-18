@@ -21,7 +21,21 @@ test('a quote says it is a quote, how long it holds, and never a receipt', () =>
   assert.match(q, /Prices hold for 7 days\. Reply to confirm\./)
   assert.doesNotMatch(q, /Receipt|Thank you for your order/)
 })
-import { localToday } from '../src/lib/dates.ts'
+import { localToday, paidDay } from '../src/lib/dates.ts'
+
+test('a day paid is a real day, not after today; empty is today', () => {
+  const now = new Date('2026-10-18T12:00:00Z')
+  assert.equal(paidDay('', now), '2026-10-18')
+  assert.equal(paidDay(null, now), '2026-10-18')
+  assert.equal(paidDay(' 2026-10-17 ', now), '2026-10-17')
+  assert.equal(paidDay('2026-10-18', now), '2026-10-18')
+  assert.equal(paidDay('2026-10-19', now), null, 'tomorrow has not happened')
+  assert.equal(paidDay('2026-02-30', now), null, 'no such day')
+  assert.equal(paidDay('0099-01-01', now), null, 'not a four-figure year')
+  assert.equal(paidDay('18/10/2026', now), null)
+  // Just after midnight in Lagos it is already the 19th there.
+  assert.equal(paidDay('2026-10-19', new Date('2026-10-18T23:30:00Z')), '2026-10-19')
+})
 
 test('just after midnight in Lagos it is already the new day', () => {
   // 00:30 in Lagos on 2 October is 23:30 UTC on 1 October.

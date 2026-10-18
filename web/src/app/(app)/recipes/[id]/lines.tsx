@@ -2,12 +2,10 @@ import Link from 'next/link'
 import { Badge, Disclosure, Field, inputClass } from '@/components/ui'
 import { Button } from '@/components/button'
 import { ConfirmSubmit } from '@/components/confirm-submit'
-import { ItemPicker } from '@/components/item-picker'
-import type { PickItem } from '@/lib/item-search'
 import { money, quantity, lineStatus } from '@/lib/format'
 import { formatDay } from '@/lib/dates'
-import { perBuyingUnit } from '../../purchases/buy-figures'
-import { addLine, addSubRecipe, removeLine, updateLine } from './actions'
+import { onDay, perBuyingUnit } from '../../purchases/buy-figures'
+import { addSubRecipe, removeLine, updateLine } from './actions'
 import { TapRow } from './tap-row'
 import { n, type Line, type Unit } from './types'
 
@@ -57,10 +55,10 @@ function Provenance({ l, links = true }: { l: Line; links?: boolean }) {
             */
             <><span style={{ color: 'var(--mm-warn)' }}>Old price</span> — your last purchase was{' '}
               {quantity(pQty, l.base_unit)} for {money(pAmt)}
-              {l.purchase_date ? ` on ${formatDay(l.purchase_date)}` : ''}. Record what you pay now to keep this accurate.</>
+              {l.purchase_date ? ` ${onDay(formatDay(l.purchase_date))}` : ''}. Record what you pay now to keep this accurate.</>
           ) : (
             <>You bought {quantity(pQty, l.base_unit)} for {money(pAmt)}
-              {l.purchase_date ? ` on ${formatDay(l.purchase_date)}` : ''}
+              {l.purchase_date ? ` ${onDay(formatDay(l.purchase_date))}` : ''}
               {' '}· uses {quantity(n(l.base_qty), l.base_unit)} of it</>
           )}
         </span>
@@ -124,7 +122,7 @@ function LineSheet({ l, recipeId, units, costs, edits }: {
           <form action={updateLine} className="grid grid-cols-2 gap-3">
             <input type="hidden" name="recipe_id" value={recipeId} />
             <input type="hidden" name="line_id" value={l.line_id} />
-            <Field label="How much">
+            <Field label="Quantity">
               <input name="qty" type="number" step="any" min="0" required inputMode="decimal"
                 defaultValue={Number(l.recipe_qty)} className={inputClass} />
             </Field>
@@ -207,52 +205,6 @@ export function WhatGoesIn({ lines, footer, ...rest }: {
       <Rows lines={cook} title={null} {...rest} footer={pack.length === 0 ? footer : undefined} />
       <Rows lines={pack} title="Packaging" {...rest} footer={pack.length > 0 ? footer : undefined} />
     </div>
-  )
-}
-
-/** "Add an ingredient": one fold, opened by itself while the dish is empty. */
-export function AddIngredient({ recipeId, ingredients, units, open }: {
-  recipeId: string
-  ingredients: PickItem[]
-  units: Unit[]
-  open: boolean
-}) {
-  return (
-    <Disclosure summary="Add an ingredient" open={open}>
-      <form action={addLine} className="grid gap-3 sm:grid-cols-4 sm:items-end">
-        <input type="hidden" name="recipe_id" value={recipeId} />
-        <div className="sm:col-span-2">
-          {/* Starts empty and must be chosen. As a <select> it had no empty
-              option, so the first item (Acha) went in whenever only an amount
-              was typed. */}
-          <Field label="Ingredient">
-            <ItemPicker items={ingredients} name="ingredient_id" required label="Ingredient" title="Which ingredient?"
-                        placeholder="Choose an ingredient…" missing="Choose the ingredient first." className="mt-1" />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:col-span-2">
-          <Field label="How much">
-            <input name="qty" type="number" step="any" min="0" required inputMode="decimal" className={inputClass} />
-          </Field>
-          <Field label="Unit">
-            {/* Empty first, for the same reason: never a unit nobody chose. */}
-            <select name="unit_id" required defaultValue="" className={inputClass}>
-              <option value="" disabled>Choose…</option>
-              {units.map((u) => (
-                <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        <div className="sm:col-span-4"><Button className="w-full sm:w-auto">Add ingredient</Button></div>
-      </form>
-      {ingredients.length === 0 && (
-        <p className="mt-3 text-sm" style={{ color: 'var(--mm-warn)' }}>
-          You have no ingredients yet. Add them under{' '}
-          <Link href="/ingredients" className="mm-inline-tap">Ingredients</Link> first, with what you paid.
-        </p>
-      )}
-    </Disclosure>
   )
 }
 

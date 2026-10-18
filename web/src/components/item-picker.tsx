@@ -4,9 +4,11 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { Sheet } from './sheet'
 import { AppIcon } from './icons'
-import { groupItems, searchItems, type PickItem } from '@/lib/item-search'
+import { aliasesOf, groupItems, normal, searchItems, type PickItem } from '@/lib/item-search'
 
 type Option = { id: string; name: string; note?: string }
+type MeasuredBy = 'weight' | 'volume' | 'count'
+const BOUGHT_BY: [MeasuredBy, string][] = [['weight', 'By weight (kg, grams)'], ['volume', 'By volume (litres)'], ['count', 'By the piece']]
 
 /**
  * Choosing one item from a long list (180 starter items and her own) by
@@ -22,12 +24,21 @@ type Option = { id: string; name: string; note?: string }
  * does not cover the results. The sheet is put on the page body, outside the
  * form and any <label>: Enter in its search box must not send the form, and a
  * tap on its backdrop must not reach the label and reopen it.
+ *
+ * With `onCreate`, a search that finds nothing by that name offers "+ Add
+ * 'x' as a new item": one question (bought by weight, volume or the piece),
+ * then the item is made, chosen, and kept in this picker's list.
  */
-export function ItemPicker({
+export function ItemPicker<T extends PickItem = PickItem>({
   items, value, defaultValue = '', onChange, name, required = false, label, title,
   placeholder = 'Choose…', top, note, clearLabel, missing = 'Choose one from the list.', className = '',
+  onCreate, onCreated,
 }: {
-  items: PickItem[]
+  items: T[]
+  /** Make a new item from what she typed (who may is the server's to decide). */
+  onCreate?: (name: string, measuredBy: MeasuredBy) => Promise<{ item: T } | { error: string }>
+  /** An item made here and chosen: given whole, in place of onChange, so the screen can use its units at once. */
+  onCreated?: (item: T) => void
   value?: string
   defaultValue?: string
   onChange?: (id: string) => void
@@ -65,24 +76,70 @@ export function ItemPicker({
 
   useEffect(() => setMounted(true), [])
 
-  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items])
+  // Items made here, until the screen's own list includes them.
+  const [made, setMade] = useState<T[]>([])
+  const all = useMemo(() => [...items, ...made.filter((m) => !items.some((i) => i.id === m.id))], [items, made])
+  const byId = useMemo(() => new Map(all.map((i) => [i.id, i])), [all])
   const chosen = byId.get(current)
   const withNote = (i: PickItem): Option => ({ id: i.id, name: i.name, note: note?.(i) })
+  // "+ Add": asked how it is bought, then saving.
+  const [creating, setCreating] = useState<'no' | 'ask' | 'saving'>('no')
+  const [createError, setCreateError] = useState<string | null>(null)
+  // Which "+ Add" is current. Opening the sheet again or choosing an item
+  // moves it on, so an answer that arrives after that is not used: it would
+  // replace what she chose since (and her amounts would go against it).
+  const createRun = useRef(0)
 
   // What the sheet lists: before typing, the short list and then every group;
-  // once typing, the matches, best first.
+  // once typing, the matches, best first. Only letters and digits count, so
+  // "." or "--" lists nothing rather than everything.
+  const typed = normal(q)
   const sections = useMemo(() => {
-    if (q.trim()) return [{ label: null as string | null, options: searchItems(items, q).slice(0, 60).map(withNote) }]
+    if (q.trim()) return [{ label: null as string | null, options: typed ? searchItems(all, q).slice(0, 60).map(withNote) : [] }]
     const out: { label: string | null; options: Option[] }[] = []
     if (clearLabel) out.push({ label: null, options: [{ id: '', name: clearLabel }] })
-    const first = (top?.ids ?? []).map((id) => byId.get(id)).filter((i): i is PickItem => !!i)
+    const first = (top?.ids ?? []).map((id) => byId.get(id)).filter((i): i is T => !!i)
     if (top && first.length) out.push({ label: top.label, options: first.map(withNote) })
-    for (const [group, list] of groupItems(items)) out.push({ label: group, options: list.map(withNote) })
+    for (const [group, list] of groupItems(all)) out.push({ label: group, options: list.map(withNote) })
     return out
     // withNote reads `note`, which callers pass inline; the items decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, items, top, byId, clearLabel])
+  }, [q, typed, all, top, byId, clearLabel])
   const flat = sections.flatMap((s) => s.options)
+  // "+ Add" only when nothing she has is called exactly that (her close matches still show above it).
+  const typedName = q.replace(/\s+/g, ' ').trim()
+  const canCreate = !!onCreate && typed.length >= 2 && !all.some((i) => normal(i.name) === typed)
+  // Typed exactly another name of an item on the list ("maggi" for Seasoning
+  // cube): still allowed, since a brand can be bought and priced on its own,
+  // but said, so it is not added by mistake.
+  const aliasOf = canCreate ? all.find((i) => aliasesOf(i.name).some((a) => normal(a) === typed)) : undefined
+
+  async function create(measuredBy: MeasuredBy) {
+    if (!onCreate || creating === 'saving') return
+    const run = ++createRun.current
+    setCreating('saving')
+    setCreateError(null)
+    let res: { item: T } | { error: string }
+    try {
+      res = await onCreate(typedName, measuredBy)
+    } catch {
+      res = { error: `We could not add ${typedName}. Check your connection and try again.` }
+    }
+    // Reopened or chose something since: leave her choice alone. A made item
+    // is found by name next time; the server never makes a second one.
+    if (run !== createRun.current) return
+    if ('error' in res) { setCreating('ask'); setCreateError(res.error); return }
+    const item = res.item
+    setMade((m) => (m.some((x) => x.id === item.id) ? m : [...m, item]))
+    setCreating('no')
+    // The screen's own list does not have the item yet, so it is handed over
+    // whole (its units with it) instead of by id through onChange.
+    if (value === undefined) setOwn(item.id)
+    setUnfilled(false)
+    setOpen(false)
+    if (onCreated) onCreated(item)
+    else onChange?.(item.id)
+  }
 
   useEffect(() => {
     if (open && active >= 0) document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' })
@@ -91,11 +148,13 @@ export function ItemPicker({
 
   function show() {
     // Opened and focused inside the tap itself, so Android raises the keyboard.
-    flushSync(() => { setQ(''); setActive(-1); setOpen(true) })
+    createRun.current++
+    flushSync(() => { setQ(''); setActive(-1); setCreating('no'); setCreateError(null); setOpen(true) })
     if (list.current) list.current.scrollTop = 0
     search.current?.focus()
   }
   function pick(id: string) {
+    createRun.current++
     if (value === undefined) setOwn(id)
     setUnfilled(false)
     setOpen(false)
@@ -127,10 +186,16 @@ export function ItemPicker({
       {unfilled && <span role="alert" className="mt-1 block text-sm" style={{ color: 'var(--mm-warn)' }}>{missing}</span>}
 
       {mounted && createPortal(
-        <Sheet open={open} onClose={() => setOpen(false)} title={title ?? label} top>
+        // Closed by her (×, backdrop, Esc) is moving on too: an "+ Add" still
+        // on its way is not used. create() closes the sheet itself only after
+        // it has handed the item over, so its own close changes nothing.
+        <Sheet open={open} onClose={() => { createRun.current++; setCreating('no'); setCreateError(null); setOpen(false) }}
+               title={title ?? label} top>
           <div className="space-y-2">
             <input
               ref={search} type="search" value={q} placeholder="Type a name, e.g. okro or maggi"
+              // While an item is being added, the name on screen is the one being saved.
+              readOnly={creating === 'saving'}
               role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list"
               aria-activedescendant={active >= 0 && active < flat.length ? optionId(active) : undefined}
               aria-label={`Search: ${label}`} autoComplete="off" autoCorrect="off" spellCheck={false} enterKeyHint="search"
@@ -138,7 +203,8 @@ export function ItemPicker({
               onChange={(e) => {
                 setQ(e.target.value)
                 // Typing points at the best match, from the top of the list.
-                setActive(e.target.value.trim() ? 0 : -1)
+                setActive(normal(e.target.value) ? 0 : -1)
+                if (creating !== 'saving') { setCreating('no'); setCreateError(null) }
                 if (list.current) list.current.scrollTop = 0
               }}
               onKeyDown={(e) => {
@@ -182,10 +248,42 @@ export function ItemPicker({
               })()}
               {q.trim() && flat.length === 0 && (
                 <p role="status" className="px-2 py-3 text-sm" style={{ color: 'var(--mm-muted)' }}>
-                  Nothing matches “{q.trim()}”. Try another name for it, or add it to your list under Ingredients.
+                  {!typed
+                    ? 'Type the name in letters, e.g. okro.'
+                    : onCreate
+                    ? `Nothing called “${typedName}” on your list yet.`
+                    : `Nothing matches “${q.trim()}”. Try another name for it, or add it to your list under Ingredients.`}
                 </p>
               )}
             </div>
+            {open && canCreate && (
+              <div className="space-y-2 border-t pt-2" style={{ borderColor: 'var(--mm-line)' }} data-create>
+                {creating === 'no' ? (
+                  <button type="button" className="mm-pick-option font-semibold" style={{ color: 'var(--mm-accent)' }}
+                          onClick={() => setCreating('ask')}>
+                    {aliasOf
+                      ? <>+ Add “{typedName}” as its own item <span className="font-normal" style={{ color: 'var(--mm-muted)' }}>(it is {aliasOf.name} above)</span></>
+                      : <>+ Add “{typedName}” as a new item</>}
+                  </button>
+                ) : (
+                  <div className="space-y-2 px-1">
+                    <p className="text-sm font-medium">How is “{typedName}” bought?</p>
+                    <div className="grid gap-2">
+                      {BOUGHT_BY.map(([m, words]) => (
+                        <button key={m} type="button" className="mm-btn mm-btn-secondary w-full" data-measure={m}
+                                // The "+ Add" tapped is gone: the cursor goes to the first answer.
+                                autoFocus={m === 'weight'}
+                                disabled={creating === 'saving'} onClick={() => create(m)}>
+                          {words}
+                        </button>
+                      ))}
+                    </div>
+                    {creating === 'saving' && <p role="status" className="text-sm" style={{ color: 'var(--mm-muted)' }}>Adding {typedName}…</p>}
+                    {createError && <p role="alert" className="text-sm" style={{ color: 'var(--mm-warn)' }}>{createError}</p>}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </Sheet>,
         document.body,
