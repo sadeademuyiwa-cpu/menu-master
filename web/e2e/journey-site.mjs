@@ -165,11 +165,13 @@ try {
   await go(a, '/')
   mark('a signed-in owner opening the site goes to the app', path(a) === '/dashboard', a.url())
 
+  // Admin → Website lists every area, each with its own page.
   await go(a, '/admin/site')
-  await must(a, 'Admin → Website has all five editors',
+  await must(a, 'Admin → Website lists all five areas',
     'Company details', 'Sign in with Google', 'Tracking pixels', 'Landing page', 'Privacy policy')
 
   // --- company details ------------------------------------------------------
+  await go(a, '/admin/site/company')
   await a.fill('input[name=support_email]', 'help@kitchen')
   await a.click('button:has-text("Save company details")')
   await waitText(a, 'Support email:')
@@ -189,7 +191,7 @@ try {
   await must(a, 'refunds points to the support email', 'Write to help@journeyfoods.ng within 14 days')
 
   // --- Google sign-in -------------------------------------------------------
-  await go(a, '/admin/site')
+  await go(a, '/admin/site/sign-in')
   await must(a, 'the admin sees whether Google is on in Supabase, and the values to paste',
     'Not on in Supabase yet', 'Authorised redirect URI', '/auth/v1/callback', 'Copy')
   await a.check('input[name=google]')
@@ -203,6 +205,7 @@ try {
     (await preP.locator('text=Continue with Google').count()) === 0)
   await pre.close()
 
+  await go(a, '/admin/site/tracking')
   await a.fill('input[name=meta_pixel_id]', 'fb-123')
   await a.click('button:has-text("Save tracking")')
   await waitText(a, 'does not look right')
@@ -218,23 +221,23 @@ try {
   mark('once pixels are set, the admin is asked about cookies too', await a.locator('.mm-consent').isVisible())
   await a.click('.mm-consent button:has-text("No thanks")')
 
-  await a.locator('summary:has-text("Screenshots")').click()
+  // The landing page's six screenshot and testimonial places are always open.
+  await go(a, '/admin/site/landing')
   await a.fill('input[name=shot_url_0]', 'not a link')
   await a.click('button:has-text("Save landing page")')
   await waitText(a, 'Screenshot 1:')
   await must(a, 'a screenshot that is not a link is refused, naming the row', 'Screenshot 1')
 
   await a.fill('input[name=whatsapp]', '0801 234 5678')
-  if (!(await a.locator('textarea[name=t_quote_0]').isVisible())) await a.locator('summary:has-text("Testimonials")').click()
   await a.fill('textarea[name=t_quote_0]', 'I finally know what my jollof costs me.')
   await a.fill('input[name=t_name_0]', 'Test Customer')
   await a.fill('input[name=t_business_0]', 'Test Kitchen, Lagos')
-  if (!(await a.locator('input[name=shot_url_0]').isVisible())) await a.locator('summary:has-text("Screenshots")').click()
   await a.fill('input[name=shot_url_0]', '')
   await a.click('button:has-text("Save landing page")')
   await waitText(a, 'Landing page saved')
   await must(a, 'the landing content is saved', 'Landing page saved')
 
+  await go(a, '/admin/site/privacy')
   const policy = await a.locator('textarea[name=body]').inputValue()
   mark('the privacy editor starts from the draft', policy.includes('## Who we are'))
   await a.fill('textarea[name=body]', policy + '\n\n## Journey heading\nA line the journey added.')
@@ -255,7 +258,7 @@ try {
   // --- 2b. pictures uploaded from the admin (0059) --------------------------------
   // A 1x1 PNG, as a phone would hand over a real one.
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
-  await go(a, '/admin/site')
+  await go(a, '/admin/site/landing')
   const logoPicker = a.locator('input[type=file][aria-label="Choose a picture for Logo"]')
   await logoPicker.setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a picture') })
   await waitText(a, 'Use a PNG, JPEG or WebP picture.', 5000)
@@ -345,7 +348,7 @@ try {
 
   // --- 4. switching the pixels off takes effect at once --------------------------
   // Through the admin page, not the database: saving clears every cached page.
-  await go(a, '/admin/site')
+  await go(a, '/admin/site/tracking')
   for (const f of ['meta_pixel_id', 'ga4_id']) await a.fill(`input[name=${f}]`, '')
   await a.click('button:has-text("Save tracking")')
   await waitText(a, 'Tracking saved')
@@ -364,7 +367,7 @@ try {
   // Reset in the database, then one admin save: a save clears every cached
   // page, so the next visitor (and the next run) sees the defaults at once.
   await db.query(`update site_settings set value = '{}'::jsonb`)
-  await go(a, '/admin/site')
+  await go(a, '/admin/site/sign-in')
   await a.click('button:has-text("Save sign-in")')
   await waitText(a, 'Sign-in saved')
   await go(a, '/terms')

@@ -1,6 +1,11 @@
 import 'server-only'
+import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
+import { googleProviderEnabled, googleProviderEnabledNow, loadSiteSettingsRaw } from '@/lib/data/site'
+import { parseAnalytics, parseCompany, parseLanding, parsePrivacy, parseSignIn } from '@/lib/site/settings'
+import { HELP_SCREENS, parseHelpVideos } from '@/lib/site/help-videos'
 import type { AlertRow, FounderSlots } from '@/lib/admin/format'
+import type { WebsiteFacts } from '@/lib/admin/website'
 
 /**
  * The platform administrator's reads.
@@ -11,12 +16,16 @@ import type { AlertRow, FounderSlots } from '@/lib/admin/format'
  * courtesy that keeps a customer from seeing an empty admin shell; it is not
  * the lock. If the function is absent (0053-0055 not yet applied) these
  * return null and the pages say so.
+ *
+ * Each read is wrapped in React's cache(): the admin layout counts open
+ * alerts and paying accounts for its sidebar, and the page below it often
+ * reads the same thing; within one request it is asked once.
  */
-export async function isPlatformAdmin(): Promise<boolean> {
+export const isPlatformAdmin = cache(async (): Promise<boolean> => {
   const supabase = await createClient()
   const { data, error } = await supabase.rpc('fn_is_platform_admin')
   return !error && data === true
-}
+})
 
 export type BillingHealth = {
   days: number
@@ -29,7 +38,10 @@ export type BillingHealth = {
     provider_event_id: string | null; account_id: string | null; status: string
     last_error_code: string | null; last_error: string | null; attempts: number
   }[]
-  anomalies: { subscription_id: string; account_id: string; status: string; anomaly: string }[]
+  anomalies: {
+    subscription_id: string; account_id: string; status: string; anomaly: string
+    trial_ends_at?: string | null; current_period_end?: string | null
+  }[]
 }
 
 export type SubscriptionRow = {
@@ -65,7 +77,41 @@ async function rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T | n
   return data as T
 }
 
-export const adminBillingHealth = (days = 30) => rpc<BillingHealth>('fn_admin_billing_health', { p_days: days })
-export const adminSubscriptions = () => rpc<Subscriptions>('fn_admin_subscriptions')
-export const adminSignups = (days = 30) => rpc<Signups>('fn_admin_signups', { p_days: days })
-export const adminAlerts = (openOnly = true) => rpc<Alerts>('fn_admin_alerts', { p_open_only: openOnly })
+export const adminBillingHealth = cache((days: number) => rpc<BillingHealth>('fn_admin_billing_health', { p_days: days }))
+export const adminSubscriptions = cache(() => rpc<Subscriptions>('fn_admin_subscriptions'))
+export const adminSignups = cache((days: number) => rpc<Signups>('fn_admin_signups', { p_days: days }))
+export const adminAlerts = cache((openOnly: boolean) => rpc<Alerts>('fn_admin_alerts', { p_open_only: openOnly }))
+
+/** The stored website settings with their dates, read once per request. */
+export const adminSiteRaw = cache(() => loadSiteSettingsRaw())
+
+/**
+ * When a setting was last SAVED. The rows exist from the migration on, with
+ * an empty value; only a value with something in it has been saved.
+ */
+export function savedAt(o: Record<string, unknown> | undefined): string | null {
+  return o && typeof o._updated_at === 'string' && Object.keys(o).some((k) => k !== '_updated_at') ? o._updated_at : null
+}
+
+/**
+ * The website as a visitor gets it, for the admin's status lines and to-do
+ * list. `fresh` asks Supabase about Google this moment (the sign-in page);
+ * elsewhere the five-minute answer the public pages use is enough.
+ */
+export async function adminWebsiteFacts(fresh = false): Promise<{ raw: Record<string, Record<string, unknown>>; facts: WebsiteFacts } | null> {
+  const [raw, provider] = await Promise.all([adminSiteRaw(), fresh ? googleProviderEnabledNow() : googleProviderEnabled()])
+  if (!raw) return null
+  return {
+    raw,
+    facts: {
+      company: parseCompany(raw.company ?? {}),
+      analytics: parseAnalytics(raw.analytics ?? {}),
+      landing: parseLanding(raw.landing ?? {}),
+      privacy: parsePrivacy(raw.privacy ?? {}),
+      signin: parseSignIn(raw.signin ?? {}),
+      provider,
+      help: raw.help ? { set: Object.keys(parseHelpVideos(raw.help)).length, total: HELP_SCREENS.length } : null,
+      saved: { company: savedAt(raw.company), privacy: savedAt(raw.privacy) },
+    },
+  }
+}

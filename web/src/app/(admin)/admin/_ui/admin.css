@@ -1,0 +1,445 @@
+/* PLATFORM ADMIN (app/(admin)/admin).
+   Its own shell and its own density. The customer app is phone-first: big
+   touch cards, one thing per row. The admin is a control room read on a
+   laptop first: a dark sidebar that says "you are in admin", tables, a
+   14px productive type scale, 1px borders instead of shadows.
+
+   The admin's own classes (.ad-*) sit in the components layer, so a
+   Tailwind utility on the same element still wins (see the note at
+   .mm-account-chip in globals.css). The few rules that restyle the shared
+   .mm-* controls are loose and scoped under .mm-admin: those controls are
+   loose themselves, and a layered rule would always lose to them. */
+
+/* The order Tailwind declares; repeated so it holds whichever file loads first. */
+@layer theme, base, components, utilities;
+
+/* The tokens live on the page root while an admin page is open, so <html>
+   and <body> can take the admin canvas too and no strip of the app's own
+   colour shows below a short page or in an overscroll. */
+:root:has(.mm-admin),
+.mm-admin {
+  --ad-bg: #f3f5f4;
+  --ad-panel: #ffffff;
+  --ad-panel-2: #f6f8f7;
+  --ad-line: #e2e7e4;
+  --ad-line-strong: #cdd6d1;
+  --ad-muted: #5d6963;
+  --ad-side: #0f2a1e;
+  --ad-side-2: #17392a;
+  --ad-side-fg: #e9f1ec;
+  --ad-side-muted: #9cb4a7;
+  --ad-side-line: rgb(255 255 255 / 0.09);
+  --ad-side-accent: #7ddcaa;
+  --ad-radius: 10px;
+  --ad-radius-sm: 7px;
+}
+.mm-admin {
+  min-height: 100dvh;
+  background: var(--ad-bg);
+  color: var(--mm-fg);
+  font-size: 14px;
+  line-height: 1.45;
+}
+@media (prefers-color-scheme: dark) {
+  :root:has(.mm-admin),
+  .mm-admin {
+    --ad-bg: #0d110f;
+    --ad-panel: #151b17;
+    --ad-panel-2: #1a211c;
+    --ad-line: #262f29;
+    --ad-line-strong: #34403a;
+    --ad-muted: #9aa69f;
+    --ad-side: #09180f;
+    --ad-side-2: #123021;
+    --ad-side-line: rgb(255 255 255 / 0.07);
+  }
+}
+html:has(.mm-admin),
+body:has(.mm-admin) { background: var(--ad-bg); }
+html:has(.mm-admin) { scroll-padding-top: 72px; scroll-padding-bottom: 96px; }
+/* While the phone menu is open the page behind it stays put (iOS too). */
+html:has(.ad-drawer[open]) { overflow: hidden; }
+
+/* Focus on the dark green is white: the app's green ring is under 3:1 there.
+   Loose, like the a:focus-visible rule in globals.css it has to beat. */
+.mm-admin .ad-side :is(a, button):focus-visible,
+.mm-admin .ad-drawer :is(a, button):focus-visible { outline: 2px solid #ffffff; outline-offset: -2px; }
+@media (max-width: 1023px) {
+  .mm-admin .ad-topbar :is(a, button):focus-visible { outline: 2px solid #ffffff; outline-offset: -2px; }
+}
+
+/* Shared controls in the admin: its corners, its lines. */
+.mm-admin .mm-card { border-radius: var(--ad-radius); box-shadow: none; border-color: var(--ad-line); background: var(--ad-panel); }
+.mm-admin .mm-notice,
+.mm-admin .mm-empty,
+.mm-admin .mm-disclosure { border-radius: var(--ad-radius); }
+.mm-admin .mm-disclosure { border-color: var(--ad-line); background: var(--ad-panel); overflow: clip; }
+.mm-admin .mm-input { border-color: var(--ad-line-strong); background: var(--ad-panel); }
+.mm-admin .mm-btn-primary { box-shadow: none; }
+/* Laptop density only with a mouse: a touch screen keeps 44px+ targets and a
+   16px input font, below which iOS zooms in on every field it focuses. */
+@media (min-width: 1024px) and (pointer: fine) {
+  .mm-admin .mm-input { min-height: 40px; padding: .45rem .7rem; font-size: 14px; border-radius: var(--ad-radius-sm); }
+  .mm-admin .mm-btn { min-height: 38px; padding: .4rem .9rem; font-size: 14px; border-radius: var(--ad-radius-sm); }
+  .mm-admin .mm-btn-quiet { min-height: 36px; font-size: 13px; }
+  .mm-admin .mm-tap { min-height: 36px; }
+}
+
+@layer components {
+  /* --- shell ------------------------------------------------------------ */
+  .ad-shell { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 100dvh; }
+  .ad-side,
+  .ad-drawer {
+    background: var(--ad-side);
+    color: var(--ad-side-fg);
+    /* On the dark green the app's own tokens are re-pointed, so anything
+       shared drawn here stays readable; the Rising Bowl turns white. */
+    --mm-fg: var(--ad-side-fg);
+    --mm-muted: var(--ad-side-muted);
+    --mm-line: var(--ad-side-line);
+    --mm-brand-bowl: #ffffff;
+  }
+  .ad-side {
+    display: none;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
+    flex-direction: column;
+    padding: 14px 12px 16px;
+  }
+  @media (min-width: 1024px) {
+    /* The column is painted too, so the green runs the full height of a
+       long page, not just the sidebar's own sticky screenful. */
+    .ad-shell {
+      grid-template-columns: 248px minmax(0, 1fr);
+      background: linear-gradient(to right, var(--ad-side) 248px, transparent 248px);
+    }
+    .ad-side { display: flex; }
+  }
+
+  .ad-brand { display: flex; min-height: 44px; align-items: center; gap: 10px; padding: 0 8px; font-weight: 700; letter-spacing: -0.01em; }
+  .ad-brand-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ad-admin-tag {
+    display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 999px;
+    font-size: 11px; font-weight: 800; letter-spacing: .04em;
+    background: var(--mm-gold); color: #1f1705;
+  }
+
+  .ad-nav { display: grid; gap: 2px; margin-top: 10px; }
+  .ad-nav-label {
+    margin: 16px 0 4px; padding: 0 10px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ad-side-muted);
+  }
+  .ad-nav-link {
+    display: flex; min-height: 44px; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px;
+    color: color-mix(in srgb, var(--ad-side-fg) 84%, transparent); font-size: 14px; font-weight: 500;
+    transition: background-color var(--mm-motion-fast) var(--mm-ease), color var(--mm-motion-fast) var(--mm-ease);
+  }
+  @media (min-width: 1024px) and (pointer: fine) { .ad-nav-link { min-height: 38px; } }
+  .ad-nav-link:hover { background: var(--ad-side-2); color: var(--ad-side-fg); }
+  .ad-nav-link[aria-current="page"] {
+    color: var(--ad-side-fg); font-weight: 650; background: rgb(255 255 255 / 0.12);
+    box-shadow: inset 3px 0 0 var(--ad-side-accent);
+  }
+  .ad-count {
+    margin-left: auto; display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 6px;
+    border-radius: 999px; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+    background: rgb(255 255 255 / 0.14); color: var(--ad-side-fg);
+  }
+  /* White on this red is 6.6:1; the brighter red was under 4:1. */
+  .ad-count[data-tone="critical"] { background: #b42318; color: #fff; }
+  .ad-count[data-tone="warn"] { background: #e3b14e; color: #1f1705; }
+
+  .ad-side-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--ad-side-line); display: grid; gap: 2px; }
+  .ad-side-who { padding: 4px 10px 8px; font-size: 12px; color: var(--ad-side-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .ad-main { display: flex; min-width: 0; flex-direction: column; }
+  /* On a phone the top bar is the admin's green, so "you are in admin" holds
+     with the menu shut; from 1024px the sidebar says it and the bar is quiet. */
+  .ad-topbar {
+    position: sticky; top: 0; z-index: 30;
+    display: flex; height: 56px; align-items: center; gap: 6px; padding: 0 8px;
+    background: var(--ad-side); color: var(--ad-side-fg);
+    --mm-brand-bowl: #ffffff;
+  }
+  @media (min-width: 1024px) {
+    .ad-topbar {
+      gap: 10px; padding: 0 32px; color: var(--mm-fg);
+      border-bottom: 1px solid var(--ad-line);
+      background: color-mix(in srgb, var(--ad-panel) 90%, transparent);
+      backdrop-filter: blur(12px);
+    }
+  }
+  .ad-menu-btn {
+    display: inline-grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: 8px; cursor: pointer;
+    color: inherit; background: transparent; border: 0;
+  }
+  .ad-menu-btn:hover { background: rgb(255 255 255 / 0.1); }
+  .ad-top-brand { display: flex; min-width: 0; align-items: center; gap: 8px; font-weight: 700; }
+  @media (min-width: 1024px) { .ad-menu-btn, .ad-top-brand { display: none; } }
+  .ad-crumbs { display: none; min-width: 0; flex: 1; align-items: center; gap: 6px; font-size: 13px; color: var(--ad-muted); }
+  @media (min-width: 1024px) { .ad-crumbs { display: flex; } }
+  .ad-crumbs a { white-space: nowrap; }
+  .ad-crumbs a:hover { color: var(--mm-fg); }
+  .ad-crumbs [aria-current="page"] { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--mm-fg); font-weight: 600; }
+  .ad-crumb-sep { color: var(--ad-line-strong); }
+  .ad-top-spacer { flex: 1; }
+  @media (min-width: 1024px) { .ad-top-spacer { display: none; } }
+  .ad-top-link {
+    display: inline-flex; min-height: 44px; align-items: center; gap: 6px; padding: 0 10px; border-radius: 8px;
+    font-size: 13px; font-weight: 600; color: inherit; white-space: nowrap;
+  }
+  .ad-top-link:hover { background: rgb(255 255 255 / 0.1); }
+  .ad-top-alerts { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; padding: 0 8px; border-radius: 8px; font-size: 13px; font-weight: 700; color: inherit; }
+  .ad-top-alerts .ad-count { margin-left: 0; }
+  @media (min-width: 1024px) {
+    .ad-top-link { min-height: 36px; color: var(--ad-muted); }
+    .ad-top-link:hover { color: var(--mm-fg); background: var(--ad-panel-2); }
+    .ad-top-alerts { display: none; }
+  }
+
+  .ad-content { width: 100%; max-width: 1320px; margin: 0 auto; padding: 18px 16px 72px; }
+  @media (min-width: 1024px) { .ad-content { padding: 28px 32px 88px; } }
+  /* The way up from a page inside Website, on a phone (the trail shows from 1024px). */
+  .ad-up { display: inline-flex; min-height: 44px; align-items: center; gap: 4px; margin: -8px 0 4px; font-size: 13px; font-weight: 600; color: var(--ad-muted); }
+  @media (min-width: 1024px) { .ad-up { display: none; } }
+
+  /* The phone menu: the same sidebar, sliding in from the left. */
+  .ad-drawer {
+    margin: 0; inset: 0 auto 0 0; width: min(300px, 86vw); height: 100dvh; max-height: 100dvh; max-width: none;
+    padding: 0; border: 0; overflow-y: auto;
+  }
+  .ad-drawer::backdrop { background: rgb(4 10 7 / 0.55); }
+  .ad-drawer[open] { display: flex; flex-direction: column; padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); animation: ad-drawer-in var(--mm-motion) var(--mm-ease); }
+  @keyframes ad-drawer-in { from { transform: translateX(-100%); } }
+
+  /* --- page header ------------------------------------------------------- */
+  .ad-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; margin-bottom: 18px; }
+  @media (min-width: 1024px) { .ad-head { margin-bottom: 22px; } }
+  .ad-title { font-size: 21px; font-weight: 700; line-height: 1.2; }
+  @media (min-width: 1024px) { .ad-title { font-size: 24px; } }
+  .ad-desc { margin-top: 4px; max-width: 74ch; color: var(--ad-muted); font-size: 14px; }
+  @media (max-width: 1023px) { .ad-desc { font-size: 13.5px; } }
+  .ad-meta { margin-top: 6px; font-size: 12px; color: var(--ad-muted); }
+  .ad-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+  /* --- panels ------------------------------------------------------------ */
+  .ad-stack { display: grid; gap: 18px; }
+  @media (min-width: 1024px) { .ad-stack { gap: 24px; } }
+  .ad-cols { display: grid; gap: 18px; align-items: start; }
+  @media (min-width: 1180px) { .ad-cols { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 24px; } }
+  .ad-panel { min-width: 0; border: 1px solid var(--ad-line); border-radius: var(--ad-radius); background: var(--ad-panel); scroll-margin-top: 72px; }
+  .ad-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 14px 18px; border-bottom: 1px solid var(--ad-line); }
+  .ad-panel-title { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+  .ad-panel-desc { margin-top: 2px; font-size: 13px; color: var(--ad-muted); }
+  .ad-panel-body { padding: 16px 18px; }
+  .ad-panel-foot { padding: 10px 18px; border-top: 1px solid var(--ad-line); font-size: 13px; }
+  .ad-link { display: inline-flex; min-height: 44px; align-items: center; color: var(--mm-accent); font-weight: 600; }
+  @media (min-width: 1024px) and (pointer: fine) { .ad-link { min-height: 32px; } }
+  .ad-link:hover { text-decoration: underline; }
+  .ad-muted { color: var(--ad-muted); }
+  .ad-small { font-size: 12.5px; }
+  .ad-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; overflow-wrap: anywhere; }
+  .ad-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 14px;
+    border: 1px solid var(--ad-line); border-radius: var(--ad-radius); background: var(--ad-panel); font-size: 13.5px;
+  }
+
+  /* --- key figures ------------------------------------------------------- */
+  .ad-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (min-width: 1024px) { .ad-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; } }
+  .ad-kpi { display: flex; min-width: 0; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid var(--ad-line); border-radius: var(--ad-radius); background: var(--ad-panel); }
+  @media (min-width: 1024px) { .ad-kpi { padding: 14px 16px; } }
+  a.ad-kpi { transition: border-color var(--mm-motion-fast) var(--mm-ease); }
+  a.ad-kpi:hover { border-color: var(--ad-line-strong); }
+  .ad-kpi-label { font-size: 12.5px; font-weight: 600; color: var(--ad-muted); }
+  .ad-kpi-value { font-size: 21px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  @media (min-width: 480px) { .ad-kpi-value { font-size: 26px; } }
+  .ad-kpi-sub { font-size: 12.5px; color: var(--ad-muted); }
+  .ad-kpi[data-tone="critical"] .ad-kpi-value { color: var(--mm-bad); }
+  .ad-kpi[data-tone="warn"] .ad-kpi-value { color: var(--mm-warn); }
+  .ad-kpi[data-tone="good"] .ad-kpi-value { color: var(--mm-accent); }
+
+  /* --- status words ------------------------------------------------------ */
+  .ad-pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px;
+    border: 1px solid var(--ad-line); background: var(--ad-panel-2); color: var(--ad-muted);
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+  }
+  .ad-pill::before { content: ''; width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; }
+  .ad-pill[data-tone="critical"] { color: var(--mm-bad); background: var(--mm-bad-soft); border-color: color-mix(in srgb, var(--mm-bad) 28%, transparent); }
+  .ad-pill[data-tone="warn"] { color: var(--mm-warn); background: var(--mm-warn-soft); border-color: color-mix(in srgb, var(--mm-warn) 30%, transparent); }
+  .ad-pill[data-tone="good"] { color: var(--mm-accent); background: var(--mm-accent-soft); border-color: color-mix(in srgb, var(--mm-accent) 28%, transparent); }
+  .ad-warn-text { color: var(--mm-warn); font-weight: 600; }
+  .ad-bad-text { color: var(--mm-bad); font-weight: 600; }
+
+  /* --- the queue --------------------------------------------------------- */
+  .ad-attn { margin: 0; padding: 0; list-style: none; }
+  .ad-attn-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 14px;
+    padding: 12px 18px; border-top: 1px solid var(--ad-line);
+  }
+  .ad-attn > li:first-child .ad-attn-row { border-top: 0; }
+  a.ad-attn-row:hover { background: var(--ad-panel-2); }
+  .ad-attn-row[data-tone="critical"] { box-shadow: inset 3px 0 0 var(--mm-bad); }
+  .ad-attn-row[data-tone="warn"] { box-shadow: inset 3px 0 0 var(--mm-warn); }
+  .ad-attn-main { display: grid; min-width: 0; gap: 3px; }
+  .ad-attn-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-weight: 600; }
+  .ad-attn-detail { font-size: 13px; color: var(--ad-muted); }
+  @media (min-width: 768px) { .ad-attn-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
+  .ad-attn-go { display: inline-flex; align-items: center; gap: 4px; color: var(--mm-accent); font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .ad-attn-go-words { display: none; }
+  @media (min-width: 640px) { .ad-attn-go-words { display: inline; } }
+  .ad-attn-more > summary {
+    display: flex; min-height: 44px; align-items: center; padding: 0 18px; border-top: 1px solid var(--ad-line);
+    cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--mm-accent);
+  }
+  .ad-attn-more > summary::-webkit-details-marker { display: none; }
+  .ad-attn-more .ad-more-open,
+  .ad-attn-more[open] .ad-more-shut { display: none; }
+  .ad-attn-more[open] .ad-more-open { display: inline; }
+  .ad-clear { display: flex; align-items: center; gap: 12px; padding: 16px 18px; }
+  .ad-clear-icon { display: grid; width: 36px; height: 36px; flex: none; place-items: center; border-radius: 50%; background: var(--mm-accent-soft); color: var(--mm-accent); }
+
+  /* --- tables ------------------------------------------------------------ */
+  /* The wrap is the container: a table stacks when ITS panel is narrow, not
+     when the window is, so 7 columns never squeeze beside the sidebar. */
+  .ad-table-wrap { container-type: inline-size; overflow-x: auto; }
+  .ad-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
+  .ad-table th {
+    padding: 9px 14px; border-bottom: 1px solid var(--ad-line); background: var(--ad-panel-2);
+    text-align: left; white-space: nowrap; font-size: 12px; font-weight: 650; color: var(--ad-muted);
+  }
+  .ad-table td { padding: 11px 14px; border-bottom: 1px solid var(--ad-line); vertical-align: top; }
+  .ad-table th:first-child, .ad-table td:first-child { padding-left: 18px; }
+  .ad-table th:last-child, .ad-table td:last-child { padding-right: 18px; }
+  .ad-table tbody tr:last-child td { border-bottom: 0; }
+  .ad-table tbody tr:hover td { background: var(--ad-panel-2); }
+  .ad-table .ad-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ad-table td.ad-nowrap { white-space: nowrap; }
+  .ad-cell-main { font-weight: 600; overflow-wrap: anywhere; }
+  .ad-cell-sub { margin-top: 2px; font-size: 12.5px; color: var(--ad-muted); overflow-wrap: anywhere; }
+  .ad-cell-sub a:hover { color: var(--mm-fg); text-decoration: underline; }
+  .ad-table-empty { padding: 16px 18px; color: var(--ad-muted); font-size: 13.5px; }
+  /* Columns marked wide need a wide panel; below it header and cells both
+     go, so a screen reader still pairs every cell with its own column. */
+  @container (max-width: 900px) {
+    .ad-table [data-wide] { display: none; }
+  }
+  /* A narrow panel reads each row as a short block: the name first, then
+     label and value lines. */
+  @container (max-width: 640px) {
+    .ad-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .ad-table, .ad-table tbody, .ad-table tr, .ad-table td { display: block; width: 100%; }
+    .ad-table tr { padding: 12px 16px; border-bottom: 1px solid var(--ad-line); }
+    .ad-table tbody tr:last-child { border-bottom: 0; }
+    .ad-table td, .ad-table td:first-child, .ad-table td:last-child { padding: 3px 0; border: 0; }
+    .ad-table td { display: flex; justify-content: space-between; gap: 16px; text-align: right; }
+    .ad-table td > .ad-td-val { min-width: 0; }
+    .ad-table td::before { content: attr(data-label); flex: none; color: var(--ad-muted); font-size: 12.5px; text-align: left; }
+    .ad-table td[data-primary] { display: block; padding-bottom: 6px; text-align: left; }
+    .ad-table td[data-primary]::before { content: none; }
+    .ad-table tbody tr:hover td { background: transparent; }
+  }
+
+  /* --- small charts ------------------------------------------------------ */
+  .ad-meter { height: 8px; overflow: hidden; border-radius: 999px; background: var(--ad-panel-2); box-shadow: inset 0 0 0 1px var(--ad-line); }
+  .ad-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--mm-accent); }
+  .ad-stackbar { display: flex; height: 10px; overflow: hidden; border-radius: 999px; background: var(--ad-panel-2); gap: 2px; }
+  .ad-stackbar > span { display: block; height: 100%; }
+  .ad-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 13px; }
+  .ad-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .ad-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .ad-bars { display: flex; height: 112px; align-items: flex-end; gap: 3px; }
+  .ad-bar { flex: 1; min-width: 2px; border-radius: 3px 3px 0 0; background: color-mix(in srgb, var(--mm-accent) 72%, transparent); }
+  .ad-bar[data-zero] { height: 2px !important; background: var(--ad-line-strong); }
+  .ad-bar[data-today] { background: var(--mm-accent); }
+  .ad-bars-axis { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11.5px; color: var(--ad-muted); }
+  .ad-figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+  .ad-fig-label { font-size: 12.5px; color: var(--ad-muted); }
+  .ad-fig-value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* --- link tabs --------------------------------------------------------- */
+  .ad-seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--ad-line); border-radius: 9px; background: var(--ad-panel-2); }
+  .ad-seg a { display: inline-flex; min-height: 44px; align-items: center; padding: 0 12px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--ad-muted); white-space: nowrap; }
+  .ad-seg a:hover { color: var(--mm-fg); }
+  .ad-seg a[aria-current="page"] { background: var(--ad-panel); color: var(--mm-fg); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 0 0 1px var(--ad-line); }
+  @media (min-width: 1024px) and (pointer: fine) { .ad-seg a { min-height: 32px; } }
+
+  /* --- settings: what it controls on the left, the form on the right ----- */
+  .ad-set { display: grid; gap: 14px; padding: 24px 0; border-top: 1px solid var(--ad-line); scroll-margin-top: 72px; }
+  .ad-set:first-child { padding-top: 0; border-top: 0; }
+  @media (min-width: 1100px) { .ad-set { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 36px; } }
+  .ad-set-title { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+  .ad-set-desc { margin-top: 6px; font-size: 13.5px; color: var(--ad-muted); }
+  .ad-set-meta { display: grid; gap: 10px; margin-top: 14px; }
+  .ad-now { padding: 10px 12px; border: 1px solid var(--ad-line); border-radius: 8px; background: var(--ad-panel); font-size: 13px; }
+  .ad-now-label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 700; color: var(--ad-muted); }
+  .ad-now ul { margin: 0; padding-left: 1rem; list-style: disc; }
+  .ad-appears { font-size: 12.5px; color: var(--ad-muted); }
+  .ad-appears a { color: var(--mm-accent); font-weight: 600; }
+  .ad-form { min-width: 0; max-width: 780px; border: 1px solid var(--ad-line); border-radius: var(--ad-radius); background: var(--ad-panel); }
+  .ad-form-body { display: grid; gap: 18px; padding: 18px; }
+  .ad-field-help { display: block; margin-top: 4px; font-size: 12.5px; color: var(--ad-muted); }
+  .ad-subhead { padding-top: 14px; border-top: 1px dashed var(--ad-line); font-size: 13px; font-weight: 700; }
+  .ad-subhead:first-child { padding-top: 0; border-top: 0; }
+  .ad-savebar {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+    padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--ad-line); border-radius: 0 0 var(--ad-radius) var(--ad-radius);
+    background: var(--ad-panel);
+  }
+  /* In reach while a long form scrolls -- on a laptop; a phone has it at the end. */
+  @media (min-width: 1024px) {
+    .ad-savebar { position: sticky; bottom: 0; z-index: 5; background: color-mix(in srgb, var(--ad-panel) 94%, transparent); backdrop-filter: blur(8px); }
+  }
+  .ad-savebar-stamp { font-size: 12.5px; color: var(--ad-muted); }
+  /* A phone keeps the bar to its button. */
+  @media (max-width: 639px) { .ad-savebar-stamp { display: none; } .ad-savebar { justify-content: flex-end; } }
+  /* The bar under a form of several sections, rather than inside one panel. */
+  .ad-savebar[data-solo] { max-width: calc(780px + 336px); border: 1px solid var(--ad-line); border-radius: var(--ad-radius); }
+  .ad-slots { display: grid; gap: 12px; }
+  @media (min-width: 720px) { .ad-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .ad-slot { display: grid; gap: 8px; padding: 12px; border: 1px dashed var(--ad-line-strong); border-radius: 8px; }
+  .ad-slot[data-filled] { border-style: solid; border-color: var(--ad-line); background: var(--ad-panel-2); }
+  .ad-slot-label { font-size: 12px; font-weight: 700; color: var(--ad-muted); }
+
+  /* --- website: areas with their own gaps ---------------------------------- */
+  .ad-areas { display: grid; gap: 12px; }
+  @media (min-width: 720px) { .ad-areas { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (min-width: 1400px) { .ad-areas { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .ad-area {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 12px;
+    padding: 16px; border: 1px solid var(--ad-line); border-radius: var(--ad-radius); background: var(--ad-panel);
+    transition: border-color var(--mm-motion-fast) var(--mm-ease);
+  }
+  .ad-area:hover { border-color: var(--ad-line-strong); }
+  .ad-area-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 9px; background: var(--mm-accent-soft); color: var(--mm-accent); }
+  .ad-area-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; font-weight: 650; }
+  .ad-area-now { margin-top: 4px; font-size: 13px; color: var(--ad-muted); }
+  .ad-area-gaps { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; }
+  .ad-area-gaps li { display: flex; gap: 8px; }
+  .ad-area-gaps li::before { content: ''; width: 6px; height: 6px; margin-top: 7px; flex: none; border-radius: 50%; background: var(--mm-warn); }
+  .ad-area-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin-top: 10px; font-size: 12px; color: var(--ad-muted); }
+
+  /* --- alerts ------------------------------------------------------------ */
+  .ad-alert { padding: 10px 18px; border-top: 1px solid var(--ad-line); }
+  .ad-alert:first-child { border-top: 0; }
+  .ad-alert-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+  .ad-alert-when { flex: none; font-size: 12.5px; color: var(--ad-muted); font-variant-numeric: tabular-nums; }
+  .ad-alert-summary { min-width: 0; flex: 1; }
+  .ad-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; }
+  .ad-facts dt { display: inline; color: var(--ad-muted); }
+  .ad-facts dt::after { content: ' '; }
+  .ad-facts dd { display: inline; margin: 0; overflow-wrap: anywhere; }
+  .ad-resolve > summary {
+    display: inline-flex; min-height: 44px; align-items: center; gap: 6px; padding: 0 2px; cursor: pointer; list-style: none;
+    font-size: 13px; font-weight: 600; color: var(--mm-accent);
+  }
+  @media (min-width: 1024px) and (pointer: fine) { .ad-resolve > summary { min-height: 30px; } }
+  .ad-resolve > summary::-webkit-details-marker { display: none; }
+  .ad-resolve[open] > summary { color: var(--mm-fg); }
+  .ad-resolve-body { display: grid; gap: 10px; margin: 4px 0 6px; padding: 12px; border: 1px solid var(--ad-line); border-radius: 8px; background: var(--ad-panel-2); }
+  .ad-group-action { margin-top: 4px; font-size: 13px; color: var(--ad-muted); }
+}

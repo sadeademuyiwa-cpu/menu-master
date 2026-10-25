@@ -62,7 +62,7 @@ try {
   await a.click('button:has-text("Log in")')
   await a.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30000 })
 
-  await go(a, '/admin/site')
+  await go(a, '/admin/site/sign-in')
   await waitText(a, 'Sign in with Google')
   mark('the admin page sees Google on in Supabase', await waitText(a, 'On in Supabase', 5000))
 

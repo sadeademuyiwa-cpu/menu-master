@@ -1,10 +1,11 @@
 import { SkeletonPage, SkeletonStats, SkeletonList } from '@/components/skeleton'
 
+// The Overview's shape while it loads: the queue, then the four figures.
 export default function Loading() {
   return (
     <SkeletonPage>
-      <SkeletonStats n={3} />
-      <SkeletonList rows={5} />
+      <SkeletonList rows={3} />
+      <SkeletonStats n={4} />
     </SkeletonPage>
   )
 }
