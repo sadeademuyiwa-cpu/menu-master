@@ -8,7 +8,10 @@ import { QuickAdd } from '@/components/quick-add'
 import { Toaster } from '@/components/toaster'
 import { AppIcon } from '@/components/icons'
 import { BrandMark } from '@/components/brand-mark'
-import { HelpVideoButton } from '@/components/help-video'
+import { HelpSheet } from '@/components/help-sheet'
+import { UsageBeacon } from '@/components/usage-beacon'
+import { FeedbackPrompt } from '@/components/feedback-prompt'
+import { UsageNotice } from '@/components/usage-notice'
 import { loadSiteSettings } from '@/lib/data/site'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -59,7 +62,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <div className="mm-shell-header-nav"><PrimaryNav variant="header" /></div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <HelpVideoButton videos={site.help} />
+              <HelpSheet videos={site.help} whatsapp={site.landing.whatsapp} />
               <Link
                 href="/account"
                 className="mm-account-chip lg:hidden"
@@ -77,6 +80,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             last card. Only the top is set here, so nothing overrides it. */}
         <main className="mm-main mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 pt-5 sm:pt-7">
           <EntitlementBanner />
+          <UsageNotice userId={user.id} />
           {children}
         </main>
 
@@ -85,7 +89,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
         <QuickAdd />
 
-        <Suspense fallback={null}><Toaster /></Suspense>
+        <Suspense fallback={null}><Toaster track /></Suspense>
+        {/* Which screen, for the admin's "Live now" and journeys (0069), and
+            now and then one short question. Neither shows anything else. */}
+        <Suspense fallback={null}><UsageBeacon /></Suspense>
+        <FeedbackPrompt />
       </div>
     </div>
   )

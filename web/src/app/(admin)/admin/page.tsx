@@ -1,6 +1,8 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
-import { adminAlerts, adminSubscriptions, adminSignups, adminBillingHealth, adminWebsiteFacts } from '@/lib/data/admin'
+import {
+  adminActivation, adminAlerts, adminBillingHealth, adminCheckins, adminHelp, adminLive, adminSignups, adminSubscriptions, adminWebsiteFacts,
+} from '@/lib/data/admin'
 import { Notice } from '@/components/ui'
 import { money } from '@/lib/format'
 import { alertWords, fmtAsOf, fmtDay, relDays, shareWords } from '@/lib/admin/format'
@@ -8,6 +10,8 @@ import {
   attentionItems, billingSuccessRate, fillDays, monthlyValue, setUpCount, subscriptionBuckets, trialCounts, weekOverWeek,
 } from '@/lib/admin/overview'
 import { customersCannotReach, websiteChecklist } from '@/lib/admin/website'
+import { stuckReasons } from '@/lib/admin/journeys'
+import { screenName } from '@/lib/admin/screens'
 import { billingSelfServe } from '@/lib/site/billing-words'
 import { AdminPage, AttentionList, DayBars, Kpi, KpiRow, Meter, Panel, Pill, StackBar } from './_ui/kit'
 import Loading from './skeleton'
@@ -16,8 +20,9 @@ export const dynamic = 'force-dynamic'
 
 async function AdminOverviewBody() {
   const now = new Date()
-  const [alerts, subs, signups, billing, site] = await Promise.all([
-    adminAlerts(true), adminSubscriptions(), adminSignups(30), adminBillingHealth(7), adminWebsiteFacts(),
+  const [alerts, subs, signups, billing, site, checkins, live, help, activation] = await Promise.all([
+    adminAlerts(true), adminSubscriptions(), adminSignups(30), adminBillingHealth(7), adminWebsiteFacts(), adminCheckins(),
+    adminLive(), adminHelp(), adminActivation(),
   ])
 
   if (!alerts || !subs || !signups || !billing) {
@@ -39,6 +44,12 @@ async function AdminOverviewBody() {
     trialsEndingSoon: signups.trials_ending_soon,
     stalled: signups.accounts_without_business,
     website: site ? { missing: open.map((i) => i.label), unreachable: customersCannotReach(site.facts) } : null,
+    checkinsDue: checkins?.due,
+    helpOpen: help?.requests.filter((h) => h.status === 'open'),
+    // the same rule as Journeys: a low rating of the last 30 days nobody has answered
+    lowRatings: activation?.filter((r) => stuckReasons(r, now).some((x) => x.startsWith('Unhappy'))).map((r) => ({ business: r.name })),
+    // Help and low ratings have their own rows above; this is the rest.
+    stuck: activation?.filter((r) => stuckReasons(r, now).some((x) => !x.startsWith('Asked for help') && !x.startsWith('Unhappy'))),
     say: { alert: alertWords, money: (n) => money(n), ago: (iso) => relDays(iso, now) },
     now,
   })
@@ -82,6 +93,25 @@ async function AdminOverviewBody() {
         </Panel>
 
         <div className="ad-stack">
+          {live && (
+            <Panel title="In the app now" action={<Link href="/admin/live" className="ad-link">See who</Link>}>
+              <div className="ad-figs">
+                <div><p className="ad-fig-label">In the app this minute</p><p className="ad-fig-value">{live.live}</p></div>
+                <div><p className="ad-fig-label">People today</p><p className="ad-fig-value">{live.today}</p></div>
+              </div>
+              {live.by_screen.length > 0 && (
+                <ul className="ad-rank mt-4">
+                  {live.by_screen.slice(0, 4).map((s) => (
+                    <li key={`${s.screen}-${s.path}`}>
+                      <span className="ad-rank-label">{screenName(s.screen, s.path)}</span>
+                      <span className="ad-rank-n">{s.n}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          )}
+
           <Panel title="Paystack, last 7 days" action={<Link href="/admin/billing" className="ad-link">Open the log</Link>}>
             <div className="ad-figs">
               <div><p className="ad-fig-label">Applied</p><p className="ad-fig-value">{billing.totals.applied ?? 0}</p></div>

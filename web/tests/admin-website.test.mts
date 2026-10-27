@@ -100,6 +100,9 @@ test('before 0065 there is no help area and no help to-do', () => {
 test('the admin trail names each page, and Website pages one level deeper', () => {
   assert.deepEqual(adminCrumbs('/admin').map((c) => c.label), ['Admin', 'Overview'])
   assert.deepEqual(adminCrumbs('/admin/billing').map((c) => c.label), ['Admin', 'Paystack log'])
+  assert.deepEqual(adminCrumbs('/admin/journeys/3f2504e0-4f89-11d3-9a0c-0305e82c3301').map((c) => c.label), ['Admin', 'Journeys'])
+  assert.equal(adminTitle('/admin/live'), 'Admin · Live now · Menu Master NG')
+  assert.equal(adminTitle('/admin/feedback'), 'Admin · Help & feedback · Menu Master NG')
   assert.deepEqual(adminCrumbs('/admin/site/landing').map((c) => c.label), ['Admin', 'Website', 'Landing page'])
   assert.equal(adminTitle('/admin/site/privacy'), 'Admin · Privacy policy · Menu Master NG')
 })

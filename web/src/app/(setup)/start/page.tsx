@@ -474,7 +474,9 @@ export default async function StartPage(props: { searchParams: Promise<{ notice?
   const warning = notice && noticeTone(notice) === 'warn' ? <Notice>{notice}</Notice> : null
 
   return (
-    <div className="space-y-6">
+    // data-setup-step: the step shown, for the screen record (components/usage-beacon.tsx);
+    // with no ?step= the URL alone does not say it.
+    <div className="space-y-6" data-setup-step={view}>
       <div className="flex justify-end">
         {progress === 'done' ? (
           <Link href="/dashboard" className="mm-btn mm-btn-quiet">Go to my dashboard <AppIcon name="arrow-right" size={16} /></Link>

@@ -244,6 +244,10 @@ page.on('requestfailed', (r) => {
   // RSC-prefetch requests to our own origin get cancelled. That is the
   // framework working. Anything else -- and any abort against the API -- counts.
   if (r.failure()?.errorText === 'net::ERR_ABORTED' && r.url().startsWith(BASE)) return
+  // The screen beat (0069) is sent with keepalive as a page goes, and DevTools
+  // reports such a request cancelled although the browser delivers it: a probe
+  // saw the visit marked hidden in the database after the same 'abort'.
+  if (r.failure()?.errorText === 'net::ERR_ABORTED' && /\/rest\/v1\/rpc\/fn_usage_(beat|event)$/.test(r.url())) return
   netFailures.push(`${r.url()} ${r.failure()?.errorText}`)
 })
 

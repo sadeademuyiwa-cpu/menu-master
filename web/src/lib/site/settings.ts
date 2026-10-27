@@ -126,12 +126,16 @@ export function safeImageUrl(v: unknown): string | null {
 
 /**
  * A WhatsApp number as wa.me wants it: country code and number, digits only.
- * A Nigerian number typed the local way (080…) becomes 23480…
+ * A Nigerian number typed the local way (080…) becomes 23480…, and the 0
+ * people keep after the country code ("+234 0803…") is dropped -- left in,
+ * it made a 14-digit number WhatsApp does not know.
  */
 export function normaliseWhatsapp(v: unknown): string | null {
   if (typeof v !== 'string') return null
   let d = v.replace(/[\s()+-]/g, '')
   if (!/^\d+$/.test(d)) return null
+  if (d.startsWith('00')) d = d.slice(2)
+  if (d.startsWith('2340')) d = '234' + d.slice(4)
   if (d.startsWith('0') && d.length === 11) d = '234' + d.slice(1)
   return d.length >= 10 && d.length <= 15 ? d : null
 }

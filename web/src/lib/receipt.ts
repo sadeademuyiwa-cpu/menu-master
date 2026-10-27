@@ -127,6 +127,8 @@ export function whatsappNumber(phone: string | null | undefined): string | null 
   if (!phone) return null
   let d = phone.replace(/\D/g, '')
   if (d.startsWith('00')) d = d.slice(2)
+  // "+234 0803…": the 0 kept after the country code would make 14 digits.
+  if (d.startsWith('2340')) d = '234' + d.slice(4)
   if (d.startsWith('0')) d = '234' + d.slice(1)
   else if (d.length === 10 && /^[789]/.test(d)) d = '234' + d   // 803... without the leading 0
   return d.length >= 11 && d.length <= 15 ? d : null

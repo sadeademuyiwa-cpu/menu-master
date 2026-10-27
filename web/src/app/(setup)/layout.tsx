@@ -5,7 +5,9 @@ import { Toaster } from '@/components/toaster'
 import { Button } from '@/components/button'
 import { signOut } from '@/lib/auth-actions'
 import { BrandLockup } from '@/components/brand-mark'
-import { HelpVideoButton } from '@/components/help-video'
+import { HelpSheet } from '@/components/help-sheet'
+import { UsageBeacon } from '@/components/usage-beacon'
+import { UsageNotice } from '@/components/usage-notice'
 import { loadSiteSettings } from '@/lib/data/site'
 
 /**
@@ -22,9 +24,10 @@ export default async function SetupLayout({ children }: { children: React.ReactN
     <div className="min-h-dvh flex flex-col">
       <header className="mm-app-header">
         <div className="mx-auto flex h-16 max-w-2xl items-center justify-between gap-3 px-4">
-          <BrandLockup size={44} />
+          {/* 40: the Help button and Sign out fit beside it on a 360px phone */}
+          <BrandLockup size={40} className="mm-setup-brand" />
           <div className="flex items-center gap-2">
-            <HelpVideoButton videos={site.help} />
+            <HelpSheet videos={site.help} whatsapp={site.landing.whatsapp} compact />
             <form action={signOut}>
               <Button variant="quiet" busyLabel="Signing out…">Sign out</Button>
             </form>
@@ -33,10 +36,12 @@ export default async function SetupLayout({ children }: { children: React.ReactN
       </header>
 
       <main className="mx-auto w-full max-w-2xl flex-1 space-y-5 px-4 py-6 sm:py-8">
+        <UsageNotice userId={user.id} />
         {children}
       </main>
 
-      <Suspense fallback={null}><Toaster /></Suspense>
+      <Suspense fallback={null}><Toaster track /></Suspense>
+      <Suspense fallback={null}><UsageBeacon /></Suspense>
     </div>
   )
 }

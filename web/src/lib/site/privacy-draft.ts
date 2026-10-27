@@ -10,7 +10,7 @@ import { legalEntityWords, type CompanyDetails } from '@/lib/site/settings'
  * advice. Every service named here is one the product actually uses; the
  * advertising and analytics tools run only after a visitor accepts cookies.
  */
-export const PRIVACY_DRAFT_DATE = '2026-10-02'
+export const PRIVACY_DRAFT_DATE = '2026-10-26'
 
 /**
  * Built from the company details the admin has entered (Admin -> Website).
@@ -28,6 +28,10 @@ ${L.productName} (${L.website}) is run by ${runBy}. We decide how the personal d
 ## What we collect
 - Your account: your email address and a password (stored only in scrambled form by our sign-in provider). If you sign in with Google, we receive your name and email address from Google.
 - Your business: its name, type and the details you choose to add.
+- Your WhatsApp number, if you give it when you set up your business or in More → Account.
+- If we contact you: a short record of each time (when, how, what happened and a brief note), and of each choice you make about being contacted.
+- Inside the app, while you are signed in: which screen you are on, for how long and whether it is in use, whether you are on a phone, tablet or computer, and when a screen refuses something, breaks, or you open Help or a help video. We record the screen's name only, never what you type or see on it.
+- Help you ask for in the app (your message and the screen you sent it from), and your answers to our occasional short questions about how easy the app is.
 - What you record: purchases, prices, recipes, sales, and the names and phone numbers of your customers if you enter them.
 - Billing: your plan, payment status and the payment reference. Card details go straight to Paystack; we never see or store them.
 - How you use the service: pages opened, device and browser type, IP address, and, if you accept cookies, the advert or link that brought you to us.
@@ -37,6 +41,8 @@ ${L.productName} (${L.website}) is run by ${runBy}. We decide how the personal d
 - To take payment and keep billing records (contract, and our legal duty to keep accounts).
 - To keep the service secure and fix problems (our legitimate interest in a safe, working product).
 - To send you emails about your account, your trial and your payments. We send marketing only if you agree, and every marketing email lets you stop.
+- To WhatsApp or call you on the number you gave us, to help you set up and when something goes wrong with your account (our legitimate interest in helping you use the service). We send tips and offers on WhatsApp only if you tick the box for them (consent).
+- To see where people get stuck, so we can offer help and fix what is hard (our legitimate interest in helping you use the service). You can turn this off in More → Account.
 - To measure which adverts bring people to us and improve the product, only if you accept cookies (consent). You can say no and still use everything.
 
 ## Your customers' details
@@ -50,12 +56,13 @@ We share personal data only with the companies that help us run the service, and
 - Resend: sends our emails.
 - Sentry: tells us when something breaks, so we can fix it. Error reports carry no cookies, IP address or email address.
 - Google: sign-in with Google, if you choose it.
+- WhatsApp (Meta): when we message you there, on the number you gave us.
 - Meta (Facebook and Instagram), Google Ads, Google Analytics and PostHog: advert measurement and product analytics, only if you accept cookies.
 
 Some of these companies store data outside Nigeria. Where they do, we rely on the safeguards the NDPA allows, such as their contractual data-protection commitments. We do not sell your personal data.
 
 ## How long we keep it
-We keep your account and records for as long as your account is open, so you can always read what you entered. If you ask us to delete your account, we delete your records within 30 days, except billing records we must keep for tax and accounting, which we keep for six years. Cookie and analytics data is kept for up to 13 months.
+We keep your account and records for as long as your account is open, so you can always read what you entered. Your WhatsApp number is kept until you remove it in More → Account, ask us to stop, or close your account. The record of your contact choices, and our notes of each check-in, are kept while your account is open, so we can show what you agreed to, and are deleted with your account. If you ask us to delete your account, we delete your records within 30 days, except billing records we must keep for tax and accounting, which we keep for six years. Records of which screens you used are kept for 90 days, then deleted. Help requests and your answers to our questions are kept while your account is open. Cookie and analytics data is kept for up to 13 months.
 
 ## Your rights
 Under the NDPA you may ask us to:
@@ -63,7 +70,9 @@ Under the NDPA you may ask us to:
 - correct anything that is wrong;
 - delete your data, or stop using it for a purpose;
 - move your data to another service;
-- stop using it for marketing or advert measurement, and withdraw your consent at any time.
+- stop using it for marketing or advert measurement, and withdraw your consent at any time;
+- stop contacting you on WhatsApp: remove your number in More → Account or reply STOP;
+- stop recording which screens you use: turn it off in More → Account, and we delete what was recorded.
 
 Write to us at ${contact}. We reply within 30 days. If you are not satisfied, you may complain to the Nigeria Data Protection Commission (ndpc.gov.ng).
 

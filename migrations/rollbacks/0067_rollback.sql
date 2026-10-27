@@ -424,9 +424,15 @@ begin
        and proname='fn_admin_scan') <> '8d402ad907dcd23906a333f70217a1f9' then
     raise exception '0067 rollback FAILED: a restored body is not byte-identical to its original.';
   end if;
+  -- 0068 (signup contact) may be applied too; its four functions stay.
   if coalesce(current_setting('mm.fresh_install', true), '') <> 'on'
-     and (v_fns <> 102 or v_pols <> 118) then
-    raise exception '0067 rollback FAILED: expected 102 fn_* and 118 policies, found % and %.', v_fns, v_pols;
+     and (v_fns <> 102 + (select count(*) from pg_proc where pronamespace='public'::regnamespace
+                            and proname in ('fn_normalise_ng_phone','fn_set_my_contact','fn_admin_checkins_due','fn_admin_record_checkin',
+                                       'fn_usage_beat','fn_usage_event','fn_ask_for_help','fn_give_feedback','fn_feedback_due',
+                                       'fn_set_my_usage_tracking','fn_admin_live','fn_admin_activation','fn_admin_journey',
+                                       'fn_admin_help','fn_admin_set_help_status','fn_usage_purge'))
+          or v_pols <> 118) then
+    raise exception '0067 rollback FAILED: expected 102 fn_* (106 with 0068) and 118 policies, found % and %.', v_fns, v_pols;
   end if;
   raise notice '0067 rollback OK: back at 0066; % fn_*, % policies.', v_fns, v_pols;
 end

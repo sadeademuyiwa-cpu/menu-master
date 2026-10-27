@@ -53,3 +53,5 @@
 051_help_videos.sql                   requires=0065 era=0065
 052_trial_gate.sql                    requires=0066
 053_billing_self_serve.sql            requires=0067
+054_signup_contact.sql                requires=0068
+055_usage_and_help.sql                requires=0069

@@ -13,6 +13,9 @@ export type NavCounts = Partial<Record<AdminNavKey, NavCount>>
 const ICONS: Record<AdminNavKey, IconName> = {
   overview: 'home',
   alerts: 'alert',
+  live: 'chart',
+  journeys: 'arrow-right',
+  feedback: 'info',
   subscriptions: 'card',
   billing: 'money',
   signups: 'people',

@@ -231,6 +231,14 @@ export function attentionItems(input: {
   stalled: { name: string; created_at: string }[]
   /** null: the website settings could not be read at all. */
   website: { missing: string[]; unreachable: boolean } | null
+  /** Owners due a check-in (0068), one row per reason; absent before it. */
+  checkinsDue?: { reason: string; account_id: string }[]
+  /** Help asked for in the app and not answered yet (0069); absent before it. */
+  helpOpen?: { business: string | null; created_at: string }[]
+  /** Owners whose low rating of the last 30 days nobody has answered (lib/admin/journeys.ts, 0069). */
+  lowRatings?: { business: string | null }[]
+  /** Owners stuck at a step or gone quiet (lib/admin/journeys.ts), help and low ratings aside (0069). */
+  stuck?: { name: string }[]
   say: { alert: (kind: string) => string; money: (naira: number) => string; ago: (iso: string) => string }
   now?: Date
 }): Attention[] {
@@ -313,6 +321,62 @@ export function attentionItems(input: {
       detail: m.slice(0, 3).join(' · ') + (m.length > 3 ? ` · and ${m.length - 3} more` : ''),
       href: '/admin/site',
       action: 'Open website',
+    })
+  }
+
+  const due = input.checkinsDue ?? []
+  if (due.length) {
+    const count = (reason: string) => due.filter((d) => d.reason === reason).length
+    const parts = [
+      count('payment_failed') && `${count('payment_failed')} failed payment`,
+      count('trial_end') && `${count('trial_end')} trial ending`,
+      count('welcome') && `${count('welcome')} new`,
+      count('day3') && `${count('day3')} on day 3`,
+    ].filter(Boolean)
+    // One owner can be due for two reasons; they are one person to message.
+    const owners = new Set(due.map((d) => d.account_id)).size
+    items.push({
+      key: 'checkins',
+      tone: 'info',
+      title: `${plural(owners, 'owner', 'owners')} to check in with`,
+      detail: `${parts.join(' · ')} · the WhatsApp message is written for you`,
+      href: '/admin/signups#checkins',
+      action: 'Check in',
+    })
+  }
+
+  const help = input.helpOpen ?? []
+  if (help.length) {
+    const oldest = help.reduce((a, h) => (h.created_at < a ? h.created_at : a), help[0].created_at)
+    items.push({
+      key: 'help',
+      tone: 'warn',
+      title: `${plural(help.length, 'help request is', 'help requests are')} waiting for an answer`,
+      detail: `The oldest ${say.ago(oldest)} · ${names(help.map((h) => ({ name: h.business ?? 'no business yet' })))}`,
+      href: '/admin/feedback#requests',
+      action: 'Answer',
+    })
+  }
+  const low = input.lowRatings ?? []
+  if (low.length) {
+    items.push({
+      key: 'low-ratings',
+      tone: 'info',
+      title: `${plural(low.length, 'owner', 'owners')} rated the app low and have not heard from you`,
+      detail: `Worth a message to ask what was hard · ${names(low.map((h) => ({ name: h.business ?? 'no business yet' })))}`,
+      href: '/admin/journeys',
+      action: 'See who',
+    })
+  }
+  const stuck = input.stuck ?? []
+  if (stuck.length) {
+    items.push({
+      key: 'stuck',
+      tone: 'info',
+      title: `${plural(stuck.length, 'owner looks', 'owners look')} stuck`,
+      detail: `Stopped at a setup step or gone quiet · ${names(stuck)}`,
+      href: '/admin/journeys',
+      action: 'See who',
     })
   }
 

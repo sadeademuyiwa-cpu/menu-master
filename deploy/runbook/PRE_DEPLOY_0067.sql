@@ -16,10 +16,14 @@ with checks(n, check_name, ok, detail) as (
          case when to_regprocedure('public.fn_require_entitled(uuid, boolean)') is not null
               then '0066 applied: 0067 may run now'
               else 'NOT YET: apply 0066 first (0065 before it, if 0065 ships); 0067 refuses to run without 0066' end
-  union all select 2, 'identity: 118 policies; 102 fn_* with 0066 (99 without it)',
+  union all select 2, 'identity: 118 policies; 102 fn_* with 0066 (99 without it), +4 if 0068 went in first',
          (select count(*) from pg_policies where schemaname='public') = 118
          and (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%')
-             = case when to_regprocedure('public.fn_require_entitled(uuid, boolean)') is not null then 102 else 99 end,
+             = case when to_regprocedure('public.fn_require_entitled(uuid, boolean)') is not null then 102 else 99 end
+               + (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname in ('fn_normalise_ng_phone','fn_set_my_contact','fn_admin_checkins_due','fn_admin_record_checkin',
+                                       'fn_usage_beat','fn_usage_event','fn_ask_for_help','fn_give_feedback','fn_feedback_due',
+                                       'fn_set_my_usage_tracking','fn_admin_live','fn_admin_activation','fn_admin_journey',
+                                       'fn_admin_help','fn_admin_set_help_status','fn_usage_purge')),
          (select count(*)::text from pg_policies where schemaname='public') || ' policies, '
          || (select count(*)::text from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%') || ' fn_*'
   union all select 3, 'not yet applied: no billing_superseded, none of the five 0067 functions',

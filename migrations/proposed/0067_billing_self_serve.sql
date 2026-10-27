@@ -165,10 +165,15 @@ begin
   if v_pols <> 118 then
     raise exception '0067 preflight FAILED: policy count is %, expected 118.', v_pols;
   end if;
-  if v_fns <> 102 then
-    raise exception '0067 preflight FAILED: fn_* count is %, expected 102 (0066 applied).', v_fns;
+  -- 0068 (signup contact) may go in first; its four functions are allowed for.
+  if v_fns <> 102 + (select count(*) from pg_proc where pronamespace='public'::regnamespace
+                       and proname in ('fn_normalise_ng_phone','fn_set_my_contact','fn_admin_checkins_due','fn_admin_record_checkin',
+                                       'fn_usage_beat','fn_usage_event','fn_ask_for_help','fn_give_feedback','fn_feedback_due',
+                                       'fn_set_my_usage_tracking','fn_admin_live','fn_admin_activation','fn_admin_journey',
+                                       'fn_admin_help','fn_admin_set_help_status','fn_usage_purge')) then
+    raise exception '0067 preflight FAILED: fn_* count is %, expected 102 (0066 applied), plus any of 0068/0069''s.', v_fns;
   end if;
-  raise notice '0067 preflight OK: 0066 applied, 118 policies, 102 fn_*.';
+  raise notice '0067 preflight OK: 0066 applied, 118 policies, % fn_*.', v_fns;
 end
 $$;
 
@@ -1293,8 +1298,13 @@ begin
     raise exception '0067 self-check FAILED: fn_* went from % to %, expected +5.', b.fns, v_fns;
   end if;
   if coalesce(current_setting('mm.fresh_install', true), '') <> 'on'
-     and (v_fns <> 107 or v_pols <> 118) then
-    raise exception '0067 self-check FAILED: expected 107 fn_* and 118 policies, found % and %.', v_fns, v_pols;
+     and (v_fns <> 107 + (select count(*) from pg_proc where pronamespace='public'::regnamespace
+                            and proname in ('fn_normalise_ng_phone','fn_set_my_contact','fn_admin_checkins_due','fn_admin_record_checkin',
+                                       'fn_usage_beat','fn_usage_event','fn_ask_for_help','fn_give_feedback','fn_feedback_due',
+                                       'fn_set_my_usage_tracking','fn_admin_live','fn_admin_activation','fn_admin_journey',
+                                       'fn_admin_help','fn_admin_set_help_status','fn_usage_purge'))
+          or v_pols <> 118) then
+    raise exception '0067 self-check FAILED: expected 107 fn_* (plus any of 0068/0069''s) and 118 policies, found % and %.', v_fns, v_pols;
   end if;
 
   if not (select relrowsecurity from pg_class where oid = 'public.billing_superseded'::regclass) then

@@ -714,7 +714,17 @@ select 81, 'every elevated volatile fn_* a signed-in user can run asks fn_requir
                          'fn_remove_member','fn_revoke_invitation',
                          'fn_record_order_payment',
                          'fn_admin_resolve_alert','fn_admin_set_site_setting','fn_admin_scan',
-                         'fn_create_account_and_business');
+                         'fn_create_account_and_business',
+                         -- 0068: a person's own contact choice is not business
+                         -- data, and withdrawing it must stay as easy as giving
+                         -- it after a trial too (NDPA s.35); the admin's
+                         -- check-ins are not the customer's work.
+                         'fn_set_my_contact','fn_admin_record_checkin',
+                         -- 0069: recording which screen is open, asking for
+                         -- help and answering a rating must keep working after
+                         -- a trial -- that is exactly when people get stuck.
+                         'fn_usage_beat','fn_usage_event','fn_ask_for_help','fn_give_feedback',
+                         'fn_set_my_usage_tracking','fn_admin_set_help_status');
 
 insert into t52
 select 82, 'the 13 gated functions and onboarding ask it; member management and payments do not',

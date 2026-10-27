@@ -10,6 +10,15 @@ import { useEffect } from 'react'
  */
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
+    // The admin's journeys show where someone hit this (0069): the screen and
+    // the error's code, never its message. Signed out, it is simply ignored.
+    void Promise.all([import('@/lib/usage-client'), import('@/lib/site/help-videos'), import('@/lib/usage')])
+      .then(([{ sendUsage }, { helpScreenFor }, { routePattern }]) => {
+        const path = window.location.pathname
+        const code = (error.digest ?? '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 24) || null
+        sendUsage('fn_usage_event', { p_kind: 'crash', p_screen: helpScreenFor(path), p_path: routePattern(path), p_code: code })
+      })
+      .catch(() => undefined)
     if (!process.env.NEXT_PUBLIC_SENTRY_DSN) return
     void import('@sentry/nextjs').then((Sentry) => Sentry.captureException(error)).catch(() => {})
   }, [error])

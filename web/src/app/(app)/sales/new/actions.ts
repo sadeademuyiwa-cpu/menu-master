@@ -165,7 +165,7 @@ export async function placeOrder(_prev: OrderResult, formData: FormData): Promis
     // A draft is not a sale, so no money is recorded against it: the owner
     // records the deposit when she confirms.
     const depositNote = partPaid !== null ? ' Record what they paid when you confirm it.' : ''
-    redirect(`/sales/${order.id}?notice=${encodeURIComponent('Saved for later. It does not count as a sale until you confirm it. You can send it as a quote from here.' + depositNote + costNote)}`)
+    redirect(`/sales/${order.id}?notice=${encodeURIComponent('Saved for later. It counts as a sale once you confirm it. You can send it as a quote from here.' + depositNote + costNote)}`)
   }
 
   const { data: confirmed, error: cErr } = await supabase.rpc('fn_confirm_order', { p_order_id: order.id })

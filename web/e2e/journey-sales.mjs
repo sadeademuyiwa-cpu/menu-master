@@ -142,6 +142,10 @@ const page = await ctx.newPage()
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()) })
 page.on('requestfailed', (r) => {
   if (r.failure()?.errorText === 'net::ERR_ABORTED' && r.url().startsWith(BASE)) return
+  // The screen beat (0069) is sent with keepalive as a page goes, and DevTools
+  // reports such a request cancelled although the browser delivers it: a probe
+  // saw the visit marked hidden in the database after the same 'abort'.
+  if (r.failure()?.errorText === 'net::ERR_ABORTED' && /\/rest\/v1\/rpc\/fn_usage_(beat|event)$/.test(r.url())) return
   netFailures.push(`${r.url()} ${r.failure()?.errorText}`)
 })
 

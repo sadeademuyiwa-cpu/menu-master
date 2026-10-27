@@ -6,6 +6,7 @@ import { parseAnalytics, parseCompany, parseLanding, parsePrivacy, parseSignIn }
 import { HELP_SCREENS, parseHelpVideos } from '@/lib/site/help-videos'
 import type { AlertRow, FounderSlots } from '@/lib/admin/format'
 import type { WebsiteFacts } from '@/lib/admin/website'
+import type { ActivationRow } from '@/lib/admin/journeys'
 
 /**
  * The platform administrator's reads.
@@ -70,6 +71,73 @@ export type Signups = {
 
 export type Alerts = { open: number; critical: number; rows: AlertRow[] }
 
+/** fn_admin_checkins_due (0068): who to contact now, and every owner's number. */
+export type CheckinDue = {
+  account_id: string; name: string; created_at: string; owner_email: string | null
+  phone: string | null; phone_confirmed: boolean; phone_wrong: boolean; marketing_ok: boolean
+  reason: 'welcome' | 'day3' | 'trial_end' | 'payment_failed'; trial_ends_at: string | null
+  last_kind: string | null; last_outcome: string | null; last_at: string | null
+}
+export type CheckinContact = {
+  account_id: string; name: string; owner_email: string | null
+  phone: string | null; phone_confirmed: boolean; phone_wrong: boolean; marketing_ok: boolean; opted_out: boolean
+  last_kind: string | null; last_outcome: string | null; last_at: string | null
+}
+export type Checkins = { due: CheckinDue[]; contacts: CheckinContact[]; new_30d: number; new_30d_with_phone: number }
+
+/** fn_admin_live (0069): each person's latest screen in the last 30 minutes. */
+export type LiveRow = {
+  user_id: string; email: string | null; account_id: string | null; business: string | null
+  screen: string | null; path: string; device: 'phone' | 'tablet' | 'desktop'
+  started_at: string; last_seen_at: string; active_seconds: number
+  state: 'active' | 'idle' | 'hidden' | 'left'; live: boolean
+  plan_status: string | null; price_tier: string | null
+}
+export type Live = {
+  live: number; recent: number; today: number; rows: LiveRow[]
+  by_screen: { screen: string | null; path: string; n: number }[]
+}
+
+/** fn_admin_journey (0069): one account, from signup to now. */
+export type JourneyVisit = {
+  id: string; session_id: string; user_id: string; screen: string | null; path: string; device: string
+  started_at: string; last_seen_at: string; active_seconds: number; state: string
+}
+export type JourneyEvent = { kind: 'refusal' | 'help_open' | 'help_video' | 'crash'; screen: string | null; path: string; code: string | null; at: string; user_id: string }
+export type JourneyHelp = {
+  id: number; screen: string | null; path: string; channel: 'message' | 'whatsapp'; message: string | null
+  status: HelpStatus; note: string | null; created_at: string; handled_at: string | null; user_id: string
+}
+export type JourneyFeedback = { prompt: FeedbackPrompt; score: number | null; comment: string | null; screen: string | null; created_at: string }
+export type Journey = {
+  account: { id: string; name: string; created_at: string }
+  members: { user_id: string; email: string | null; role: string; phone: string | null; opted_out_usage: boolean }[]
+  visits: JourneyVisit[]; events: JourneyEvent[]; help: JourneyHelp[]; feedback: JourneyFeedback[]
+  checkins: { kind: string; channel: string; outcome: string; note: string | null; done_at: string }[]
+}
+
+/** fn_admin_help (0069): help asked for in the app, the short questions' answers, where people get refused. */
+export type HelpStatus = 'open' | 'replied' | 'resolved'
+export type FeedbackPrompt = 'first_dish' | 'first_sale' | 'nps'
+export type HelpRequest = {
+  id: number; account_id: string | null; business: string | null; email: string | null; phone: string | null
+  screen: string | null; path: string; channel: 'message' | 'whatsapp'; message: string | null; device: string | null
+  status: HelpStatus; note: string | null; created_at: string; handled_at: string | null
+}
+export type FeedbackRow = {
+  prompt: FeedbackPrompt; score: number | null; comment: string | null; screen: string | null
+  created_at: string; account_id: string | null; business: string | null; email: string | null
+}
+export type HelpAndFeedback = {
+  /** Every open request, then up to 200 answered in the last 30 days. */
+  requests: HelpRequest[]; open_count: number
+  /** The last 90 days' answers shown (up to 300); the figures come from scores. */
+  feedback: FeedbackRow[]
+  /** Every answer of the last 90 days: times asked, answered, and the scores. */
+  scores: { asked: number; answered: number; nps: number[]; ease: number[] }
+  refusals: { screen: string | null; path: string; n: number; people: number }[]
+}
+
 async function rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T | null> {
   const supabase = await createClient()
   const { data, error } = await supabase.rpc(fn, args)
@@ -81,6 +149,15 @@ export const adminBillingHealth = cache((days: number) => rpc<BillingHealth>('fn
 export const adminSubscriptions = cache(() => rpc<Subscriptions>('fn_admin_subscriptions'))
 export const adminSignups = cache((days: number) => rpc<Signups>('fn_admin_signups', { p_days: days }))
 export const adminAlerts = cache((openOnly: boolean) => rpc<Alerts>('fn_admin_alerts', { p_open_only: openOnly }))
+/** Null before 0068: the pages then simply show no check-ins and no numbers. */
+export const adminCheckins = cache(() => rpc<Checkins>('fn_admin_checkins_due'))
+/** Null before 0069: the pages say so and the Overview leaves the panels out. */
+export const adminLive = cache(() => rpc<Live>('fn_admin_live'))
+export const adminActivation = cache(() => rpc<ActivationRow[]>('fn_admin_activation'))
+/** One account's row, for its journey page: reads that account only. */
+export const adminActivationOf = cache((accountId: string) => rpc<ActivationRow[]>('fn_admin_activation', { p_account_id: accountId }))
+export const adminJourney = cache((accountId: string) => rpc<Journey>('fn_admin_journey', { p_account_id: accountId }))
+export const adminHelp = cache(() => rpc<HelpAndFeedback>('fn_admin_help'))
 
 /** The stored website settings with their dates, read once per request. */
 export const adminSiteRaw = cache(() => loadSiteSettingsRaw())

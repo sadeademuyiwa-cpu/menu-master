@@ -148,3 +148,20 @@ test('settings that cannot be read at all are critical', () => {
   const items = attentionItems({ alerts: [], subs: [], trialsEndingSoon: [], stalled: [], website: null, say, now: NOW })
   assert.deepEqual(items.map((i) => [i.tone, i.key]), [['critical', 'website-down']])
 })
+
+test('help waiting is a needs-action row; low ratings and stuck owners are info (0069)', () => {
+  const items = attentionItems({
+    alerts: [], subs: [], trialsEndingSoon: [], stalled: [], website: { missing: [], unreachable: false },
+    helpOpen: [{ business: 'Iya Basira', created_at: day(-2) }, { business: null, created_at: day(-1) }],
+    lowRatings: [{ business: 'Iya Basira' }],
+    stuck: [{ name: 'Quiet Kitchen' }],
+    say, now: NOW,
+  })
+  assert.deepEqual(items.map((i) => [i.tone, i.key]), [['warn', 'help'], ['info', 'low-ratings'], ['info', 'stuck']])
+  assert.equal(items[0].title, '2 help requests are waiting for an answer')
+  assert.match(items[0].detail, /^The oldest 3 days ago · /)
+  assert.match(items[0].detail, /Iya Basira, no business yet$/)
+  assert.equal(items[2].href, '/admin/journeys')
+  // before 0069 none of them is there
+  assert.deepEqual(attentionItems({ alerts: [], subs: [], trialsEndingSoon: [], stalled: [], website: { missing: [], unreachable: false }, say, now: NOW }), [])
+})

@@ -101,7 +101,9 @@ where p.pronamespace = 'public'::regnamespace
                         'fn_require_member', 'fn_require_cost_access',
                         'fn_require_account_role')
   and pg_get_function_identity_arguments(p.oid) like '%account_id%'
-  and pg_get_functiondef(p.oid) !~ 'fn_require_member|fn_require_cost_access|fn_require_account_role|fn_is_account_member|fn_is_service_context';
+  -- fn_require_platform_admin (0053) is an authorization check too: a platform
+  -- administrator may act on any account (0068 fn_admin_record_checkin).
+  and pg_get_functiondef(p.oid) !~ 'fn_require_member|fn_require_cost_access|fn_require_account_role|fn_is_account_member|fn_is_service_context|fn_require_platform_admin';
 
 -- And proven by calling it, not only by reading it.
 do $$

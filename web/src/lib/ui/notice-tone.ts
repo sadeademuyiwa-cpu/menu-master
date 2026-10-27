@@ -27,6 +27,17 @@ export function noticeTone(notice: string, also?: RegExp): NoticeTone {
   return REFUSAL.test(notice) || (also?.test(notice) ?? false) ? 'warn' : 'info'
 }
 
+/**
+ * Which of the shared refusal words a notice used, as a short code for the
+ * admin's "where do people get refused" (0069 usage_events.code). Never the
+ * sentence itself: it can name what she typed.
+ */
+export function refusalCode(notice: string): string | null {
+  const m = REFUSAL.exec(notice)
+  if (!m) return null
+  return m[0].toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || null
+}
+
 /** How long a toast stays, in ms. A refusal is read; a confirmation is glanced at. */
 export function noticeDuration(tone: NoticeTone): number {
   return tone === 'warn' ? 10000 : 5000

@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { adminAlerts, adminSubscriptions, isPlatformAdmin } from '@/lib/data/admin'
+import { adminAlerts, adminCheckins, adminHelp, adminLive, adminSubscriptions, isPlatformAdmin } from '@/lib/data/admin'
 import { paidRows, payState } from '@/lib/admin/overview'
 import { Toaster } from '@/components/toaster'
 import { AdminNav, AdminTopbar, type NavCounts } from './_ui/shell'
@@ -50,10 +50,21 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   )
 }
 
-/** Badges only where there is something to do: open alerts, and paying accounts in trouble. */
+/**
+ * Badges only where there is something to do -- open alerts, paying accounts
+ * in trouble, owners to check in with, help waiting for an answer -- and how
+ * many people are in the app this minute.
+ */
 async function navCounts(): Promise<NavCounts> {
-  const [alerts, subs] = await Promise.all([adminAlerts(true), adminSubscriptions()])
+  const [alerts, subs, checkins, live, help] = await Promise.all([
+    adminAlerts(true), adminSubscriptions(), adminCheckins(), adminLive(), adminHelp(),
+  ])
   const counts: NavCounts = {}
+  if (live && live.live > 0) counts.live = { n: live.live, tone: 'neutral', label: 'people in the app now' }
+  const waiting = help?.open_count ?? 0
+  if (waiting > 0) counts.feedback = { n: waiting, tone: 'warn', label: 'help requests waiting' }
+  const owners = new Set((checkins?.due ?? []).map((d) => d.account_id)).size
+  if (owners > 0) counts.signups = { n: owners, tone: 'neutral', label: 'owners to check in with' }
   if (alerts && alerts.open > 0) {
     counts.alerts = {
       n: alerts.open,

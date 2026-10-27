@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { noticeTone, noticeDuration, type NoticeTone } from '@/lib/ui/notice-tone'
+import { sendUsage } from '@/lib/usage-client'
+import { helpScreenFor } from '@/lib/site/help-videos'
+import { routePattern } from '@/lib/usage'
+import { noticeTone, noticeDuration, refusalCode, type NoticeTone } from '@/lib/ui/notice-tone'
 
 type Toast = { id: number; text: string; tone: NoticeTone; leaving: boolean }
 
@@ -20,8 +23,11 @@ type Toast = { id: number; text: string; tone: NoticeTone; leaving: boolean }
  * served it from the client router cache -- the render from BEFORE the write
  * -- so a freshly added ingredient vanished from its own list. The journey
  * caught it. A reload or back/forward simply does not replay the toast.
+ *
+ * `track` (the signed-in app and setup): a refusal is also noted for the
+ * admin -- the screen and which refusal words, never the sentence (0069).
  */
-export function Toaster() {
+export function Toaster({ track = false }: { track?: boolean }) {
   const params = useSearchParams()
   const pathname = usePathname()
   const notice = params.get('notice')
@@ -56,6 +62,11 @@ export function Toaster() {
 
     const id = ++nextId.current
     const tone = noticeTone(notice)
+    if (track && tone === 'warn') {
+      sendUsage('fn_usage_event', {
+        p_kind: 'refusal', p_screen: helpScreenFor(pathname), p_path: routePattern(pathname), p_code: refusalCode(notice),
+      })
+    }
     // The same sentence already showing is not shown twice.
     setToasts((t) => (t.some((x) => x.text === notice && !x.leaving)
       ? t
@@ -71,7 +82,7 @@ export function Toaster() {
     }, noticeDuration(tone) + 300)
     timers.current.add(leave)
     timers.current.add(gone)
-  }, [notice, pathname])
+  }, [notice, pathname, track])
 
   if (toasts.length === 0) return null
 

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { noticeTone, noticeDuration } from '../src/lib/ui/notice-tone.ts'
+import { noticeTone, noticeDuration, refusalCode } from '../src/lib/ui/notice-tone.ts'
 
 test('a confirmation is info', () => {
   assert.equal(noticeTone('Ofada Rice added.'), 'info')
@@ -66,4 +66,19 @@ test('the sale and purchase pages use the shared tone, not a regex of their own'
 
 test('a refusal stays on screen longer than a confirmation', () => {
   assert.ok(noticeDuration('warn') > noticeDuration('info'))
+})
+
+test('a refusal is noted by its words, never by the sentence (0069)', () => {
+  assert.equal(refusalCode('Egusi soup already exists.'), 'already')
+  assert.equal(refusalCode('Your free trial has ended, so nothing new can be saved.'), 'nothing_new_can_be_saved')
+  assert.equal(refusalCode('We couldn’t save that.'), 'couldn_t')
+  assert.equal(refusalCode('Saved.'), null)
+  for (const s of ['Price must be more than zero.', 'Give a name.', 'That did not go through.']) {
+    assert.match(refusalCode(s) ?? '', /^[A-Za-z0-9_]{1,24}$/)
+  }
+})
+
+test('saving a sale for later is a confirmation, not a refusal (0069 counts refusals)', () => {
+  assert.equal(noticeTone('Saved for later. It counts as a sale once you confirm it. You can send it as a quote from here.'), 'info')
+  assert.equal(noticeTone('Saved for later. It counts as a sale once you confirm it. You can send it as a quote from here. Record what they paid when you confirm it.'), 'info')
 })

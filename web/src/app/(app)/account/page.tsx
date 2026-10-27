@@ -8,6 +8,8 @@ import { planStatusLabel } from '@/lib/trial'
 import { signOut } from '@/lib/auth-actions'
 import { Button } from '@/components/button'
 import { PhotoPreference } from '@/components/photo-preference'
+import { ContactNumber } from '@/components/contact-number'
+import { UsageTracking } from '@/components/usage-tracking'
 import { CancelPlan } from '@/components/cancel-plan'
 import { PayNowButton, UpdateCardButton } from '@/components/plan-chooser'
 import { SupportContact } from '@/components/legal-page'
@@ -42,11 +44,24 @@ async function AccountPageBody() {
   // accounts never reads the other one's plan here.
   const subQuery = supabase.from('subscriptions')
     .select('plan_id,status,trial_ends_at,current_period_end,price_kobo,founding_price_active,cancel_at_period_end')
-  const [{ data: sub }, { data: plans }, entitlement] = await Promise.all([
+  const [{ data: sub }, { data: plans }, entitlement, { data: contact }, tracking] = await Promise.all([
     (accountId ? subQuery.eq('account_id', accountId) : subQuery).maybeSingle<Sub>(),
     supabase.from('plans').select('id,name,tier').returns<{ id: string; name: string; tier: string }[]>(),
     entitlementStatus(),
+    // Their own row only (p_profiles). Before 0068 marketing_ok_at does not
+    // exist and this reads nothing: the box starts empty, as it would anyway.
+    user
+      ? supabase.from('profiles').select('phone,marketing_ok_at,phone_wrong_at').eq('id', user.id)
+          .maybeSingle<{ phone: string | null; marketing_ok_at: string | null; phone_wrong_at: string | null }>()
+      : Promise.resolve({ data: null }),
+    // Read on its own: before 0069 the column is not there, this one read
+    // fails, and the switch is simply not shown.
+    user
+      ? supabase.from('profiles').select('usage_opt_out_at').eq('id', user.id)
+          .maybeSingle<{ usage_opt_out_at: string | null }>()
+      : Promise.resolve({ data: null, error: true }),
   ])
+  const trackingOn = tracking.error ? null : !tracking.data?.usage_opt_out_at
 
   const plan = plans?.find((p) => p.id === sub?.plan_id)
   const planName = plan?.name ?? sub?.plan_id ?? NOT_ENTERED
@@ -116,6 +131,18 @@ async function AccountPageBody() {
           </dl>
         </Card>
       </section>
+
+      {/* Menu Master contacts the person who set the business up, so only the
+          owner is asked; staff numbers would be kept for nothing. */}
+      {owner && (
+        <section className="space-y-3">
+          <SectionHeading>Your WhatsApp number</SectionHeading>
+          <Card>
+            <ContactNumber phone={contact?.phone ?? null} offers={Boolean(contact?.marketing_ok_at)}
+                           wrong={!contact?.phone && Boolean(contact?.phone_wrong_at)} />
+          </Card>
+        </section>
+      )}
 
       <section className="space-y-3">
         <SectionHeading>Plan</SectionHeading>
@@ -213,6 +240,13 @@ async function AccountPageBody() {
               to <SupportContact />.
             </p>
           </Card>
+        </section>
+      )}
+
+      {trackingOn !== null && (
+        <section id="usage" className="space-y-3 scroll-mt-20">
+          <SectionHeading>Help us help you</SectionHeading>
+          <Card><UsageTracking on={trackingOn} /></Card>
         </section>
       )}
 

@@ -131,7 +131,8 @@ export function SignupForm({ google }: { google: boolean }) {
         <p className="text-xs" style={{ color: 'var(--mm-muted)' }}>
           By creating an account you accept our{' '}
           <Link href="/terms" className="underline">terms</Link> and{' '}
-          <Link href="/refunds" className="underline">refund policy</Link>.
+          <Link href="/refunds" className="underline">refund policy</Link>. How we use your details is
+          in our <Link href="/privacy" className="underline">privacy policy</Link>.
         </p>
       </form>
       <p className="text-sm" style={{ color: 'var(--mm-muted)' }}>

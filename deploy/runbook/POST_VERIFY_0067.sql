@@ -55,9 +55,14 @@ with fns(name, sig, definer) as (values
            like '%subscription_not_switched_off%superseded_subscription_charged%cancel_not_confirmed%possible_double_charge%', ''
   union all select 8, 'fn_billing_find_account answers, and fails closed on an event with nothing to match',
          public.fn_billing_find_account('{}'::jsonb) = '{"error": "no_account"}'::jsonb, ''
-  union all select 9, '118 policies in public, 107 fn_* functions (0066: 102, 0067 adds 5)',
+  union all select 9, '118 policies in public, 107 fn_* functions (0066: 102, 0067 adds 5; 111 with 0068)',
          (select count(*) from pg_policies where schemaname='public') = 118
-         and (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%') = 107,
+         and (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%')
+             = 107 + (select count(*) from pg_proc where pronamespace='public'::regnamespace
+                        and proname in ('fn_normalise_ng_phone','fn_set_my_contact','fn_admin_checkins_due','fn_admin_record_checkin',
+                                       'fn_usage_beat','fn_usage_event','fn_ask_for_help','fn_give_feedback','fn_feedback_due',
+                                       'fn_set_my_usage_tracking','fn_admin_live','fn_admin_activation','fn_admin_journey',
+                                       'fn_admin_help','fn_admin_set_help_status','fn_usage_purge')),
          (select count(*)::text from pg_policies where schemaname='public') || ' policies, '
          || (select count(*)::text from pg_proc where pronamespace='public'::regnamespace and proname like 'fn\_%') || ' fn_*'
   union all select 10, 'live: subscription codes recovered by 0067',

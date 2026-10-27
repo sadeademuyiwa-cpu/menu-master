@@ -4,18 +4,25 @@
  * Pure, so the rules are tested directly.
  */
 
-export type AdminNavKey = 'overview' | 'alerts' | 'subscriptions' | 'billing' | 'signups' | 'site' | 'help'
+export type AdminNavKey =
+  | 'overview' | 'alerts' | 'live' | 'journeys' | 'feedback'
+  | 'subscriptions' | 'billing' | 'signups' | 'site' | 'help'
 
 export type AdminNavItem = { key: AdminNavKey; href: string; label: string }
 
-// The daily two at the top; then who pays, what the public sees, and the
-// Paystack log, which is for working out what went wrong, not for every day.
+// The daily two at the top; then the customers -- who is in the app now,
+// how far each got, who asked for help, who pays, who is new -- what the
+// public sees, and the Paystack log, which is for working out what went
+// wrong, not for every day.
 export const ADMIN_NAV_GROUPS: { label: string | null; items: AdminNavItem[] }[] = [
   { label: null, items: [
     { key: 'overview', href: '/admin', label: 'Overview' },
     { key: 'alerts', href: '/admin/alerts', label: 'Alerts' },
   ] },
   { label: 'Customers', items: [
+    { key: 'live', href: '/admin/live', label: 'Live now' },
+    { key: 'journeys', href: '/admin/journeys', label: 'Journeys' },
+    { key: 'feedback', href: '/admin/feedback', label: 'Help & feedback' },
     { key: 'subscriptions', href: '/admin/subscriptions', label: 'Paying & trials' },
     { key: 'signups', href: '/admin/signups', label: 'Signups' },
   ] },

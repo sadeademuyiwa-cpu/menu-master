@@ -114,6 +114,8 @@ a { -webkit-tap-highlight-color: transparent; }
   white-space: nowrap;
 }
 .mm-brand-ng { color: var(--mm-brand-gold); font-size: .82em; margin-left: -.1em; }
+/* Setup's header on the narrowest phones: the mark alone, so Help and Sign out fit. */
+@media (max-width: 339px) { .mm-setup-brand .mm-brand-word { display: none; } }
 /* In the components layer, not loose like its neighbours. Tailwind v4 puts
    every utility in @layer utilities, and a rule outside any layer beats every
    layered rule whatever its specificity. Loose, this display: inline-flex
@@ -134,7 +136,7 @@ a { -webkit-tap-highlight-color: transparent; }
   }
   .mm-account-chip:hover { color: var(--mm-fg); border-color: var(--mm-muted); }
 
-  /* The screen's help video. Green, so it reads as an offer, not a setting. */
+  /* Help with this screen (components/help-sheet.tsx). Green, so it reads as an offer, not a setting. */
   .mm-help-chip {
     display: inline-flex;
     min-height: 44px;
